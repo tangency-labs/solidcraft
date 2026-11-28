@@ -1413,6 +1413,32 @@ fn a_line_meets_a_cylinders_face_ahead_on_a_tie_and_not_at_all_along_it() {
     }
 }
 
+/// `Body::face_line_hit` (the caller of ray picking and hole placement) on the Ø40 × 40 cylinder
+/// keeps the single meeting of a near-axial line beside the seam, on either side of it and
+/// however near. The line through P = (20 cos s, 20 sin s, 20), s the seam azimuth plus a, along
+/// (sin(phi) cos s, sin(phi) sin s, cos(phi)) meets the infinite cylinder at t = 0 and at
+/// t = -40 / sin(phi), at least 4000 away at |phi| = 1e-2, outside z in [0, 40]: the one meeting is P.
+#[test]
+fn a_near_axial_line_beside_a_cylinders_seam_meets_the_side_on_both_sides() {
+    let b = cylinder(Vec3::ZERO, Vec3::Z, 20.0, 40.0).unwrap();
+    let side = (0..b.face_count()).find(|&f| matches!(face_surface(&b, f), Some(FaceSurface::Cylinder { .. }))).unwrap();
+    let mut missed = Vec::new();
+    for sign in [1.0_f64, -1.0] {
+        for a in [1e-11_f64, 1e-9, 1e-7, 1e-5, 1e-3] {
+            for phi in [1e-5_f64, -1e-5, 1e-3, -1e-3, 1e-2, -1e-2] {
+                let s = crate::build::SEAM_ANGLE + sign * a;
+                let p = Vec3::new(20.0 * s.cos(), 20.0 * s.sin(), 20.0);
+                let dir = Vec3::new(phi.sin() * s.cos(), phi.sin() * s.sin(), phi.cos());
+                match b.face_line_hit(side, p, dir).unwrap() {
+                    Some(got) if got.dist(p) < 1e-6 => {}
+                    got => missed.push(format!("a = {} {a:e}, phi = {phi:e}: {got:?}", if sign > 0.0 { "+" } else { "-" })),
+                }
+            }
+        }
+    }
+    assert!(missed.is_empty(), "meetings lost or moved:\n{}", missed.join("\n"));
+}
+
 #[test]
 fn concave_fillet() {
     // An L made of a base and a wall (one solid), fillet the inside corner.

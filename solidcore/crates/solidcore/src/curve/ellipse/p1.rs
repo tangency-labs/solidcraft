@@ -304,7 +304,13 @@ impl PolarConversion {
             | ExtentPointType::Inside => {
                 // use a conversion based arcTan2 (EvaluatePoint status ignored)
                 let point = ignored(curve.base.evaluate_point(nurbs_param))?.unwrap_or(Vec3::UNDEF);
-                curve.step_inversion(k, point, false, 0.0).0
+                // A point is snapped to the domain start only when it is the end point to the
+                // scaled zero. The default zone tolerance snaps a point up to 1e-7 short of the
+                // end, which the seam fix below then turns into the end itself: a parameter
+                // just below the seam would take the seam's angle, and a point just above it
+                // would not.
+                let seam_zone = 100.0 * EFF_ZERO * (1.0 + point.max_dimension());
+                curve.step_inversion(k, point, false, seam_zone).0
             }
         };
 
