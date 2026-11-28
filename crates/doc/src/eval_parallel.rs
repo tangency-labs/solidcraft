@@ -309,6 +309,7 @@ pub(super) fn prefetch_components(
     frame_bodies: &Arc<Mutex<FrameBodies>>,
     cache: &Mutex<EvalCache>,
     import_digests: &ImportDigests,
+    constructions: &[usize],
     component_digests: &ComponentDigests,
     envelopes: &HashSet<u64>,
     carried: Option<&overlap::Carried>,
@@ -405,6 +406,7 @@ pub(super) fn prefetch_components(
                     frame_bodies,
                     cache,
                     import_digests,
+                    constructions,
                     component_digests,
                     envelopes,
                     prepared_imports,
@@ -435,6 +437,7 @@ fn eval_component_chain(
     frame_bodies: &Arc<Mutex<FrameBodies>>,
     cache: &Mutex<EvalCache>,
     import_digests: &ImportDigests,
+    constructions: &[usize],
     component_digests: &ComponentDigests,
     envelopes: &HashSet<u64>,
     prepared_imports: &PreparedImports,
@@ -458,7 +461,7 @@ fn eval_component_chain(
         if state.reserved_body_names != step.reserved {
             Arc::make_mut(&mut state).reserved_body_names.clone_from(&step.reserved);
         }
-        let key = EvalKey::new(doc, vals, f, 0, ctx, shared_ctx, &state, import_digests, component_digests);
+        let key = EvalKey::new(doc, vals, f, 0, ctx, shared_ctx, &state, import_digests, constructions, component_digests);
         let Some((reads_key, read)) = key.reads.as_ref() else {
             break;
         };
