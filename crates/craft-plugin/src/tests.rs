@@ -2154,6 +2154,33 @@ fn slot_declarations_support_custom_labels_and_model_group_flags() {
     assert_eq!(entries[1].slots[0], UiSlot::Ribbon { name: "Inspect".into(), label: Some("높이측정".into()), model_group: Some(true) });
 }
 
+/// #23389: a command may name its dialog's confirm button; without one it keeps Run, and an entry
+/// that names none serializes as before.
+#[test]
+fn a_command_may_name_its_dialogs_confirm_button() {
+    let mut value = manifest();
+    value["runtime"]["entries"] = json!([{"name": "job-setup", "submit_label": "  Save "}, {"name": "toolpath"}]);
+    let entries = parse(&value).expect("valid manifest").runtime.unwrap().entries;
+    assert_eq!(entries[0].submit_label, "Save", "trimmed");
+    assert!(entries[1].submit_label.is_empty());
+    assert!(serde_json::to_value(&entries[1]).unwrap().get("submit_label").is_none(), "absent stays absent");
+    let saved = serde_json::to_value(&entries[0]).unwrap();
+    assert_eq!(saved["submit_label"], "Save");
+    let again: Entry = serde_json::from_value(saved.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&again).unwrap(), saved, "it round-trips");
+    // Refused: blank, too long, a control character, not text, and on an import or export slot.
+    for hostile in [json!("x".repeat(25)), json!("Sa
+ve"), json!(1), json!(null)] {
+        let mut bad = manifest();
+        bad["runtime"]["entries"] = json!([{"name": "make", "submit_label": hostile.clone()}]);
+        assert!(matches!(parse(&bad), Err(HostError::InvalidManifest { .. })), "{hostile}");
+    }
+    for mut format in [importer(), exporter()] {
+        format["runtime"]["entries"][0]["submit_label"] = json!("Go");
+        assert!(matches!(parse(&format), Err(HostError::InvalidManifest { field, .. }) if field.contains("submit_label")));
+    }
+}
+
 #[test]
 fn file_conditions_are_typed_host_facts_and_cannot_be_spoofed_by_options() {
     let schema = json!({"type":"object","required":["parts"],"properties":{

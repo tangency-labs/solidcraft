@@ -2480,6 +2480,27 @@ fn plugin_dialog_titles_are_the_command_alone_and_plugin_text_has_no_long_dashes
     }
 }
 
+/// #23389: an entry that names its dialog's confirm button gets that button instead of Run; one
+/// that names none keeps Run.
+#[test]
+fn a_plugin_dialog_confirms_with_the_entrys_own_button_label() {
+    let mut h = crate::scenario::Harness::new();
+    let mut setup = entry("job-setup", "edit", json!([]));
+    setup.submit_label = "Save setup".into();
+    h.app.plugin_menu.listed = vec![listed("carve", vec![setup, entry("toolpath", "edit", json!([]))])];
+    h.app.plugin_menu.loaded = true;
+    open_entry(&mut h.app, 0, 0);
+    h.frames(3);
+    assert!(h.widget("Save setup").is_some(), "the entry's own label");
+    let run = h.app.tr("ui.plugin_dialog_run").to_owned();
+    assert!(h.widget(&run).is_none(), "no Run beside it");
+    h.app.plugin_menu.dialogs.clear();
+    open_entry(&mut h.app, 0, 1);
+    h.frames(3);
+    assert!(h.widget(&run).is_some(), "Run when the entry names no button");
+    assert!(h.widget("Save setup").is_none());
+}
+
 /// File › Plugins… is one row that opens Preferences on the Plugins page, at any window width.
 #[test]
 fn file_plugins_row_opens_preferences_on_the_plugins_page() {

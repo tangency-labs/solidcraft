@@ -744,6 +744,10 @@ pub struct Entry {
     /// Whether this entry appears in the Model tab's default Plugins group. None follows slot placement.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_group: Option<bool>,
+    /// Commands only: the confirm button of the entry's dialog ("Save", "Create"), 1..24 printable
+    /// characters (#23389). Empty: **Run**.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub submit_label: String,
 }
 
 impl Entry {
@@ -800,6 +804,8 @@ struct DeclaredEntry {
     job: bool,
     #[serde(default)]
     model_group: Option<bool>,
+    #[serde(default)]
+    submit_label: String,
 }
 impl From<EntryDeclaration> for Entry {
     fn from(value: EntryDeclaration) -> Self {
@@ -818,6 +824,7 @@ impl From<EntryDeclaration> for Entry {
                 slots: Vec::new(),
                 job: false,
                 model_group: None,
+                submit_label: String::new(),
             },
             EntryDeclaration::Declared(value) => Self {
                 name: value.name,
@@ -845,6 +852,7 @@ impl From<EntryDeclaration> for Entry {
                 slots: value.slots,
                 job: value.job,
                 model_group: value.model_group,
+                submit_label: value.submit_label.trim().to_string(),
             },
         }
     }
@@ -1151,6 +1159,12 @@ fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
     }
     if entry.file_first && entry.kind != EntryKind::Importer {
         return Err(invalid(format!("{field}.file_first"), "only an importer chooses its file first"));
+    }
+    if !entry.submit_label.is_empty() && entry.kind != EntryKind::Command {
+        return Err(invalid(format!("{field}.submit_label"), "only a command names its dialog's button; an import confirms with Open and an export with Export"));
+    }
+    if !entry.submit_label.is_empty() && !plain(&entry.submit_label, 24) {
+        return Err(invalid(format!("{field}.submit_label"), "a button's label is 1..24 printable characters"));
     }
     match entry.kind {
         EntryKind::Command if !entry.extensions.is_empty() || !entry.label.is_empty() => {
