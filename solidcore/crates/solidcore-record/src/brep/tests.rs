@@ -1185,7 +1185,7 @@ fn a_sweep_face_is_its_definition_on_its_net() {
             d.half_angles.pop();
         }),
         ("a span past an eighth of a turn", |d| {
-            d.half_angles[0] = 1.0
+            d.half_angles[0] = 1.0;
         }),
         ("a zero pitch", |d| {
             let sweep::SweepMotion::Screw { pitch, .. } = &mut d.motion;
