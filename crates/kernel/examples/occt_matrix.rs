@@ -411,6 +411,13 @@ fn cases() -> Vec<Case> {
             answer: Answer::Solid { volume: 5.0 / 3.0 * (16.0 + 4.0 + 8.0), area: Some(16.0 + 4.0 + 4.0 * 3.0 * 26f64.sqrt()) },
         },
         Case {
+            op: "loft",
+            name: "a 4 square to a point 3 above its centre",
+            build: || some(solidcraft_kernel::loft_to_point(&Plane::XY, &rect(-2.0, -2.0, 2.0, 2.0), v(0.0, 0.0, 3.0))),
+            // A pyramid: A h / 3; four triangles of base 4 and slant height √(9 + 4).
+            answer: Answer::Solid { volume: 16.0, area: Some(16.0 + 8.0 * 13f64.sqrt()) },
+        },
+        Case {
             op: "split",
             name: "a 10 cube split at z 3, the piece below",
             build: || piece(split(cube(0.0, 10.0), v(0.0, 0.0, 3.0), v(0.0, 0.0, 1.0)), 0),
