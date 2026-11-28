@@ -111,13 +111,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("faces: [[x,y,z]] (points on the faces); body?; distance: expr (signed, along the faces' normals; 0 copies the faces); chain?: bool (each pick's whole smooth chain of faces); tolerance?: expr (how far a fitted face may stray, default 0.01 mm). Planes and cylinders move exactly; other faces are fitted. A new surface body; stays_surface?: bool (default true: a result whose shells close stays a surface body, which Stitch makes a solid; false: it becomes a solid, as features saved before it keep)"),
     CommandSpec::new("surface.midsurface", "Midsurface", crate::checked!("surface.midsurface", midsurface)).begins_edit()
         .at("SURFACE", "CREATE")
-        .icon("surface_offset")
+        .icon("surface_midsurface")
         .contract(&MIDSURFACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("body; max_thickness?: expr (default: the analysis's suggestion); min_thickness?: expr (default 0); min_aspect?: number (default 5: walls whose span is less than this many times their thickness need a decision; lower flags fewer, higher more); pairs?: [[[x,y,z], [x,y,z]]] (a point on each face of each pair to build, as surface.midsurface_analyze lists them; default: the pairs it is sure of); exclude?: [[x,y,z]] (points on faces whose pairs are left out); include_review_pairs?: bool (default false); carry_holes?: bool (default true: holes through both faces stay holes); suppress_holes_below?: expr (default 0: holes no wider are filled); keep_original?: bool (default true); stitch?: bool (default true: one surface body sewn where sheets meet, edges where three meet left open, a solid where the sheets close, as surface.stitch's; false: a body per sheet, and per piece of a sheet a joint cut in pieces across a carried hole); name?, body_name?. The surface halfway between each pair of faces that face each other across material (flat and round walls), joined where walls meet. The feature stores the pairs chosen (a round pair not built yet among them); the reply's warning lists what is not covered"),
     CommandSpec::new("surface.midsurface_analyze", "Midsurface Analysis", crate::checked!("surface.midsurface_analyze", midsurface_analyze))
         .noundo().read_only()
-        .icon("surface_offset")
+        .icon("surface_midsurface")
         .contract(&MIDSURFACE_ANALYZE_CONTRACT)
         .output(output_schema_for::<MidsurfaceAnalysis>)
         .params("body; max_thickness?: expr (default: the suggestion from a first look); min_thickness?: expr (default 0); min_aspect?: number (default 5). Read-only: the proposed pairs (faces, points, thickness, area, coverage, aspect, confidence high|review, notes), the faces in no pair with their reasons (a rim of a wall is accounted for), the wall thicknesses found with a suggested max_thickness each, and what building the confident pairs leaves out"),
@@ -669,7 +669,8 @@ fn midsurface_input(s: &Session, p: &Value, cmd: &str) -> Result<MidsurfaceInput
     };
     let max = match &max_given {
         Some((_, v)) => *v,
-        None => match mid::suggested_max_thickness(&body).map_err(|e| bad(cmd, e.to_string()))? {
+        // The suggestion is probed from the minimum given, so it lies past it.
+        None => match mid::suggested_max_thickness(&body, min).map_err(|e| bad(cmd, e.to_string()))? {
             Some(v) => v,
             // Nothing confident at any shell-like thickness: look as far as a fifth of the body.
             None => mid::probe_max_thickness(&body),

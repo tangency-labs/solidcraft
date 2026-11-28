@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Midsurface</title>
+  <path d="M7.75 24L32 38L32 54L7.75 40Z" fill="#b8c3cf"/>
+  <path d="M56.25 24L32 38L32 54L56.25 40Z" fill="#8e9faf"/>
+  <path d="M32 10L56.25 24L32 38L7.75 24Z" fill="#e2e8ef"/>
+  <path d="M32 10L56.25 24L56.25 40L32 54L7.75 40L7.75 24Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M7.75 24L32 38L56.25 24" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 38L32 54" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M6.45 31.25L32 46L57.55 31.25" fill="none" stroke="#ffffff" stroke-width="6.45" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M6.45 31.25L32 46L57.55 31.25" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

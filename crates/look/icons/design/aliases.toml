@@ -22,6 +22,7 @@ surface_ruled = { master = "ruled", accent = "surface" }
 surface_boundary = { master = "boundary", accent = "surface" }
 surface_blend = { master = "blend_surface", accent = "surface" }
 surface_reverse_normal = { master = "reverse_normal", accent = "surface" }
+surface_midsurface = { master = "midsurface", accent = "surface" }
 continuity = { master = "edge_continuity", accent = "surface" }
 error = { master = "status_error", accent = "surface" }
 warning = { master = "status_warning", accent = "mesh" }
