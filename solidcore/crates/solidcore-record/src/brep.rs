@@ -16,20 +16,36 @@ mod curve2;
 pub mod envelope;
 pub mod history;
 pub mod part;
+pub mod sweep;
 mod topology;
 pub use curve2::Curve2;
 
 pub const VERSION: u32 = 4;
 /// The most items (records, points, knots, uses) [`Brep::validate`] takes in a record that comes
 /// from outside the kernel: a file, the control channel, pasted data. A record the kernel built
-/// ([`Brep::validate_built`]) has no such cap.
+/// ([`Brep::validate_built`]) has no such cap. A STEP file may take more, up to [`item_limit`].
 pub const MAX_ITEMS: usize = 4_000_000;
+/// Bytes of STEP text one item is charged when a file raises this floor (#812).
+///
+/// About 0.9e6 STEP points per 100 MB, plus knots and pcurves, so 16 bytes per item puts a
+/// 64 MB file on the `4_000_000` floor and a 256 MB file at `16_000_000`.
+pub const ITEM_BYTES: u64 = 16;
+/// The most items [`item_limit`] allows, whatever the size of the file.
+pub const ITEM_LIMIT_CEILING: usize = 16_000_000;
 pub const MAX_SHELLS: usize = 1024;
 /// Maximum number of nested geometry edges, with the root at depth zero.
 pub const MAX_DEPTH: usize = 16;
 /// The highest spline degree a record may carry.
 pub const MAX_SPLINE_DEGREE: usize = 16;
 const TAU: f64 = std::f64::consts::TAU;
+
+/// The item cap for a file of `file_bytes`: `file_bytes / `[`ITEM_BYTES`], but never under
+/// [`MAX_ITEMS`] and never over [`ITEM_LIMIT_CEILING`]. It is the same on every machine, so a
+/// file that imports on one imports on all, and it only ever grows from [`MAX_ITEMS`].
+pub fn item_limit(file_bytes: u64) -> usize {
+    let cap = (file_bytes / ITEM_BYTES).clamp(MAX_ITEMS as u64, ITEM_LIMIT_CEILING as u64);
+    usize::try_from(cap).unwrap_or(usize::MAX)
+}
 
 /// A body (SMLib `SmBrep`, STEP `MANIFOLD_SOLID_BREP`/`BREP_WITH_VOIDS`/`SHELL_BASED_SURFACE_MODEL`).
 /// Every list is in canonical order (docs/native-brep.md, "Canonical order"): a face's index
@@ -310,6 +326,14 @@ pub enum Surface {
     Blend {
         definition: Box<blend::BlendDefinition>,
     },
+    /// A screw-swept wall by its definition ([`sweep::SweepDefinition`]): a thread's flank or a
+    /// coil, the profile carried by a screw motion. It has no (u, v) of its own: the face's
+    /// `nurbs` is its net, which the kernel certifies within its bound of the definition, and the
+    /// face's (u, v) are the net's, which the definition's map takes to its own. The kernel
+    /// rebuilds the definition and certifies the net again before the face is an operand.
+    Sweep {
+        definition: Box<sweep::SweepDefinition>,
+    },
 }
 
 /// Why a record is refused.
@@ -330,22 +354,41 @@ pub fn require(condition: bool, message: &'static str) -> Result<()> {
 }
 
 /// The items counted so far and the most allowed, shared by the checks of one input.
+/// `overflowed` is the total that first passed the cap.
 #[derive(Debug)]
 pub struct Budget {
     used: usize,
     limit: usize,
+    /// The running total that first passed `limit`, or [`usize::MAX`] when that addition
+    /// overflowed. Unset until an add fails. [`Brep::validate`] ignores it.
+    overflowed: Option<usize>,
 }
 impl Budget {
     /// The budget of a record from outside the kernel: [`MAX_ITEMS`].
     pub fn input() -> Budget {
+        Budget::capped(MAX_ITEMS)
+    }
+
+    fn capped(limit: usize) -> Budget {
         Budget {
             used: 0,
-            limit: MAX_ITEMS,
+            limit,
+            overflowed: None,
         }
     }
+
     fn add(&mut self, n: usize) -> Result<()> {
-        self.used = self.used.checked_add(n).ok_or(Invalid("item budget"))?;
-        require(self.used <= self.limit, "item budget")
+        let Some(sum) = self.used.checked_add(n) else {
+            self.overflowed = Some(usize::MAX);
+            return Err(Invalid("item budget"));
+        };
+        self.used = sum;
+        if sum > self.limit {
+            self.overflowed = Some(sum);
+            Err(Invalid("item budget"))
+        } else {
+            Ok(())
+        }
     }
 }
 fn numbers(values: impl IntoIterator<Item = f64>) -> Result<()> {
@@ -738,6 +781,7 @@ fn surface(s: &Surface, depth: usize, budget: &mut Budget) -> Result<()> {
             definition.validate().map_err(|e| Invalid(e.reason))?;
             budget.add(definition.items())
         }
+        Surface::Sweep { definition } => definition.validate(budget),
     }
 }
 
@@ -766,8 +810,34 @@ impl Brep {
     ///
     /// For a record from outside the kernel (a file, the control channel, pasted data): it is
     /// refused past [`MAX_ITEMS`] items, so hostile input is bounded before anything walks it.
+    /// [`Self::validate_file`] raises that cap when the file's text pays for the record.
     pub fn validate(&self) -> Result<()> {
-        self.validate_within(Budget::input())
+        self.validate_within(&mut Budget::input())
+    }
+
+    /// [`Self::validate`] for a record read from a file of `file_bytes`.
+    ///
+    /// The same walk, with the item cap from [`item_limit`] instead of [`MAX_ITEMS`]. Past that
+    /// cap the walk stops, so the rest of the record is checked without a cap before the error
+    /// says the record is valid but too large: a record that is also invalid reports that
+    /// refusal, never "valid". The error names the count that first passed the cap and the cap.
+    /// Any other refusal is that [`Invalid`]'s message, not prefixed again.
+    pub fn validate_file(&self, file_bytes: u64) -> std::result::Result<(), String> {
+        let mut budget = Budget::capped(item_limit(file_bytes));
+        match self.validate_within(&mut budget) {
+            Ok(()) => Ok(()),
+            Err(Invalid("item budget")) => {
+                if let Err(e) = self.validate_built() {
+                    return Err(e.to_string());
+                }
+                let counted = budget.overflowed.unwrap_or(usize::MAX);
+                let cap = budget.limit;
+                Err(format!(
+                    "portable B-rep: the file is valid but too large: {counted} items, cap {cap}"
+                ))
+            }
+            Err(e) => Err(e.to_string()),
+        }
     }
 
     /// [`Brep::validate`] for a record the kernel built in memory (an operation's result, a
@@ -775,13 +845,10 @@ impl Brep {
     /// record already sits in memory, its size set by inputs that were bounded where they came
     /// in, and the checks are linear in it; a cap here would only refuse a real result.
     pub fn validate_built(&self) -> Result<()> {
-        self.validate_within(Budget {
-            used: 0,
-            limit: usize::MAX,
-        })
+        self.validate_within(&mut Budget::capped(usize::MAX))
     }
 
-    fn validate_within(&self, mut budget: Budget) -> Result<()> {
+    fn validate_within(&self, budget: &mut Budget) -> Result<()> {
         require(self.version == VERSION, "unsupported version")?;
         tolerance(self.tolerance)?;
         require(
@@ -794,13 +861,13 @@ impl Brep {
         )?;
         budget.add(self.regions.len() + self.faces.len() + self.edges.len())?;
         for v in &self.vertices {
-            points(&[v.point], &mut budget)?;
+            points(&[v.point], budget)?;
             tolerance(v.tolerance)?;
         }
         for e in &self.edges {
-            curve(&e.curve, 0, &mut budget)?;
+            curve(&e.curve, 0, budget)?;
             if let Some(n) = &e.nurbs {
-                curve(n, 0, &mut budget)?;
+                curve(n, 0, budget)?;
                 require(
                     matches!(n, Curve::Spline { .. } | Curve::RationalSpline { .. }),
                     "NURBS form is not a NURBS",
@@ -831,12 +898,12 @@ impl Brep {
         }
         for f in &self.faces {
             if f.nurbs.is_some() {
-                face_label(&f.surface, &mut budget)?;
+                face_label(&f.surface, budget)?;
             } else {
-                surface(&f.surface, 0, &mut budget)?;
+                surface(&f.surface, 0, budget)?;
             }
             if let Some(n) = &f.nurbs {
-                surface(n, 0, &mut budget)?;
+                surface(n, 0, budget)?;
                 require(
                     matches!(n, Surface::Spline { .. } | Surface::RationalSpline { .. }),
                     "NURBS form is not a NURBS",
@@ -851,12 +918,13 @@ impl Brep {
                             | Surface::Torus { .. }
                             | Surface::PlacedRevolution { .. }
                             | Surface::Blend { .. }
+                            | Surface::Sweep { .. }
                     ),
-                    "NURBS form on a surface that is not a cylinder, cone, sphere, ball patch, torus, revolution or blend",
+                    "NURBS form on a surface that is not a cylinder, cone, sphere, ball patch, torus, revolution, blend or sweep",
                 )?;
             }
-            // A cylinder, cone, sphere, ball patch, torus, revolution or blend is a label: its
-            // geometry is its form.
+            // A cylinder, cone, sphere, ball patch, torus, revolution, blend or sweep is a label:
+            // its geometry is its form.
             require(
                 f.nurbs.is_some()
                     || !matches!(
@@ -868,8 +936,9 @@ impl Brep {
                             | Surface::Torus { .. }
                             | Surface::PlacedRevolution { .. }
                             | Surface::Blend { .. }
+                            | Surface::Sweep { .. }
                     ),
-                "a cylinder, cone, sphere, ball patch, torus, revolution or blend without its NURBS form",
+                "a cylinder, cone, sphere, ball patch, torus, revolution, blend or sweep without its NURBS form",
             )?;
             let [u, v] = parameter_natural(f.parameters())?;
             interval(&f.domain[0], u)?;
@@ -879,7 +948,7 @@ impl Brep {
                 if let Loop::Edges { edges } = l {
                     budget.add(edges.len())?;
                     for e in edges {
-                        curve2::curve2(&e.pcurve, &mut budget)?;
+                        curve2::curve2(&e.pcurve, budget)?;
                     }
                 }
             }

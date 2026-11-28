@@ -1039,6 +1039,8 @@ fn shape_preflight(shape: &DxfShape) -> Result<()> {
     Ok(())
 }
 
+const ARC_EXTENT_SAMPLES: usize = 65;
+
 fn shape_work(shape: &DxfShape) -> Result<usize> {
     match shape {
         DxfShape::Insert { .. }
@@ -1063,7 +1065,7 @@ fn shape_work(shape: &DxfShape) -> Result<usize> {
         DxfShape::Point(_) => Ok(1),
         DxfShape::Line(..) | DxfShape::Circle { .. } => Ok(2),
         DxfShape::Polyline { points } => Ok(points.len()),
-        DxfShape::Arc { .. } => Ok(65),
+        DxfShape::Arc { .. } => Ok(ARC_EXTENT_SAMPLES),
         DxfShape::Ellipse { .. } => Ok(129),
         DxfShape::Text { .. } => Ok(4),
         DxfShape::AlignedText { .. } => Ok(2),
@@ -3601,6 +3603,76 @@ mod tests {
         lines.push(visible, arc, None).unwrap();
         assert!(write_dxf_file(&lines).unwrap_err().to_string().contains("geometry does not belong"));
         assert!(DxfFile::for_current_view_arc_export(1_000_001, 0, 0).is_err());
+    }
+
+    #[test]
+    fn current_view_sketch_arc_plan_reserves_only_the_missing_extent_work() {
+        for source_points in [5, 70] {
+            let make = || DxfFile::for_current_view_arc_export_with_sketch_arcs(0, 1, source_points, &[source_points]).unwrap();
+            let mut file = make();
+            let layer = file.declare_layer("SKETCH", 5, DxfLinetype::Continuous, None).unwrap();
+            file.push(layer, DxfShape::Arc { c: Vec2::ZERO, r: 5., a0: 0., a1: 90. }, None).unwrap();
+            write_dxf_file(&file).unwrap();
+            // An ARC samples65 extent points. A longer original source path keeps its own
+            // allowance. One point beyond that exact producer ceiling must still refuse.
+            let work = source_points.max(65);
+            let mut over = make();
+            let layer = over.declare_layer("SKETCH", 5, DxfLinetype::Continuous, None).unwrap();
+            let points = (0..=work).map(|i| Vec2::new(i as f64, 0.)).collect();
+            over.push(layer, DxfShape::Polyline { points }, None).unwrap();
+            let error = write_dxf_file(&over).unwrap_err().to_string();
+            assert!(error.contains("immutable producer plan"), "source={source_points}: {error}");
+        }
+        let mut circle = DxfFile::for_current_view_arc_export(0, 1, 2).unwrap();
+        let layer = circle.declare_layer("SKETCH", 5, DxfLinetype::Continuous, None).unwrap();
+        circle.push(layer, DxfShape::Circle { c: Vec2::ZERO, r: 8. }, None).unwrap();
+        write_dxf_file(&circle).unwrap();
+    }
+
+    #[test]
+    fn current_view_sketch_arc_plan_checks_source_ledgers_and_arithmetic() {
+        for (lines, paths, points, arcs) in [
+            (0, 0, 0, vec![2]),
+            (0, 1, 2, vec![1]),
+            (0, 2, 6, vec![5]),          // five arc points leave fewer than two for the other path
+            (0, 1, usize::MAX, vec![2]), // original point allowance plus arc top-up overflows
+            (0, 2, usize::MAX, vec![usize::MAX, 2]),
+            (usize::MAX, 1, 2, vec![]),
+        ] {
+            assert!(DxfFile::for_current_view_arc_export_with_sketch_arcs(lines, paths, points, &arcs).is_err());
+        }
+        // Recognition does not reduce source admission. Ordinary paths retain their point
+        // allowance, even above the generic writer's unrelated one-million-value ceiling.
+        assert!(DxfFile::for_current_view_arc_export_with_sketch_arcs(999_999, 1, 2, &[]).is_ok());
+        assert!(DxfFile::for_current_view_arc_export_with_sketch_arcs(1_000_000, 1, 2, &[]).is_err());
+        assert!(DxfFile::for_current_view_arc_export_with_sketch_arcs(0, 500_001, 1_000_002, &[]).is_ok());
+    }
+
+    #[test]
+    fn current_view_sketch_curves_do_not_widen_hidden_or_lines_producers() {
+        for shape in [DxfShape::Circle { c: Vec2::ZERO, r: 8. }, DxfShape::Arc { c: Vec2::ZERO, r: 6., a0: 0., a1: 90. }] {
+            for arcs in [false, true] {
+                let mut file =
+                    if arcs { DxfFile::for_current_view_arc_export(0, 1, 65).unwrap() } else { DxfFile::for_current_view_export(0, 1, 65).unwrap() };
+                let layer = if arcs {
+                    file.declare_layer("HIDDEN", 8, DxfLinetype::Hidden, None).unwrap()
+                } else {
+                    file.declare_layer("SKETCH", 5, DxfLinetype::Continuous, None).unwrap()
+                };
+                file.push(layer, shape.clone(), None).unwrap();
+                let error = write_dxf_file(&file).unwrap_err().to_string();
+                assert!(error.contains("geometry does not belong"), "{error}");
+            }
+        }
+        let build = |mut file: DxfFile<DxfShape>| {
+            let layer = file.declare_layer("SKETCH", 5, DxfLinetype::Continuous, None).unwrap();
+            file.push(layer, DxfShape::Line(Vec2::ZERO, Vec2::X), None).unwrap();
+            write_dxf_file(&file).unwrap()
+        };
+        assert_eq!(
+            build(DxfFile::for_current_view_arc_export(0, 1, 2).unwrap()),
+            build(DxfFile::for_current_view_arc_export_with_sketch_arcs(0, 1, 2, &[]).unwrap())
+        );
     }
 
     #[test]

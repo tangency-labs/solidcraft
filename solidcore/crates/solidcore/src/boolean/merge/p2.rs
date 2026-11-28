@@ -2073,6 +2073,7 @@ impl<O: ClassObject + SolutionObject + Ord> MergeState<TopologyIntersector<O>> {
 mod tests {
     use super::*;
     use crate::geom::solution_array::ObjectKind;
+    use crate::math::det;
 
     /// A handle: a kind and an index.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -2122,7 +2123,7 @@ mod tests {
                 .map(|i| {
                     let x = f64::from(i);
                     let z = if i == 3 { lift } else { 0.0 };
-                    CPoint::from_point(Vec3::new(x, (x * 0.7).sin(), z))
+                    CPoint::from_point(Vec3::new(x, det::sin(x * 0.7), z))
                 })
                 .collect()
         };

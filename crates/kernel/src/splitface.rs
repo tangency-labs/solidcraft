@@ -30,19 +30,9 @@ use crate::body::Body;
 use crate::history::{EdgeOrigin, FaceOrigin, History};
 use crate::{KernelError, Result, guard, record};
 
-/// What splits the faces.
-#[derive(Clone, Debug)]
-pub enum SplitTool<'a> {
-    /// A plane (unbounded).
-    Plane(Plane),
-    /// The surface of another body's face (`face` in that body's face order), extended. Split
-    /// Body by a face of a surface body joined tangentially to others cuts with their smooth
-    /// sheet as it is, or with the whole sheet where that does not cut through ([`split_body`]).
-    Face { body: &'a Body, face: usize },
-    /// Sketch curves (chains of segments in `plane`) swept along `along` (none: the plane's
-    /// normal); each curve splits on its own, an open one extended past its ends.
-    Curves { plane: Plane, curves: Vec<Vec<Seg2>>, along: Option<Vec3> },
-}
+/// What splits the faces: a plane, another body's face, or sketch curves swept
+/// ([`solidcraft_kernel_api::SplitTool`] over solidcore's body).
+pub type SplitTool<'a> = solidcraft_kernel_api::SplitTool<'a, Body>;
 
 /// Most segments a sketch tool may hold.
 pub(crate) const MAX_SEGMENTS: usize = 4096;
@@ -159,10 +149,16 @@ fn face_patch(body: &Body, face: usize) -> Result<Patch> {
     let f = record.faces.get(face).ok_or_else(|| invalid(format!("the tool body has no face {face}")))?;
     let forward = body.face_forward(face);
     // The surface's own parameter box, unbounded where it is: of `surface` itself, not of its
-    // NURBS form (SMLib's cylinder is held on one, parameterised otherwise).
-    let dom = SurfaceEval::new(&f.surface).map_err(|e| invalid(format!("the split tool's surface: {e}")))?.domain();
+    // NURBS form (SMLib's cylinder is held on one, parameterised otherwise). A label (a round's
+    // definition, a ball patch) has no (u, v) of its own: its face's NURBS form is the surface,
+    // over its knot box, as a round's face was before it kept its definition.
+    let surface = match &f.surface {
+        Surface::Blend { .. } | Surface::Sweep { .. } | Surface::BallPatch { .. } => f.parameters(),
+        s => s,
+    };
+    let dom = SurfaceEval::new(surface).map_err(|e| invalid(format!("the split tool's surface: {e}")))?.domain();
     let range = |k: usize| dom.range[k].map_or(ALL, |(a, b)| [a, b]);
-    Ok(Patch { surface: f.surface.clone(), domain: [range(0), range(1)], flip: !forward })
+    Ok(Patch { surface: surface.clone(), domain: [range(0), range(1)], flip: !forward })
 }
 
 /// The unit sweep direction of a sketch tool, on the sketch normal's side (`None`: along the
@@ -540,15 +536,11 @@ pub(crate) fn tagged(name: &str, body: &Body) -> Result<(solidcraft_smlib::Brep,
     Ok((sb.tagged(0).map_err(|e| failed(name, e))?, ob))
 }
 
-/// Split the given faces (indices in `body`'s face order) where the tool meets them. The solid
-/// is unchanged. A listed face the tool misses is an error naming it; a tool that runs into the
-/// faces and ends inside them, cutting none through, is an error saying so. The result's history is
-/// over `[body]`: each piece of a split face is Split from it, every other face Kept.
-pub fn split_faces(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<Body> {
-    split_faces_with_map(body, faces, tool).map(|(b, _)| b)
-}
-
-/// Like [`split_faces`], with the body face each face of the result came from (in face order).
+/// Split the given faces (indices in `body`'s face order) where the tool meets them, with the
+/// body face each face of the result came from (in face order). The solid is unchanged. A listed
+/// face the tool misses is an error naming it; a tool that runs into the faces and ends inside
+/// them, cutting none through, is an error saying so. The result's history is over `[body]`: each
+/// piece of a split face is Split from it, every other face Kept.
 pub fn split_faces_with_map(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<(Body, Vec<usize>)> {
     let _span = solidcraft_profile::span("kernel", "split_faces_with_map");
     let (b, map, made) = split(body, faces, tool)?;
@@ -839,6 +831,29 @@ pub fn split_at_facing_side(tool: &Body, sheet: &Body, face: usize, near: Vec3, 
     split_body(tool, &SplitTool::Face { body: &trough, face: round })
 }
 
+/// `tool`, a prism run on past the surface of `face` of `target`, cut at that surface carried on
+/// past the face's edges (a plane without end, a cylinder, cone, sphere or torus along its
+/// surface), keeping the pieces that start at `start`: no on-face test, as the whole profile ends
+/// on the extended surface. `None` when a kept piece still has its end cap at `far`: the
+/// surface does not cross the prism's path over some of the profile (a cone's apex side, a plane
+/// running along the path), so that part has no end.
+///
+/// The two heights are told apart by the body's own tolerance, never more than a quarter of the
+/// distance between them, as in [`face_split_if_on_face`].
+pub fn face_split_extended(tool: &Body, target: &Body, face: usize, plane: &Plane, start: f64, far: f64) -> Result<Option<Vec<Body>>> {
+    let mut out = Vec::new();
+    for part in split_body(tool, &SplitTool::Face { body: target, face })? {
+        if !has_cap_at(&part, plane, start, far - start) {
+            continue;
+        }
+        if has_cap_at(&part, plane, far, far - start) {
+            return Ok(None);
+        }
+        out.push(part);
+    }
+    Ok(Some(out))
+}
+
 /// Whether `body` has a planar face square to `plane`'s normal at `height` along it (a prism's
 /// cap there), by the body's own tolerance never over a quarter of `span`
 /// ([`solidcore_ops::cap::is_square_plane_at_height`]).
@@ -995,7 +1010,7 @@ fn split_by_sheet(body: &Body, sheet: &Body, face: usize, faces: &[usize]) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{box_solid, cylinder, measure};
+    use crate::{box_solid, cylinder, measure, split_faces};
 
     fn rel(a: f64, b: f64) -> f64 {
         (a - b).abs() / b.abs().max(1e-9)
@@ -1351,6 +1366,45 @@ mod tests {
         let v = volumes(&split_body(&across, &SplitTool::Face { body: &ball, face }).unwrap());
         assert!(v.len() == 3, "{v:?}");
         assert!(rel(v[0], end) < 1e-4 && rel(v[1], end) < 1e-4 && rel(v[2], core) < 1e-4, "{v:?}, core {core}, ends {end}");
+    }
+
+    /// A round along a curved edge keeps its definition (`Surface::Blend`), which has no (u, v)
+    /// of its own, and is a split tool by its face's NURBS form. A cylinder r 20, 20 tall, its
+    /// bottom rim rounded r 5: the round is the torus of major radius 15 and tube radius 5 about
+    /// (0, 0, 5). Shelled 2 in from the top, the cavity's round is that torus with tube radius 3.
+    /// A tube r 16 to 17, 20 tall, split by either round: below the torus of tube radius r it
+    /// holds 2 pi times the integral of (5 - sqrt(r^2 - u^2)) (15 + u) over u = rho - 15 in
+    /// [1, 2]. Both splits were refused (#23158): "the split tool's surface: not supported yet:
+    /// a blend's label".
+    #[test]
+    fn a_tube_splits_by_a_round_on_a_cylinder_rim_and_by_the_round_of_its_shell() {
+        let pi = std::f64::consts::PI;
+        let disc = cylinder(Vec3::ZERO, Vec3::Z, 20.0, 20.0).unwrap();
+        let rounded = crate::fillet(&disc, &[Vec3::new(20.0, 0.0, 0.0)], 5.0).unwrap();
+        let shelled = crate::shell(&rounded, &[Vec3::new(0.0, 0.0, 20.0)], 2.0).unwrap();
+        let outer = cylinder(Vec3::ZERO, Vec3::Z, 17.0, 20.0).unwrap();
+        let bore = cylinder(Vec3::new(0.0, 0.0, -1.0), Vec3::Z, 16.0, 22.0).unwrap();
+        let tube = crate::boolean(&outer, &bore, crate::BoolOp::Cut).unwrap().unwrap();
+        let whole = pi * (289.0 - 256.0) * 20.0;
+        // The integral of sqrt(r^2 - u^2) and of u sqrt(r^2 - u^2).
+        let f = |r: f64, u: f64| u / 2.0 * (r * r - u * u).sqrt() + r * r / 2.0 * (u / r).asin();
+        let g = |r: f64, u: f64| -(r * r - u * u).powf(1.5) / 3.0;
+        let below = |r: f64| 2.0 * pi * (5.0 * 16.5 - (g(r, 2.0) - g(r, 1.0)) - 15.0 * (f(r, 2.0) - f(r, 1.0)));
+        // The round's face of each body: the face at the point (17.5, 0, z) of its torus.
+        let round_of = |b: &Body, r: f64| {
+            let z = 5.0 - (r * r - 2.5f64 * 2.5).sqrt();
+            let i = b.face_at(Vec3::new(17.5, 0.0, z), 1e-6).unwrap();
+            assert!(matches!(b.record().faces[i].surface, Surface::Blend { .. }), "face {i} of the r {r} round keeps its definition");
+            i
+        };
+        for (b, r) in [(&rounded, 5.0), (&shelled, 3.0)] {
+            let v = volumes(&split_body(&tube, &SplitTool::Face { body: b, face: round_of(b, r) }).unwrap());
+            let low = below(r);
+            assert!(
+                v.len() == 2 && rel(v[0], low.min(whole - low)) < 1e-6 && rel(v[1], low.max(whole - low)) < 1e-6,
+                "r {r}: {v:?}, below {low}, whole {whole}"
+            );
+        }
     }
 
     #[test]

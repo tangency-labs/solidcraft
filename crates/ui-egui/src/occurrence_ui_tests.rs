@@ -438,12 +438,15 @@ fn occurrence_isolate_offers_unisolate_beside_it() {
     // The isolated placement: Isolate would change nothing, so Exit Isolation alone, with its key.
     let own = context_menu::items(&h.app, &target);
     assert!(!own.iter().any(|i| i.id == "ui.isolateOccurrence"), "no Isolate that changes nothing");
-    assert!(own.iter().any(|i| i.id == "ui.unisolate" && i.shortcut == "Ctrl+Shift+I"));
+    assert!(own.iter().any(|i| i.id == "ui.unisolate" && i.shortcut == crate::ui_kit::chord_label("Ctrl+Shift+I")));
     // The hidden placement keeps its own Isolate, then Exit Isolation.
     let items = context_menu::items(&h.app, &Target::Occurrence { path: vec![first] });
     let at = items.iter().position(|i| i.id == "ui.isolateOccurrence").expect("Isolate on the hidden placement");
     assert_eq!(items[at].params.as_ref().unwrap()["path"], json!([first]), "this placement's own Isolate");
-    assert_eq!((items[at].shortcut.as_str(), items[at + 1].id.as_str(), items[at + 1].shortcut.as_str()), ("Ctrl+I", "ui.unisolate", "Ctrl+Shift+I"));
+    assert_eq!(
+        (items[at].shortcut.as_str(), items[at + 1].id.as_str(), items[at + 1].shortcut.as_str()),
+        (crate::ui_kit::chord_label("Ctrl+I").as_str(), "ui.unisolate", crate::ui_kit::chord_label("Ctrl+Shift+I").as_str())
+    );
     let unisolate = context_menu::items(&h.app, &target).into_iter().find(|i| i.label == "Exit Isolation").expect("Exit Isolation");
     context_menu::run_item(&mut h.app, &unisolate, egui::Pos2::ZERO);
     assert!(!context_menu::items(&h.app, &target).iter().any(|i| i.label == "Exit Isolation"), "gone once everything is back");
@@ -879,10 +882,21 @@ fn a_folded_folders_menu_items_move_to_the_placements_menu() {
     let from = items.iter().find(|i| i.id == "component.from_bodies").unwrap();
     assert_eq!(from.params.as_ref().unwrap()["bodies"], json!(["Body1", "Second"]));
     assert!(has(&h, "ui.newGroup"), "on every component's menu");
-    assert!(!has(&h, "ui.showAll"), "Show All Bodies only while something is hidden");
+    assert!(!has(&h, "ui.showAllBodies"), "Show All Bodies only while something is hidden");
     h.app.run("browser.visibility", json!({"items": ["Second"], "visible": false})).unwrap();
-    assert!(has(&h, "ui.showAll"), "a hidden body anywhere brings it back");
-    h.app.run("browser.visibility", json!({"items": ["Second"], "visible": true})).unwrap();
+    assert!(has(&h, "ui.showAllBodies"), "a hidden body anywhere brings it back");
+    // #22707: it brings back bodies only; hidden sketches and the origin stay hidden.
+    h.app.run("browser.visibility", json!({"folder": "sketches", "visible": false})).unwrap();
+    h.app.run("browser.visibility", json!({"folder": "origin", "visible": false})).unwrap();
+    let (sketches, origin) = (h.app.session.visibility.hidden_sketches.clone(), h.app.session.visibility.hidden_origin.clone());
+    assert!(!origin.is_empty());
+    let show = context_menu::items(&h.app, &target).into_iter().find(|i| i.id == "ui.showAllBodies").unwrap();
+    assert_eq!(solidcraft_ui_text::tr_command(&show.id, &show.label), "Show All Bodies", "its own label, not Show All's");
+    context_menu::run_item(&mut h.app, &show, egui::Pos2::ZERO);
+    assert!(h.app.session.visibility.hidden_bodies.is_empty(), "the body is back");
+    assert_eq!((&h.app.session.visibility.hidden_sketches, &h.app.session.visibility.hidden_origin), (&sketches, &origin));
+    assert!(h.app.session.visibility.shown_sketches.is_empty());
+    h.app.run("browser.visibility", json!({"folder": "all", "visible": true})).unwrap();
     assert!(!has(&h, "ui.groupSelected"), "nothing selected");
     h.app.session.selection = vec![Sel::Body { name: "Body1".into() }, Sel::Body { name: "Second".into() }];
     let group = context_menu::items(&h.app, &target).into_iter().find(|i| i.id == "ui.groupSelected").unwrap();
