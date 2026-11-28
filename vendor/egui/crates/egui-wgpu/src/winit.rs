@@ -22,13 +22,8 @@ struct SurfaceState {
     resizing: bool,
     needs_reconfigure: bool,
     needs_recreate: bool,
-    /// SolidCraft: configures the device refused in a row and when the next try is due (#1935),
-    /// kept across a recreate.
-    retry: crate::ConfigureRetry,
 }
 
-/// SolidCraft: whether a frame was presented yet (`crate::STEP_FIRST_PRESENT`).
-static FIRST_PRESENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Everything you need to paint egui with [`wgpu`] on [`winit`].
 ///
@@ -70,7 +65,6 @@ impl Painter {
         support_transparent_backbuffer: bool,
         options: RendererOptions,
     ) -> Self {
-        crate::startup_step(crate::STEP_INSTANCE, ""); // SolidCraft
         let instance = config.wgpu_setup.new_instance().await;
 
         Self {
@@ -119,17 +113,11 @@ impl Painter {
         }
     }
 
-    /// SolidCraft: a configuration the device refuses (D3D12: "Failed to wait for GPU to come
-    /// idle before reconfiguring the Surface", #1935) comes back as the error instead of reaching
-    /// the device's uncaptured-error handler, which panics; so does a configure that met a lost
-    /// device, or a surface the adapter doesn't support, neither of which configured it (#7007).
-    /// Called only through [`Self::try_configure`], which says what follows.
     fn configure_surface(
-        viewport_id: ViewportId,
         surface_state: &SurfaceState,
         render_state: &RenderState,
         config: &SurfaceConfig,
-    ) -> Result<(), crate::ConfigureError> {
+    ) {
         profiling::function_scope!();
 
         let SurfaceConfig {
@@ -149,95 +137,25 @@ impl Painter {
         let width = surface_state.width;
         let height = surface_state.height;
 
-        // SolidCraft: an unsupported surface is a refused configure, not a panic.
-        let Some(default_config) = surface_state
-            .surface
-            .get_default_config(&render_state.adapter, width, height)
-        else {
-            return Err(crate::ConfigureError::Unsupported);
-        };
-        // SolidCraft: a window other than the main one presents without waiting for the display
-        // where its surface can (`crate::viewport_present_mode`).
-        let supported = surface_state
-            .surface
-            .get_capabilities(&render_state.adapter)
-            .present_modes;
-        let present_mode = crate::viewport_present_mode(
-            viewport_id == ViewportId::ROOT,
-            present_mode,
-            &supported,
-        );
         let mut surf_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: render_state.target_format,
             present_mode,
             alpha_mode: surface_state.alpha_mode,
             view_formats: vec![render_state.target_format],
-            ..default_config
+            ..surface_state
+                .surface
+                .get_default_config(&render_state.adapter, width, height)
+                .expect("The surface isn't supported by this adapter")
         };
 
         if let Some(desired_maximum_frame_latency) = desired_maximum_frame_latency {
             surf_config.desired_maximum_frame_latency = desired_maximum_frame_latency;
         }
 
-        let device = &render_state.device;
-        crate::configure_captured(device, &render_state.device_lost, || {
-            surface_state.surface.configure(device, &surf_config);
-        })
-    }
-
-    /// SolidCraft: configures the surface at `now` unless a refused configure's retry isn't due
-    /// yet (#1935, [`crate::ConfigureRetry::attempt`]), and says whether the surface has its
-    /// configuration. A refusal is a warning once per streak (debug after that); it marks the
-    /// surface to be configured again (every few refusals in a row the retry state also asks for
-    /// a recreate first) and asks for a repaint when the retry is due. A try that isn't due
-    /// configures nothing and asks for that repaint again, since an earlier repaint may have used
-    /// up the one asked for before.
-    fn try_configure(
-        context: &Context,
-        viewport_id: ViewportId,
-        state: &mut SurfaceState,
-        render_state: &RenderState,
-        config: &SurfaceConfig,
-        now: web_time::Instant,
-    ) -> bool {
-        // A copy, as the configure borrows the whole surface state.
-        let mut retry = state.retry;
-        let attempt = retry.attempt(now, || {
-            Self::configure_surface(viewport_id, state, render_state, config)
-        });
-        state.retry = retry;
-        match attempt {
-            crate::Attempt::Took(refusals) => {
-                if refusals > 0 {
-                    log::info!("The surface took its configuration after {refusals} refusals");
-                }
-                state.needs_reconfigure = false;
-                true
-            }
-            crate::Attempt::Waiting(left) => {
-                state.needs_reconfigure = true;
-                context.request_repaint_after_for(left, viewport_id);
-                false
-            }
-            crate::Attempt::Refused(plan, error) => {
-                if plan.first {
-                    log::warn!(
-                        "The {}x{} surface could not be configured; trying again: {error}",
-                        state.width,
-                        state.height
-                    );
-                } else {
-                    log::debug!(
-                        "The surface refused its configuration again ({} in a row): {error}",
-                        plan.failures
-                    );
-                }
-                state.needs_reconfigure = true;
-                context.request_repaint_after_for(plan.delay, viewport_id);
-                false
-            }
-        }
+        surface_state
+            .surface
+            .configure(&render_state.device, &surf_config);
     }
 
     /// Drop the existing [`wgpu::Surface`] for `viewport_id` and create a fresh one for the
@@ -257,17 +175,12 @@ impl Painter {
         };
 
         let surface = self.instance.create_surface(Arc::clone(window))?;
-        // SolidCraft: the refusal streak and its deadline go on with the new surface (#1935); a
-        // recreate the streak asked for is done by this one.
-        let mut retry = old_state.retry;
-        retry.recreated();
         self.install_surface(
             surface,
             viewport_id,
             old_state.requested.0,
             old_state.requested.1,
             old_state.resizing,
-            retry,
         );
         Ok(())
     }
@@ -303,7 +216,6 @@ impl Painter {
         if let Some(window) = window {
             let size = window.inner_size();
             if !self.surfaces.contains_key(&viewport_id) {
-                crate::startup_step(crate::STEP_SURFACE, ""); // SolidCraft
                 let surface = self.instance.create_surface(window)?;
                 self.add_surface(surface, viewport_id, size).await?;
             }
@@ -353,19 +265,9 @@ impl Painter {
             let render_state =
                 RenderState::create(&self.config, &self.instance, Some(&surface), self.options)
                     .await?;
-            // SolidCraft: attachment sample counts must match the backend-adjusted pipelines.
-            self.options.msaa_samples = render_state.msaa_samples;
             self.render_state = Some(render_state);
         }
-        crate::startup_step(crate::STEP_SURFACE_CONFIGURE, ""); // SolidCraft
-        self.install_surface(
-            surface,
-            viewport_id,
-            size.width,
-            size.height,
-            false,
-            crate::ConfigureRetry::default(),
-        );
+        self.install_surface(surface, viewport_id, size.width, size.height, false);
         Ok(())
     }
 
@@ -380,7 +282,6 @@ impl Painter {
         width: u32,
         height: u32,
         resizing: bool,
-        retry: crate::ConfigureRetry,
     ) {
         let alpha_mode = {
             // Panic: We use the same failure mode as `resize_and_generate_depth_texture_view_and_msaa_view`
@@ -419,7 +320,6 @@ impl Painter {
                 resizing,
                 needs_reconfigure: false,
                 needs_recreate: false,
-                retry,
             },
         );
         let Some(width) = NonZeroU32::new(width) else {
@@ -479,17 +379,7 @@ impl Painter {
         surface_state.requested = requested;
         surface_state.scale = scale;
 
-        // SolidCraft: while a refused configure waits for its retry (#1935), a resize doesn't
-        // try early, since the device refuses, not the size: the new size is kept above and the
-        // retry configures it.
-        Self::try_configure(
-            &self.context,
-            viewport_id,
-            surface_state,
-            render_state,
-            &self.config.surface,
-            web_time::Instant::now(),
-        );
+        Self::configure_surface(surface_state, render_state, &self.config.surface);
 
         if let Some(depth_format) = self.options.depth_stencil_format {
             self.depth_texture_view.insert(
@@ -589,15 +479,7 @@ impl Painter {
                         .lock()
                         .setPresentsWithTransaction(resizing);
 
-                    // SolidCraft: not before a refused configure's retry is due (#1935).
-                    Self::try_configure(
-                        &self.context,
-                        viewport_id,
-                        state,
-                        render_state,
-                        &self.config.surface,
-                        web_time::Instant::now(),
-                    );
+                    Self::configure_surface(state, render_state, &self.config.surface);
                 }
             }
         }
@@ -641,52 +523,6 @@ impl Painter {
         capture_data: Vec<egui::ScreenshotCallback>,
         window: &Arc<winit::window::Window>,
     ) -> f32 {
-        // SolidCraft: a device lost while the frame is drawn panics inside wgpu at the first
-        // queue write to meet it (#4172, #10240). That panic is survived: the probe in `survive`
-        // marks the loss, the painter draws nothing more and the app restarts.
-        let watch = self.render_state.as_ref().map(|rs| {
-            (
-                rs.device_lost.clone(),
-                rs.device.clone(),
-                rs.queue.clone(),
-            )
-        });
-        let context = self.context.clone();
-        let paint = || {
-            self.paint_frame(
-                viewport_id,
-                pixels_per_point,
-                clear_color,
-                clipped_primitives,
-                textures_delta,
-                capture_data,
-                window,
-            )
-        };
-        let Some((lost, device, queue)) = watch else {
-            return paint();
-        };
-        lost.survive(&device, &queue, paint).unwrap_or_else(|| {
-            log::error!(
-                "The graphics device was lost during a frame: {}",
-                lost.reason().unwrap_or_default()
-            );
-            context.request_repaint_of(viewport_id);
-            0.0
-        })
-    }
-
-    #[expect(clippy::too_many_arguments)]
-    fn paint_frame(
-        &mut self,
-        viewport_id: ViewportId,
-        pixels_per_point: f32,
-        clear_color: [f32; 4],
-        clipped_primitives: &[epaint::ClippedPrimitive],
-        textures_delta: &mut epaint::textures::TexturesDelta,
-        capture_data: Vec<egui::ScreenshotCallback>,
-        window: &Arc<winit::window::Window>,
-    ) -> f32 {
         profiling::function_scope!();
 
         /// Guard to ensure that commands are always submitted to the renderer queue
@@ -713,47 +549,17 @@ impl Painter {
 
         let capture = !capture_data.is_empty();
         let mut vsync_sec = 0.0;
-        // SolidCraft: one clock reading for this frame's surface retries (#1935).
-        let now = web_time::Instant::now();
-
-        // SolidCraft: a lost device draws nothing more; the app sees `RenderState::device_lost`
-        // and restarts (#4172).
-        if self
-            .render_state
-            .as_ref()
-            .is_some_and(|rs| rs.device_lost.is_lost())
-        {
-            if let Some(rs) = &self.render_state
-                && let Some(effect) = &rs.renderer.read().frame_compositor
-            {
-                effect.suspend();
-            }
-            // The app's frame (not this paint) acts on it: keep its frames coming.
-            self.context
-                .request_repaint_after_for(std::time::Duration::from_millis(250), viewport_id);
-            return vsync_sec;
-        }
 
         // If the previous frame produced `CurrentSurfaceTexture::Lost`, the action match
         // below set `needs_recreate`. Recreate the surface now, before re-borrowing
         // `self.render_state` / `self.surfaces` for the rest of the paint.
-        // SolidCraft: refused configures also ask for a recreate every few in a row (#1935),
-        // done only once their retry is due, whatever repaints before; until then the check
-        // below skips the frame. A recreate for `Lost` goes ahead as before.
         if self
             .surfaces
             .get(&viewport_id)
-            .is_some_and(|s| s.needs_recreate || s.retry.recreate_due(now))
+            .is_some_and(|s| s.needs_recreate)
             && let Err(err) = self.recreate_surface(viewport_id, window)
         {
             log::error!("Failed to recreate surface for {viewport_id:?}: {err}");
-            if viewport_id == ViewportId::ROOT {
-                crate::note_refused(now);
-            }
-            // SolidCraft: nothing else may draw the next frame, which tries again and lets the
-            // app's hang check see the time without a texture grow (#3321 review).
-            self.context
-                .request_repaint_after_for(std::time::Duration::from_millis(250), viewport_id);
             return vsync_sec;
         }
 
@@ -781,62 +587,24 @@ impl Painter {
             return vsync_sec;
         };
 
-        // SolidCraft: a surface still refusing its configuration, or waiting for the retry of a
-        // refused one (to be configured or recreated), skips this frame rather than acquire a
-        // texture from it; the retry is scheduled (#1935).
-        if (surface_state.needs_reconfigure || surface_state.retry.recreate_pending())
-            && !Self::try_configure(
-                &self.context,
-                viewport_id,
-                surface_state,
-                render_state,
-                &self.config.surface,
-                now,
-            )
-        {
-            // SolidCraft: the main window's time without a texture (#3321, `refused_for`).
-            if viewport_id == ViewportId::ROOT {
-                crate::note_refused(now);
-            }
-            return vsync_sec;
+        if surface_state.needs_reconfigure {
+            Self::configure_surface(surface_state, render_state, &self.config.surface);
+            surface_state.needs_reconfigure = false;
         }
 
         let output_frame = {
             profiling::scope!("get_current_texture");
             // This is what vsync-waiting happens on my Mac.
             let start = web_time::Instant::now();
-            // SolidCraft: the first frame is the last startup step.
-            if !FIRST_PRESENT.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                crate::startup_step(crate::STEP_FIRST_PRESENT, "");
-            }
-            // SolidCraft: an acquire wgpu refuses (a surface left without its configuration,
-            // #7007) comes back as `CurrentSurfaceTexture::Validation` instead of reaching the
-            // device's uncaptured-error handler, which panics by default.
-            let (output_frame, failed) = crate::capture_errors(&render_state.device, || {
-                surface_state.surface.get_current_texture()
-            });
-            if let Some(error) = failed {
-                log::warn!("The surface gave no frame: {error}");
-            }
-            let elapsed = start.elapsed();
-            vsync_sec += elapsed.as_secs_f32();
-            // SolidCraft: the main window's frames that wait out the acquire are a hung GPU
-            // (#3321); only one that gives a texture ends its time without one.
-            if viewport_id == ViewportId::ROOT {
-                let frame = matches!(
-                    output_frame,
-                    wgpu::CurrentSurfaceTexture::Success(_)
-                        | wgpu::CurrentSurfaceTexture::Suboptimal(_)
-                );
-                crate::note_acquire(elapsed, frame);
-            }
+            let output_frame = surface_state.surface.get_current_texture();
+            vsync_sec += start.elapsed().as_secs_f32();
             output_frame
         };
 
         // `None` when there is no frame to present to. A capture is rendered to its own
         // texture and copied back to the cpu, so it is served even then — that is how a hidden
         // window, which the compositor gives no surface texture, is screenshotted at all.
-        let frame = match output_frame {
+        let output_frame = match output_frame {
             wgpu::CurrentSurfaceTexture::Success(frame) => Some(frame),
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
                 surface_state.needs_reconfigure = true;
@@ -845,17 +613,8 @@ impl Painter {
             other => {
                 match (*self.config.on_surface_status)(&other) {
                     SurfaceErrorAction::Reconfigure => {
-                        // SolidCraft: not before a refused configure's retry is due (#1935).
-                        if Self::try_configure(
-                            &self.context,
-                            viewport_id,
-                            surface_state,
-                            render_state,
-                            &self.config.surface,
-                            now,
-                        ) {
-                            self.context.request_repaint_of(viewport_id);
-                        }
+                        Self::configure_surface(surface_state, render_state, &self.config.surface);
+                        self.context.request_repaint_of(viewport_id);
                     }
                     SurfaceErrorAction::RecreateSurface => {
                         // Because of ownership, I could not find an easy way to do a full recovery here,
@@ -874,15 +633,6 @@ impl Painter {
                 None
             }
         };
-        // SolidCraft: however this frame ends (presented, dropped by an early return below, or
-        // dropped while a panic unwinds), the surface gets its image back, also on a lost device,
-        // where wgpu's present and discard keep it and the surface's drop then panicked (#7148).
-        // wgpu marks the loss (the lost callback) inside the present or discard that meets it.
-        let output_frame = frame.map(|frame| {
-            let texture = frame.texture.clone();
-            crate::AcquiredFrame::new(frame, texture, render_state.device_lost.flag())
-        });
-
         // SolidCraft: acquire the drawable before preparing callbacks. Preparation can
         // cache GPU resources whose initialization is recorded into `encoder` (such as
         // the viewport's tessellated vertices). If acquisition skips this frame, dropping
@@ -934,7 +684,7 @@ impl Painter {
                 // as long as no resize is in flight.
                 let (size, format) = match &output_frame {
                     Some(output_frame) => {
-                        (output_frame.frame.texture.size(), output_frame.frame.texture.format())
+                        (output_frame.texture.size(), output_frame.texture.format())
                     }
                     None => (
                         wgpu::Extent3d {
@@ -957,7 +707,7 @@ impl Painter {
 
                 &capture_state.texture
             } else if let Some(output_frame) = &output_frame {
-                &output_frame.frame.texture
+                &output_frame.texture
             } else {
                 // Unreachable: without a frame to present to, and with nothing to capture,
                 // we returned above.
@@ -1049,7 +799,7 @@ impl Painter {
             if capture && let Some(capture_state) = &mut self.screen_capture_state {
                 capture_buffer = Some(capture_state.copy_textures(
                     &render_state.device,
-                    output_frame.as_ref().map(|output_frame| &output_frame.frame),
+                    output_frame.as_ref(),
                     &mut encoder,
                 ));
             }
@@ -1101,7 +851,7 @@ impl Painter {
             profiling::scope!("present");
             // wgpu doesn't document where vsync can happen. Maybe here?
             let start = web_time::Instant::now();
-            output_frame.present(|frame| render_state.queue.present(frame));
+            render_state.queue.present(output_frame);
             vsync_sec += start.elapsed().as_secs_f32();
         }
 

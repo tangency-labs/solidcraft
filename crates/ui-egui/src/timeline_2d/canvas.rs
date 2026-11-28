@@ -5,10 +5,12 @@ use super::state::Timeline2DState;
 use crate::SolveApp;
 use crate::ui_kit::Menu;
 use egui::{FontId, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
-use solidcraft_engine::doc::{Document, Feature, FeatureKind, Model};
+use solidcraft_engine::Session;
+use solidcraft_engine::doc::{Document, Feature, FeatureKind, Model, ModelBody, ModelState};
 use solidcraft_engine::geom::Vec3Geom;
 use solidcraft_theme::Tokens;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 
 pub const HEADER_BANNER_HEIGHT: f32 = 26.0;
 pub const HEADER_T1_HEIGHT: f32 = 22.0;
@@ -26,35 +28,119 @@ pub const VIRTUAL_GROUP_HEIGHT: f32 = DOCK_TOTAL_HEIGHT;
 
 /// Discovers component IDs and names for the 2D timeline tracks.
 pub fn discover_component_tracks(app: &SolveApp) -> (Vec<u64>, BTreeMap<u64, String>) {
-    let mut component_ids: Vec<u64> = Vec::new();
-    let mut component_names: BTreeMap<u64, String> = BTreeMap::new();
-
-    // Root component 0 always first
-    component_ids.push(0);
-    let root_name = if app.session.doc.name.is_empty() { "Root Component".to_string() } else { app.session.doc.name.clone() };
-    component_names.insert(0, root_name);
-
-    for comp in &app.session.doc.components {
-        if comp.id != 0 && !component_ids.contains(&comp.id) {
-            component_ids.push(comp.id);
-            component_names.insert(comp.id, comp.name.clone());
-        }
+    let mut tracks = ComponentTracks::new(&app.session);
+    let final_state = app.session.model.state();
+    for index in 0..app.session.doc.features.len() {
+        tracks.check(&app.session, &final_state, index);
     }
+    tracks.rows(&app.session.doc)
+}
 
-    let model = Some(&app.session.model);
-    for f in &app.session.doc.features {
-        let affected = feature_affected_components(&app.session.doc, model, f);
-        for &cid in &affected {
-            if !component_ids.contains(&cid) {
-                let comp_opt = app.session.doc.components.iter().find(|c| c.id == cid);
-                let name = comp_opt.map(|c| c.name.clone()).unwrap_or_else(|| format!("Component {cid}"));
-                component_ids.push(cid);
-                component_names.insert(cid, name);
+struct ComponentTracks {
+    /// Indices into this revision's evaluated results, without keeping body snapshots alive.
+    states: HashMap<u64, (Option<usize>, usize)>,
+    first_use: BTreeMap<u64, usize>,
+    affected: Vec<Option<Vec<u64>>>,
+    next: usize,
+}
+
+impl ComponentTracks {
+    fn new(session: &Session) -> Self {
+        // The state before a result is the last one that was not skipped (Model::state_before).
+        let mut states = HashMap::with_capacity(session.model.results.len());
+        let mut before = None;
+        for (i, result) in session.model.results.iter().enumerate() {
+            states.entry(result.id).or_insert((before, i));
+            if !result.skipped {
+                before = Some(i);
             }
         }
+        Self { states, first_use: BTreeMap::new(), affected: vec![None; session.doc.features.len()], next: 0 }
     }
 
-    (component_ids, component_names)
+    fn check(&mut self, session: &Session, final_state: &ModelState, i: usize) {
+        if self.affected[i].is_some() {
+            return;
+        }
+        let f = &session.doc.features[i];
+        let results = &session.model.results;
+        let states = self
+            .states
+            .get(&f.id)
+            .map(|&(before, after)| (before.map_or(&[][..], |b| results[b].state.bodies.as_slice()), results[after].state.bodies.as_slice()));
+        let affected = affected_components(&session.doc, f, states, Some(final_state));
+        for &cid in &affected {
+            let first = self.first_use.entry(cid).or_insert(i);
+            *first = (*first).min(i);
+        }
+        self.affected[i] = Some(affected);
+    }
+
+    fn prepare(&mut self, session: &Session, graph: &DependencyGraph, visible: &[VisualColumn], ctx: &egui::Context) {
+        if self.next == self.affected.len() {
+            return;
+        }
+        let final_state = session.model.state();
+        for col in visible {
+            if let VisualColumn::Features { features, .. } = col {
+                for id in features {
+                    if let Some(&i) = graph.id_to_index.get(id) {
+                        self.check(session, &final_state, i);
+                    }
+                }
+            }
+        }
+        // Hidden steps can introduce undeclared rows. Discover them between paints, leaving
+        // time for input instead of walking a large assembly's entire history on the first frame.
+        let began = web_time::Instant::now();
+        let end = (self.next + visible.len().max(1)).min(self.affected.len());
+        while self.next < end {
+            self.check(session, &final_state, self.next);
+            self.next += 1;
+            if began.elapsed() >= std::time::Duration::from_millis(2) {
+                break;
+            }
+        }
+        if self.next < self.affected.len() {
+            ctx.request_repaint();
+        }
+    }
+
+    fn rows(&self, doc: &Document) -> (Vec<u64>, BTreeMap<u64, String>) {
+        let (mut ids, mut names) = super::assembly::collect_component_ids_and_names(doc);
+        // An old design can reference an undeclared row. Keep first-use order even when a
+        // later column was visited first. A feature's affected IDs are in ascending order.
+        let mut extra: Vec<_> = self.first_use.iter().filter(|(id, _)| !names.contains_key(id)).map(|(&id, &i)| (i, id)).collect();
+        extra.sort_unstable();
+        for (_, id) in extra {
+            ids.push(id);
+            names.insert(id, format!("Component {id}"));
+        }
+        (ids, names)
+    }
+}
+
+/// The parts of the grid that depend only on the design. A single slot per window keeps
+/// closed designs out of memory and lets scrolling and selection reuse the same analysis.
+struct TimelineAnalysis {
+    key: (u64, u64),
+    tracks: Mutex<ComponentTracks>,
+    graph: DependencyGraph,
+}
+
+impl TimelineAnalysis {
+    fn get(ctx: &egui::Context, session: &Session) -> Arc<Self> {
+        let id = egui::Id::unique("timeline_2d_analysis");
+        let key = (session.uid, session.model_revision());
+        if let Some(cached) = ctx.data(|d| d.get_temp::<Arc<Self>>(id))
+            && cached.key == key
+        {
+            return cached;
+        }
+        let data = Arc::new(Self { key, tracks: Mutex::new(ComponentTracks::new(session)), graph: DependencyGraph::from_doc(&session.doc) });
+        ctx.data_mut(|d| d.insert_temp(id, data.clone()));
+        data
+    }
 }
 
 /// Represents a visual column on the timeline grid.
@@ -108,22 +194,10 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
         state.separately_suppressed_features.clear();
     }
 
-    // 1. Build dependency graph
-    let dep_graph = DependencyGraph::from_doc(&app.session.doc);
+    let analysis = TimelineAnalysis::get(ui.ctx(), &app.session);
+    let dep_graph = &analysis.graph;
     let total_features = app.session.doc.features.len();
     let marker_slot = app.session.doc.marker.unwrap_or(total_features);
-
-    // 2. Discover component tracks
-    let (component_ids, component_names) = discover_component_tracks(app);
-
-    let mut feature_components_map: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
-    {
-        let model = Some(&app.session.model);
-        for f in &app.session.doc.features {
-            let affected = feature_affected_components(&app.session.doc, model, f);
-            feature_components_map.insert(f.id, affected);
-        }
-    }
 
     // 3. Build visual columns (respecting folded groups)
     let visual_columns = build_visual_columns(&app.session.doc, &state.folded_groups);
@@ -141,12 +215,11 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
     if checks.animating(now) {
         ui.ctx().request_repaint();
     }
-    // Each timeline step's visual column; between two steps, between their columns.
-    let step_cols: Vec<Option<f32>> =
-        app.session.doc.features.iter().map(|f| feature_to_visual_col(&visual_columns, f.id).map(|c| c as f32)).collect();
+    // Only the two ends of a checked corridor need their columns. Folded steps share a column.
     let step_col = |step: f32| -> Option<f32> {
+        let column = |i| feature_to_visual_col(&visual_columns, *dep_graph.features.get(i)?).map(|c| c as f32);
         let (a, b) = (step.floor().max(0.0) as usize, step.ceil().max(0.0) as usize);
-        let (ca, cb) = ((*step_cols.get(a)?)?, (*step_cols.get(b)?)?);
+        let (ca, cb) = (column(a)?, column(b)?);
         Some(ca + (cb - ca) * (step - a as f32))
     };
     // The checked corridor of the feature being dragged, in visual columns.
@@ -170,10 +243,8 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
         num_columns
     };
 
-    // 3b. Discover assembly joints for post-modeling track view
-    let visual_joints = super::assembly::build_visual_joints(&app.session.doc, &component_ids, &component_names);
     let has_assembly_section = true;
-    let num_joints = visual_joints.len();
+    let num_joints = app.session.doc.assembly.joints.len();
 
     // 4. Compute layout dimensions and split sections
     let grid_origin_x = total_rect.left() + PINNED_LEFT_WIDTH;
@@ -238,12 +309,6 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
     let a_max_scroll_x = assembly_rect.map(|r| (assembly_content_width - r.width()).max(0.0)).unwrap_or(0.0);
     state.assembly_scroll_x = state.assembly_scroll_x.clamp(0.0, a_max_scroll_x);
 
-    let num_tracks = component_ids.len();
-    let content_height = HEADER_TOTAL_HEIGHT + num_tracks as f32 * ROW_HEIGHT + SCROLLBAR_RESERVE_HEIGHT;
-    let _grid_viewport_height = (total_rect.height() - HEADER_TOTAL_HEIGHT).max(0.0);
-    let max_scroll_y = (content_height - total_rect.height()).max(0.0);
-    state.scroll_y = state.scroll_y.clamp(0.0, max_scroll_y);
-
     // 5. Handle mouse wheel scrolling and rubberband overscroll
     let scroll_delta = ui.input(|i| {
         i.events
@@ -256,22 +321,54 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
     });
     let pointer_in_asm = ui.input(|i| i.pointer.hover_pos().is_some_and(|pos| assembly_rect.is_some_and(|r| r.contains(pos))));
 
-    if ui.rect_contains_pointer(total_rect) {
-        if scroll_delta.x.abs() > 0.0 {
+    let over_timeline = ui.rect_contains_pointer(total_rect);
+    let shift = ui.input(|i| i.modifiers.shift);
+    let pan = over_timeline && ui.input(|i| i.pointer.button_down(egui::PointerButton::Middle));
+    let drag_delta = ui.input(|i| i.pointer.delta());
+    if over_timeline {
+        let mut scroll = |delta: f32| {
             if pointer_in_asm {
-                state.assembly_scroll_x = (state.assembly_scroll_x - scroll_delta.x).clamp(0.0, a_max_scroll_x);
+                state.assembly_scroll_x = (state.assembly_scroll_x - delta).clamp(0.0, a_max_scroll_x);
             } else {
-                state.scroll_x = (state.scroll_x - scroll_delta.x).clamp(0.0, m_max_scroll_x);
+                state.scroll_x = (state.scroll_x - delta).clamp(0.0, m_max_scroll_x);
             }
+        };
+        scroll(scroll_delta.x);
+        if shift {
+            scroll(scroll_delta.y);
         }
+        if pan {
+            scroll(drag_delta.x);
+        }
+    }
+
+    let grid_rect = modeling_rect.map_or(Rect::NOTHING, |r| Rect::from_min_max(pos2(grid_origin_x, r.top() + HEADER_TOTAL_HEIGHT), r.right_bottom()));
+    // Read the pan before choosing columns so a long drag shows the correct chips in this frame.
+    let background_pan = modeling_rect.and_then(|_| {
+        let response = ui.interact(grid_rect, ui.scope_id().with("modeling_bg_pan"), Sense::drag());
+        let marker_dragged = ["marker_head_2d", "marker_line_2d"].iter().any(|id| ui.ctx().is_being_dragged(ui.scope_id().with(id)));
+        (response.dragged() && state.drag.is_none() && !marker_dragged).then(|| response.drag_delta())
+    });
+    if let Some(delta) = background_pan {
+        state.scroll_x = (state.scroll_x - delta.x).clamp(0.0, m_max_scroll_x);
+    }
+    let visible = modeling_rect.filter(|r| r.width() > 0.0).map_or(&[][..], |rect| {
+        let first = ((state.scroll_x / COL_WIDTH).ceil() as usize).saturating_sub(1).min(num_columns);
+        let end = (((state.scroll_x + rect.width()) / COL_WIDTH) as usize + 1).min(num_columns);
+        visual_columns.get(first..end).unwrap_or_default()
+    });
+    let mut tracks = analysis.tracks.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    tracks.prepare(&app.session, dep_graph, visible, ui.ctx());
+    let (component_ids, component_names) = tracks.rows(&app.session.doc);
+    let affected = |id: &u64| tracks.affected.get(*dep_graph.id_to_index.get(id)?)?.as_deref();
+    let visual_joints = super::assembly::build_visual_joints(&app.session.doc, &component_ids, &component_names);
+    let num_tracks = component_ids.len();
+    let content_height = HEADER_TOTAL_HEIGHT + num_tracks as f32 * ROW_HEIGHT + SCROLLBAR_RESERVE_HEIGHT;
+    let max_scroll_y = (content_height - total_rect.height()).max(0.0);
+    state.scroll_y = state.scroll_y.clamp(0.0, max_scroll_y);
+    if over_timeline {
         if scroll_delta.y.abs() > 0.0 {
-            if ui.input(|i| i.modifiers.shift) {
-                if pointer_in_asm {
-                    state.assembly_scroll_x = (state.assembly_scroll_x - scroll_delta.y).clamp(0.0, a_max_scroll_x);
-                } else {
-                    state.scroll_x = (state.scroll_x - scroll_delta.y).clamp(0.0, m_max_scroll_x);
-                }
-            } else {
+            if !shift {
                 let target_y = state.scroll_y - scroll_delta.y;
                 if target_y < 0.0 {
                     state.overscroll_y = target_y * 0.35;
@@ -290,15 +387,8 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
     }
 
     // 5b. Middle-button grab-and-drag pan gesture across entire timeline
-    let is_middle_drag = ui.input(|i| i.pointer.button_down(egui::PointerButton::Middle));
-    if is_middle_drag && ui.rect_contains_pointer(total_rect) {
-        let delta = ui.input(|i| i.pointer.delta());
-        if pointer_in_asm {
-            state.assembly_scroll_x = (state.assembly_scroll_x - delta.x).clamp(0.0, a_max_scroll_x);
-        } else {
-            state.scroll_x = (state.scroll_x - delta.x).clamp(0.0, m_max_scroll_x);
-        }
-        state.scroll_y = (state.scroll_y - delta.y).clamp(0.0, max_scroll_y);
+    if pan {
+        state.scroll_y = (state.scroll_y - drag_delta.y).clamp(0.0, max_scroll_y);
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         ui.ctx().request_repaint();
     }
@@ -309,23 +399,12 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
     let grid_right = modeling_rect.map(|r| r.right()).unwrap_or(grid_origin_x);
     let m_is_open = modeling_rect.is_some();
 
-    let grid_rect = if let Some(m_r) = modeling_rect {
-        Rect::from_min_max(pos2(grid_origin_x, m_r.top() + HEADER_TOTAL_HEIGHT), m_r.right_bottom())
-    } else {
-        Rect::NOTHING
-    };
     let grid_painter = ui.painter().with_clip_rect(grid_rect);
     let grid_line_color = t.border.gamma_multiply(0.25);
 
     if m_is_open {
         // Background grab-and-drag pan gesture on empty modeling grid
-        let bg_resp = ui.interact(grid_rect, ui.scope_id().with("modeling_bg_pan"), Sense::drag());
-        let marker_head_id = ui.scope_id().with("marker_head_2d");
-        let marker_line_id = ui.scope_id().with("marker_line_2d");
-        let is_marker_dragged = ui.ctx().is_being_dragged(marker_head_id) || ui.ctx().is_being_dragged(marker_line_id);
-        if bg_resp.dragged() && state.drag.is_none() && !is_marker_dragged {
-            let delta = bg_resp.drag_delta();
-            state.scroll_x = (state.scroll_x - delta.x).clamp(0.0, m_max_scroll_x);
+        if let Some(delta) = background_pan {
             state.scroll_y = (state.scroll_y - delta.y).clamp(0.0, max_scroll_y);
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             ui.ctx().request_repaint();
@@ -382,8 +461,9 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
                     continue;
                 }
 
+                let occupied = visual_columns.get(c).and_then(|col| occupied_rows(col, affected, &component_ids));
                 for t_idx in 0..num_tracks {
-                    if cell_is_occupied(c, t_idx, &visual_columns, &feature_components_map, &component_ids, &app.session.doc) {
+                    if occupied.as_ref().is_some_and(|rows| rows.contains(&t_idx)) {
                         continue;
                     }
                     let cy =
@@ -410,7 +490,7 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
     // checks come back; otherwise the graph's corridor.
     let visual_corridor: Option<(f32, f32)> = shown
         .and_then(|s| Some((step_col(s.low)?, step_col(s.high)?)))
-        .or_else(|| compute_visual_corridor(&visual_columns, &dep_graph, &state.selected_features).map(|(a, b)| (a as f32, b as f32)));
+        .or_else(|| compute_visual_corridor(&visual_columns, dep_graph, &state.selected_features).map(|(a, b)| (a as f32, b as f32)));
 
     // Draw movable corridor background tint if selected (brackets painted in Step 11b on top of tracks and marker)
     if let Some((min_col, max_col)) = visual_corridor {
@@ -468,7 +548,7 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
 
                 for &fid in features {
                     if let Some(f) = app.session.doc.feature(fid) {
-                        let affected = feature_components_map.get(&fid).cloned().unwrap_or_else(|| vec![f.component]);
+                        let affected = affected(&fid).unwrap_or(std::slice::from_ref(&f.component));
                         let mut tracks: Vec<usize> = affected.iter().filter_map(|cid| component_ids.iter().position(|id| id == cid)).collect();
                         if tracks.is_empty() {
                             let default_track = component_ids.iter().position(|&cid| cid == f.component).unwrap_or(0);
@@ -615,23 +695,40 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
                         }
 
                         // Attach context menu
-                        if state.drag.is_none() {
-                            Menu::context(&resp, |ui| {
-                                // Built only while the menu is open, not for every chip each frame.
-                                let targets = if state.selected_features.contains(&fid) {
-                                    state.selected_features.iter().copied().collect::<Vec<_>>()
-                                } else {
-                                    vec![fid]
-                                };
-                                let is_adjacent = state.is_selection_adjacent(&dep_graph.features);
-                                let sel_count = state.selected_features.len();
-                                if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Edit Feature"), "edit").clicked() {
-                                    action_to_edit = Some(fid);
-                                    ui.close();
-                                }
-                                if is_adjacent && sel_count >= 2 {
-                                    let label = solidcraft_ui_text::format("ui.timeline_2d_group_selection", &[("count", &sel_count.to_string())]);
-                                    if crate::ui_kit::menu::button(ui, &label, "folder").clicked() {
+                        if state.drag.is_none() && Menu::context_active(&resp) {
+                            let targets = if state.selected_features.contains(&fid) {
+                                state.selected_features.iter().copied().collect::<Vec<_>>()
+                            } else {
+                                vec![fid]
+                            };
+                            let is_adjacent = state.is_selection_adjacent(&dep_graph.features);
+                            let sel_count = state.selected_features.len();
+                            let mut items = vec![crate::ui_kit::Item::action("edit", solidcraft_ui_text::tr_label("Edit Feature"), "edit")];
+                            if is_adjacent && sel_count >= 2 {
+                                let label = solidcraft_ui_text::format("ui.timeline_2d_group_selection", &[("count", &sel_count.to_string())]);
+                                items.push(crate::ui_kit::Item::action("group", &label, "folder"));
+                            }
+                            if sel_count <= 1 {
+                                items.push(crate::ui_kit::Item::action("rename", solidcraft_ui_text::tr_label("Rename"), "rename"));
+                            }
+                            let suppress_key = if is_suppressed { "timeline.unsuppress_features" } else { "timeline.suppress_features" };
+                            let suppress_icon = if is_suppressed { "eye" } else { "suppress" };
+                            let delete_label = match targets.len() {
+                                1 => solidcraft_ui_text::tr_label("Delete").to_string(),
+                                n => solidcraft_ui_text::format("timeline.delete_many", &[("count", &n.to_string())]),
+                            };
+                            items.extend([
+                                crate::ui_kit::Item::action("suppress", solidcraft_ui_text::tr(suppress_key), suppress_icon),
+                                crate::ui_kit::Item::action("rollback", solidcraft_ui_text::tr_label("Roll History Marker Here"), "rollback"),
+                                crate::ui_kit::Item::sep(),
+                                crate::ui_kit::Item::action("delete", &delete_label, "delete"),
+                            ]);
+                            if let Some(picked) = Menu::context_items(&resp, &items) {
+                                match picked.id.as_str() {
+                                    "edit" => {
+                                        action_to_edit = Some(fid);
+                                    }
+                                    "group" => {
                                         let ordered_selected: Vec<u64> =
                                             dep_graph.features.iter().copied().filter(|id| state.selected_features.contains(id)).collect();
                                         let group_name = format!("Group {}", app.session.doc.timeline_groups.len() + 1);
@@ -646,63 +743,49 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
                                             state.folded_groups.insert(gid);
                                             app.tree.collapsed.insert(format!("timeline_group:{gid}"));
                                         }
-                                        ui.close();
                                     }
-                                }
-                                // 2D Timeline only: Rename is hidden when the right-clicked chip is part of a
-                                // multi-selection, because this menu then acts on the whole selection. The 1D
-                                // timeline (crates/ui-egui/src/timeline.rs) keeps its own Rename rule.
-                                if sel_count <= 1 && crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Rename"), "rename").clicked() {
-                                    let f_name = app.session.doc.feature(fid).map(|f| f.name.clone()).unwrap_or_default();
-                                    app.dialog = Some(crate::dialogs::Dialog::rename(fid, &f_name));
-                                    ui.close();
-                                }
-                                let suppress_key = if is_suppressed { "timeline.unsuppress_features" } else { "timeline.suppress_features" };
-                                let suppress_icon = if is_suppressed { "eye" } else { "suppress" };
-                                if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr(suppress_key), suppress_icon).clicked() {
-                                    let base_targets = if state.selected_features.contains(&fid) {
-                                        state.selected_features.iter().copied().collect::<Vec<_>>()
-                                    } else {
-                                        vec![fid]
-                                    };
-                                    state.separately_suppressed_features.retain(|id| app.session.doc.feature(*id).is_some_and(|f| f.suppressed));
+                                    "rename" => {
+                                        let f_name = app.session.doc.feature(fid).map(|f| f.name.clone()).unwrap_or_default();
+                                        app.dialog = Some(crate::dialogs::Dialog::rename(fid, &f_name));
+                                    }
+                                    "suppress" => {
+                                        let base_targets = if state.selected_features.contains(&fid) {
+                                            state.selected_features.iter().copied().collect::<Vec<_>>()
+                                        } else {
+                                            vec![fid]
+                                        };
+                                        state.separately_suppressed_features.retain(|id| app.session.doc.feature(*id).is_some_and(|f| f.suppressed));
 
-                                    let target_features = if is_suppressed {
-                                        dep_graph.collect_unsuppression_with_mode(
-                                            &app.session.doc,
-                                            &base_targets,
-                                            app.preferences.timeline_2d_unsuppress_mode,
-                                            &state.separately_suppressed_features,
-                                        )
-                                    } else {
-                                        for &id in &base_targets {
-                                            state.separately_suppressed_features.insert(id);
-                                        }
-                                        dep_graph.collect_suppression_cascade_for_set(&base_targets)
-                                    };
-                                    let _ = app.run_heavy(
-                                        "timeline.suppress",
-                                        serde_json::json!({
-                                            "features": target_features,
-                                            "suppressed": !is_suppressed,
-                                        }),
-                                    );
-                                    ui.close();
+                                        let target_features = if is_suppressed {
+                                            dep_graph.collect_unsuppression_with_mode(
+                                                &app.session.doc,
+                                                &base_targets,
+                                                app.preferences.timeline_2d_unsuppress_mode,
+                                                &state.separately_suppressed_features,
+                                            )
+                                        } else {
+                                            for &id in &base_targets {
+                                                state.separately_suppressed_features.insert(id);
+                                            }
+                                            dep_graph.collect_suppression_cascade_for_set(&base_targets)
+                                        };
+                                        let _ = app.run_heavy(
+                                            "timeline.suppress",
+                                            serde_json::json!({
+                                                "features": target_features,
+                                                "suppressed": !is_suppressed,
+                                            }),
+                                        );
+                                    }
+                                    "rollback" => {
+                                        let _ = app.run_heavy("timeline.roll_to", serde_json::json!({ "feature": fid }));
+                                    }
+                                    "delete" => {
+                                        crate::timeline::delete_features(app, targets);
+                                    }
+                                    _ => {}
                                 }
-                                if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Roll History Marker Here"), "rollback").clicked() {
-                                    let _ = app.run_heavy("timeline.roll_to", serde_json::json!({ "feature": fid }));
-                                    ui.close();
-                                }
-                                ui.separator();
-                                let delete_label = match targets.len() {
-                                    1 => solidcraft_ui_text::tr_label("Delete").to_string(),
-                                    n => solidcraft_ui_text::format("timeline.delete_many", &[("count", &n.to_string())]),
-                                };
-                                if crate::ui_kit::menu::button(ui, &delete_label, "delete").clicked() {
-                                    crate::timeline::delete_features(app, targets);
-                                    ui.close();
-                                }
-                            });
+                            }
                         }
                     }
                 }
@@ -811,25 +894,30 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
             // Group Context Menu
             let gid = *group_id;
             let g_name = grp_name.clone();
-            Menu::context(&resp, |ui| {
-                if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr("ui.timeline_2d_open_group"), "folder").clicked() {
-                    state.set_group_folded(gid, false);
-                    ui.close();
+            let items = vec![
+                crate::ui_kit::Item::action("fold", solidcraft_ui_text::tr("ui.timeline_2d_open_group"), "folder"),
+                crate::ui_kit::Item::action("rename", solidcraft_ui_text::tr("ui.timeline_2d_rename_group"), "rename"),
+                crate::ui_kit::Item::action("ungroup", solidcraft_ui_text::tr("ui.timeline_2d_delete_group_expand"), "folder"),
+                crate::ui_kit::Item::action("delete", solidcraft_ui_text::tr("ui.timeline_2d_delete_group_all"), "delete"),
+            ];
+            if let Some(picked) = Menu::context_items(&resp, &items) {
+                match picked.id.as_str() {
+                    "fold" => {
+                        state.set_group_folded(gid, false);
+                    }
+                    "rename" => {
+                        app.dialog = Some(crate::dialogs::Dialog::rename_group(gid, &g_name));
+                    }
+                    "ungroup" => {
+                        let _ = app.run_heavy("timeline.ungroup", serde_json::json!({ "group": gid }));
+                    }
+                    "delete" => {
+                        let contents = crate::timeline_left::folder_features(app, &[gid]);
+                        crate::timeline::delete_folders(app, vec![gid], contents);
+                    }
+                    _ => {}
                 }
-                if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr("ui.timeline_2d_rename_group"), "rename").clicked() {
-                    app.dialog = Some(crate::dialogs::Dialog::rename_group(gid, &g_name));
-                    ui.close();
-                }
-                if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr("ui.timeline_2d_delete_group_expand"), "folder").clicked() {
-                    let _ = app.run_heavy("timeline.ungroup", serde_json::json!({ "group": gid }));
-                    ui.close();
-                }
-                if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr("ui.timeline_2d_delete_group_all"), "delete").clicked() {
-                    let contents = crate::timeline_left::folder_features(app, &[gid]);
-                    crate::timeline::delete_folders(app, vec![gid], contents);
-                    ui.close();
-                }
-            });
+            }
 
             paint_virtual_group_chip(&painter, card_rect, &grp_name, features.len(), is_active, is_group_selected, &t);
         }
@@ -903,11 +991,10 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
         let line_width = if marker_hovered || marker_dragged { 3.0 } else { 2.5 };
 
         // Vertical marker line through Tier 2 and component tracks (clipped to modeling section)
-        p_m.line_segment([pos2(line_x, line_top), pos2(line_x, line_bottom)], Stroke::new(line_width, accent.color));
+        p_m.line_segment([pos2(line_x, line_top), pos2(line_x, line_bottom - MARKER_FOOT_OVERLAP)], Stroke::new(line_width, accent.color));
 
-        // Bottom handle cap on vertical line
-        let bottom_cap_rect = Rect::from_min_size(pos2(line_x - 5.0, line_bottom - 4.0), vec2(10.0, 4.0));
-        p_m.rect_filled(bottom_cap_rect, egui::CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 }, accent.color);
+        // Bottom of the vertical line: a down arrowhead while component rows are out of sight below
+        p_m.add(marker_foot(line_x, line_bottom, accent.color, state.scroll_y + 0.5 < max_scroll_y));
 
         // Square pin handle in Tier 1 contacting vertical line
         let pin_size = if marker_hovered || marker_dragged { vec2(15.0, 15.0) } else { vec2(14.0, 14.0) };
@@ -1000,7 +1087,7 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
             // Constrained to the original component track row horizontally
             let mut single_sel = BTreeSet::new();
             single_sel.insert(drag_fid);
-            let drag_corridor = dragged_checked.or_else(|| compute_visual_corridor(&visual_columns, &dep_graph, &single_sel));
+            let drag_corridor = dragged_checked.or_else(|| compute_visual_corridor(&visual_columns, dep_graph, &single_sel));
             let is_valid_drop = drag_corridor.is_some_and(|(min_c, max_c)| target_visual_col >= min_c && target_visual_col <= max_c);
 
             // A. Target cell highlight in grid (constrained to origin track row)
@@ -1235,7 +1322,7 @@ fn paint_two_tier_header(
 
     // Diamond icon + Title + Count Badge
     p.text(pos2(banner_rect.left() + 10.0, banner_rect.center().y), egui::Align2::LEFT_CENTER, "◆", FontId::proportional(t.font_small), accent.color);
-    p.text(
+    let heading_rect = p.text(
         pos2(banner_rect.left() + 24.0, banner_rect.center().y),
         egui::Align2::LEFT_CENTER,
         solidcraft_ui_text::tr_label("MODELING FEATURES"),
@@ -1243,7 +1330,8 @@ fn paint_two_tier_header(
         t.text,
     );
     let count_text = solidcraft_ui_text::format("ui.timeline_2d_steps_badge", &[("count", &total_features.to_string())]);
-    let badge_rect = Rect::from_center_size(pos2(banner_rect.left() + 175.0, banner_rect.center().y), vec2(58.0, 16.0));
+    let badge_left = (banner_rect.left() + 146.0).max(heading_rect.right() + 6.0);
+    let badge_rect = Rect::from_min_size(pos2(badge_left, banner_rect.center().y - 8.0), vec2(58.0, 16.0));
     p.rect_filled(badge_rect, 3.0, accent.color.gamma_multiply(0.18));
     p.rect_stroke(badge_rect, 3.0, Stroke::new(1.0, accent.color.gamma_multiply(0.4)), StrokeKind::Inside);
     p.text(badge_rect.center(), egui::Align2::CENTER_CENTER, count_text, FontId::monospace(t.font_badge), accent.color);
@@ -1404,25 +1492,30 @@ fn paint_two_tier_header(
 
                 let gid = grp_id;
                 let g_name = grp_name.clone();
-                Menu::context(&resp, |ui| {
-                    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr("ui.timeline_2d_close_group"), "folder").clicked() {
-                        state.set_group_folded(gid, true);
-                        ui.close();
+                let items = vec![
+                    crate::ui_kit::Item::action("fold", solidcraft_ui_text::tr("ui.timeline_2d_close_group"), "folder"),
+                    crate::ui_kit::Item::action("rename", solidcraft_ui_text::tr("ui.timeline_2d_rename_group"), "rename"),
+                    crate::ui_kit::Item::action("ungroup", solidcraft_ui_text::tr("ui.timeline_2d_delete_group_expand"), "folder"),
+                    crate::ui_kit::Item::action("delete", solidcraft_ui_text::tr("ui.timeline_2d_delete_group_all"), "delete"),
+                ];
+                if let Some(picked) = Menu::context_items(&resp, &items) {
+                    match picked.id.as_str() {
+                        "fold" => {
+                            state.set_group_folded(gid, true);
+                        }
+                        "rename" => {
+                            app.dialog = Some(crate::dialogs::Dialog::rename_group(gid, &g_name));
+                        }
+                        "ungroup" => {
+                            let _ = app.run_heavy("timeline.ungroup", serde_json::json!({ "group": gid }));
+                        }
+                        "delete" => {
+                            let contents = crate::timeline_left::folder_features(app, &[gid]);
+                            crate::timeline::delete_folders(app, vec![gid], contents);
+                        }
+                        _ => {}
                     }
-                    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr("ui.timeline_2d_rename_group"), "rename").clicked() {
-                        app.dialog = Some(crate::dialogs::Dialog::rename_group(gid, &g_name));
-                        ui.close();
-                    }
-                    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr("ui.timeline_2d_delete_group_expand"), "folder").clicked() {
-                        let _ = app.run_heavy("timeline.ungroup", serde_json::json!({ "group": gid }));
-                        ui.close();
-                    }
-                    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr("ui.timeline_2d_delete_group_all"), "delete").clicked() {
-                        let contents = crate::timeline_left::folder_features(app, &[gid]);
-                        crate::timeline::delete_folders(app, vec![gid], contents);
-                        ui.close();
-                    }
-                });
+                }
 
                 p.rect_filled(banner_rect, 4.0, pill_color);
                 p.rect_stroke(banner_rect, 4.0, Stroke::new(1.0, stroke_color), StrokeKind::Inside);
@@ -1572,21 +1665,18 @@ fn paint_pinned_left(
         // Right-click context menu for component row (Rename Component, Show/Hide)
         let menu_pos = resp.interact_pointer_pos().unwrap_or(row_rect.left_bottom());
         let can_toggle_vis = (cid != 0 && !first_path.is_empty()) || !bodies.is_empty();
-        Menu::context(&resp, |ui| {
-            if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Rename Component"), "rename").clicked() {
-                crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::Component(cid), menu_pos);
-                ui.close();
+        let items = [
+            crate::ui_kit::Item::action("rename", solidcraft_ui_text::tr_label("Rename Component"), "rename"),
+            crate::ui_kit::Item::action("visibility", solidcraft_ui_text::tr_label("Show/Hide"), if is_visible { "eye" } else { "suppress" })
+                .on_if(can_toggle_vis),
+        ];
+        if let Some(picked) = Menu::context_items(&resp, &items) {
+            match picked.id.as_str() {
+                "rename" => crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::Component(cid), menu_pos),
+                "visibility" => toggle_visibility(app),
+                _ => {}
             }
-            let vis_icon = if is_visible { "eye" } else { "suppress" };
-            if ui
-                .add_enabled_ui(can_toggle_vis, |ui| crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Show/Hide"), vis_icon))
-                .inner
-                .clicked()
-            {
-                toggle_visibility(app);
-                ui.close();
-            }
-        });
+        }
 
         // Active / Hover row background
         if is_active {
@@ -1967,6 +2057,21 @@ fn paint_movable_corridor(
 }
 
 /// Renders the opening bracket `[` of a movable corridor with smart inset when coincident with the rollback marker.
+/// How far above its foot's bottom a marker's line ends: inside the cap and the arrowhead, so neither shows the line through its tip.
+pub(crate) const MARKER_FOOT_OVERLAP: f32 = 3.0;
+
+/// The foot of a rollback marker's line: a flat cap, or a down arrowhead when component rows
+/// are out of sight below, so the hidden rows show at the marker and not only in a counter.
+pub(crate) fn marker_foot(line_x: f32, line_bottom: f32, color: egui::Color32, more_below: bool) -> egui::Shape {
+    if more_below {
+        let points = vec![pos2(line_x - 6.0, line_bottom - 7.0), pos2(line_x + 6.0, line_bottom - 7.0), pos2(line_x, line_bottom)];
+        egui::Shape::convex_polygon(points, color, Stroke::NONE)
+    } else {
+        let cap = Rect::from_min_size(pos2(line_x - 5.0, line_bottom - 4.0), vec2(10.0, 4.0));
+        egui::Shape::rect_filled(cap, egui::CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 }, color)
+    }
+}
+
 pub(crate) fn paint_bracket_open(p: &egui::Painter, x: f32, grid_origin_x: f32, top: f32, bottom: f32, color: egui::Color32, marker_x: Option<f32>) {
     let stroke = Stroke::new(2.0, color);
 
@@ -2010,18 +2115,31 @@ fn paint_dotted_vertical_line(p: &egui::Painter, x: f32, y_start: f32, y_end: f3
 
 /// Returns the sorted, deduplicated list of component IDs affected by a feature.
 pub fn feature_affected_components(doc: &Document, model: Option<&Model>, f: &Feature) -> Vec<u64> {
+    let before = model.map(|m| m.state_before(f.id));
+    let after = model.and_then(|m| m.result(f.id));
+    let states = before.as_ref().zip(after).map(|(a, b)| (a.bodies.as_slice(), b.state.bodies.as_slice()));
+    let final_state = model.map(Model::state);
+    affected_components(doc, f, states, final_state.as_deref())
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static FEATURES_CHECKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn affected_components(doc: &Document, f: &Feature, states: Option<(&[ModelBody], &[ModelBody])>, final_state: Option<&ModelState>) -> Vec<u64> {
+    #[cfg(test)]
+    FEATURES_CHECKED.with(|n| n.set(n.get() + 1));
     let mut comps = BTreeSet::new();
     comps.insert(f.component);
 
     // 1. If evaluation results exist in model, compare state before and after this feature
-    if let Some(m) = model
-        && let Some(res) = m.result(f.id)
-    {
-        let before = m.state_before(f.id);
-        let after = &res.state;
-
-        for b_before in &before.bodies {
-            if let Some(b_after) = after.body(&b_before.name) {
+    if let Some((before, after)) = states {
+        // Keep the first match, as ModelState::body does even in damaged states with repeated names.
+        let after_by_name: HashMap<_, _> = after.iter().rev().map(|b| (b.name.as_str(), b)).collect();
+        let before_names: HashSet<_> = before.iter().map(|b| b.name.as_str()).collect();
+        for b_before in before {
+            if let Some(b_after) = after_by_name.get(b_before.name.as_str()) {
                 if b_before.geometry_key() != b_after.geometry_key() || b_before.component != b_after.component {
                     comps.insert(doc.model_body_component(b_before));
                     comps.insert(doc.model_body_component(b_after));
@@ -2031,8 +2149,8 @@ pub fn feature_affected_components(doc: &Document, model: Option<&Model>, f: &Fe
             }
         }
 
-        for b_after in &after.bodies {
-            if b_after.feature == f.id || before.body(&b_after.name).is_none() {
+        for b_after in after {
+            if b_after.feature == f.id || !before_names.contains(b_after.name.as_str()) {
                 comps.insert(doc.model_body_component(b_after));
             }
         }
@@ -2050,16 +2168,13 @@ pub fn feature_affected_components(doc: &Document, model: Option<&Model>, f: &Fe
         }
     }
 
-    let model_state = model.map(|m| m.state());
-    let model_bodies = model_state.as_deref().map(|s| s.bodies.as_slice());
-
     let resolve_body = |b: &str| -> Option<u64> {
         let trimmed = b.trim();
         if trimmed.is_empty() || trimmed == "*" {
             return None;
         }
-        if let Some(bodies) = model_bodies
-            && let Some(mb) = bodies.iter().find(|body| body.name.trim() == trimmed)
+        if let Some(state) = final_state
+            && let Some(mb) = state.bodies.iter().find(|body| body.name.trim() == trimmed)
         {
             return Some(doc.model_body_component(mb));
         }
@@ -2117,13 +2232,14 @@ pub fn feature_affected_components(doc: &Document, model: Option<&Model>, f: &Fe
             {
                 comps.insert(cid);
             }
-            if let Some(bodies) = model_bodies {
-                for p in edges {
-                    for b in bodies {
+            if let Some(state) = final_state
+                && !edges.is_empty()
+            {
+                for (b, owner) in state.bodies.iter().zip(doc.model_body_components(state)) {
+                    if !comps.contains(&owner) {
                         let mesh = b.mesh();
-                        let is_near = mesh.edges.iter().any(|e| e.windows(2).any(|w| p.0.dist_to_segment(w[0], w[1]) < 0.05));
-                        if is_near {
-                            comps.insert(doc.model_body_component(b));
+                        if edges.iter().any(|p| mesh.edges.iter().any(|e| e.windows(2).any(|w| p.0.dist_to_segment(w[0], w[1]) < 0.05))) {
+                            comps.insert(owner);
                         }
                     }
                 }
@@ -2186,63 +2302,36 @@ pub fn feature_affected_components(doc: &Document, model: Option<&Model>, f: &Fe
     comps.into_iter().collect()
 }
 
-/// Helper to determine whether a grid cell (col_idx, track_idx) is occupied by an action chip,
-/// a multi-component vertical connector, or a folded group card.
-fn cell_is_occupied(
-    col_idx: usize,
-    track_idx: usize,
-    visual_columns: &[VisualColumn],
-    feature_components_map: &BTreeMap<u64, Vec<u64>>,
+/// Chips and their connector occupy the rows between the first and last affected component.
+fn occupied_rows<'a>(
+    column: &VisualColumn,
+    affected: impl Fn(&u64) -> Option<&'a [u64]>,
     component_ids: &[u64],
-    doc: &solidcraft_engine::doc::Document,
-) -> bool {
-    let Some(col) = visual_columns.get(col_idx) else {
-        return false;
+) -> Option<std::ops::RangeInclusive<usize>> {
+    // The folded card covers its members. While their tracks are being discovered, keep
+    // its column clear of dots instead of inferring a connector from incomplete data.
+    if let VisualColumn::FoldedGroup { features, .. } = column
+        && features.iter().any(|id| affected(id).is_none())
+    {
+        return Some(0..=component_ids.len().saturating_sub(1));
+    }
+    let mut rows = column.feature_ids().iter().filter_map(affected).flatten().filter_map(|cid| component_ids.iter().position(|id| id == cid));
+    let Some(first) = rows.next() else {
+        return matches!(column, VisualColumn::FoldedGroup { .. }).then_some(0..=0);
     };
-    match col {
-        VisualColumn::Features { features, .. } => {
-            let mut tracks: Vec<usize> = Vec::new();
-            for &fid in features {
-                if let Some(f) = doc.feature(fid) {
-                    let affected = feature_components_map.get(&fid).cloned().unwrap_or_else(|| vec![f.component]);
-                    for &cid in &affected {
-                        if let Some(pos) = component_ids.iter().position(|&id| id == cid) {
-                            tracks.push(pos);
-                        }
-                    }
-                }
-            }
-            tracks.sort_unstable();
-            tracks.dedup();
-            if tracks.contains(&track_idx) {
-                return true;
-            }
-            if tracks.len() > 1 {
-                let min_t = tracks.first().copied().unwrap_or(0);
-                let max_t = tracks.last().copied().unwrap_or(0);
-                if track_idx >= min_t && track_idx <= max_t {
-                    return true;
-                }
-            }
-            false
-        }
-        VisualColumn::FoldedGroup { features, .. } => {
-            let mut tracks: Vec<usize> = Vec::new();
-            for &fid in features {
-                if let Some(f) = doc.feature(fid) {
-                    let affected = feature_components_map.get(&fid).cloned().unwrap_or_else(|| vec![f.component]);
-                    for &cid in &affected {
-                        if let Some(pos) = component_ids.iter().position(|&id| id == cid) {
-                            tracks.push(pos);
-                        }
-                    }
-                }
-            }
-            tracks.sort_unstable();
-            tracks.dedup();
-            let min_t = tracks.first().copied().unwrap_or(0);
-            let max_t = tracks.last().copied().unwrap_or(0);
-            track_idx >= min_t && track_idx <= max_t
-        }
+    let (low, high) = rows.fold((first, first), |(low, high), i| (low.min(i), high.max(i)));
+    Some(low..=high)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_folded_column_keeps_dots_clear_until_all_its_tracks_are_known() {
+        let col = VisualColumn::FoldedGroup { group_id: 1, features: vec![2, 3] };
+        let rows = [0, 10, 20, 30];
+        assert_eq!(occupied_rows(&col, |&id| (id == 2).then_some(&[10][..]), &rows), Some(0..=3));
+        assert_eq!(occupied_rows(&col, |&id| Some(if id == 2 { &[10] } else { &[30] }), &rows), Some(1..=3));
     }
 }

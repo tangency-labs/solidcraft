@@ -4007,6 +4007,37 @@ fn plane_at_angle_direction_only_shows_a_pivot_and_applies() {
     assert!(reopened.inputs.iter().any(|i| i.label == "Pivot" && !i.items.is_empty()), "{:?}", reopened.inputs);
 }
 
+/// A new Plane at Angle starts with "Through the axis" off, as before; ticking it in the dialog
+/// sends `through_axis` and the plane goes through an edge off the base (#6180).
+#[test]
+fn plane_at_angle_through_the_axis_starts_off_and_can_be_turned_on() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Box"})).unwrap();
+    let mut made = Vec::new();
+    for on in [true, false] {
+        h.app.start("construct.plane.at_angle");
+        h.frames(2);
+        let d = h.app.dialog.as_mut().unwrap();
+        assert!(matches!(d.kind, Kind::AnglePlane { through_axis: false, direction_only: false, .. }), "{:?}", d.kind);
+        if let Kind::AnglePlane { through_axis, .. } = &mut d.kind {
+            *through_axis = on;
+        }
+        d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
+        d.extra.insert("axis".into(), json!({"edge": [20, 0, 20]}));
+        let (cmd, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+        assert_eq!(params.get("through_axis"), on.then_some(&json!(true)), "{params}");
+        h.app.dialog = None;
+        made.push(h.app.run(&cmd, params).unwrap()["feature"].as_u64().unwrap());
+    }
+    let planes = solidcraft_engine::view::construction_planes(&h.app.session);
+    let height = |id: u64| planes.iter().find(|(fid, _, _)| *fid == id).map(|(_, _, pl)| pl.height(Vec3::new(10.0, 0.0, 20.0)).abs()).unwrap();
+    assert!(height(made[0]) < 1e-6, "through the top front edge");
+    assert!((height(made[1]) - 20.0).abs() < 1e-6, "turned about the edge where it is, as before");
+    // Reopened, each shows how it was made.
+    let reopened = crate::dialogs::for_feature(&h.app, made[0], None).unwrap();
+    assert!(matches!(reopened.kind, Kind::AnglePlane { through_axis: true, .. }), "{:?}", reopened.kind);
+}
+
 #[test]
 fn offset_plane_picks_a_3d_spline_tip_and_keeps_its_reference() {
     check_offset_plane_wire_point(2, Vec3::new(50., 40., 30.));
@@ -4319,6 +4350,84 @@ fn delete_face_asks_for_faces_and_takes_the_preselected_one() {
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
     assert!(volume(&h) > filleted + 1.0, "the rounded edge is square again");
+}
+
+/// #18645, #4510: Delete Face with Heal unchecked leaves an open surface body rather than failing to heal.
+#[test]
+fn delete_face_without_healing_leaves_an_open_surface_body() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.remember_dialog_values = true;
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Box"})).unwrap();
+
+    let top_face = crate::dialogs::face_sel(&h.app.session, Vec3::new(10.0, 10.0, 20.0)).expect("top face");
+    h.app.session.selection = vec![top_face];
+    h.app.start("face.delete");
+    h.frames(1);
+
+    match h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        Some(crate::dialogs::Kind::DeleteFaces { heal }) => {
+            assert!(*heal, "Delete Face defaults to heal: true");
+            *heal = false;
+        }
+        other => panic!("expected Kind::DeleteFaces, got {other:?}"),
+    }
+
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+
+    let st = h.app.session.world_state().unwrap();
+    let body = &st.body("Box").unwrap().body;
+    assert!(body.is_surface(), "body is now a surface quilt");
+    assert_eq!(body.face_count(), 5, "top face was deleted without healing");
+
+    // Re-editing from timeline preserves heal: false (verifying against fresh defaults with memory off)
+    let doc = &h.app.session.doc;
+    let feat = doc.features.last().expect("DeleteFace feature");
+    h.app.preferences.remember_dialog_values = false;
+    let edit_dialog = crate::dialogs::for_feature(&h.app, feat.id, None).expect("edit dialog");
+    assert!(matches!(edit_dialog.kind, crate::dialogs::Kind::DeleteFaces { heal: false }), "heal: false preserved in timeline edit");
+    h.app.preferences.remember_dialog_values = true;
+
+    // The next face.delete invocation remembers heal: false
+    h.app.session.selection.clear();
+    h.app.start("face.delete");
+    h.frames(1);
+    assert!(
+        matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::DeleteFaces { heal: false })),
+        "heal toggle is remembered across uses"
+    );
+    crate::dialogs::cancel(&mut h.app);
+}
+
+/// #18645, #4510: Delete Face dialog has a Heal toggle that starts enabled (heal: true)
+/// across all tabs (preserving previous default solid behavior without changing defaults),
+/// and can be unchecked to delete faces without healing leaving open surface bodies.
+#[test]
+fn delete_face_defaults_to_heal_true() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.remember_dialog_values = false;
+
+    for tab in ["SOLID", "SURFACE"] {
+        h.app.ui.tab = tab.into();
+        h.app.start("face.delete");
+        h.frames(1);
+        assert!(
+            matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::DeleteFaces { heal: true })),
+            "Delete Face in {tab} tab defaults to heal: true"
+        );
+        crate::dialogs::cancel(&mut h.app);
+    }
+
+    // Context menu / command search path started while in Surface tab
+    h.app.ui.tab = "SURFACE".into();
+    h.app.command_tab_before_start = Some("SURFACE".into());
+    h.app.start("face.delete");
+    h.frames(1);
+    assert!(
+        matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::DeleteFaces { heal: true })),
+        "Delete Face started from search/context menu in Surface tab defaults to heal: true"
+    );
+    crate::dialogs::cancel(&mut h.app);
 }
 
 /// #2494: two planes selected first, Axis Through Two Planes takes both and makes the axis
@@ -4720,6 +4829,75 @@ fn convert_mesh_asks_for_the_body_and_converts_the_selected_one() {
     assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
     let state = h.app.session.model.state();
     assert!(!state.body("Mesh").unwrap().body.is_mesh(), "rebuilt as faces");
+}
+
+/// #2698: Section Stack opens a dialog that takes the selected mesh body and a plane, and OK
+/// sketches a section on each plane (the 10 x 20 x 30 mm box every 10 mm up from XY, from 0 to 30
+/// kept just inside its ends: 0.001, 10.001, 20.001 and 29.999) without changing the mesh. With
+/// dialog values remembered, the next one keeps the spacing but not the ends, which belonged to
+/// that body: it spans its body again.
+#[test]
+fn section_stack_takes_the_mesh_and_a_plane_and_sketches_each_section() {
+    use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
+    let body = solidcraft_engine::kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
+    let mesh = body.mesh(&solidcraft_engine::kernel::MeshTolerance::chord(0.01)).unwrap();
+    let mut doc = Document::default();
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "box.stl".into(),
+            meshes: vec![MeshData {
+                name: "Mesh".into(),
+                positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
+                triangles: mesh.triangles.iter().flatten().copied().collect(),
+                color: None,
+                corner_normals: Default::default(),
+            }],
+        },
+        Some("Imported mesh"),
+    )
+    .unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.remember_dialog_values = true;
+    h.app.session = Session::new(doc);
+    h.app.session.selection = vec![Sel::Body { name: "Mesh".into() }];
+    h.app.start("mesh.section_stack");
+    h.frames(1);
+    let d = h.app.dialog.as_mut().expect("the Section Stack dialog");
+    assert!(matches!(d.kind, Kind::MeshSectionStack { .. }), "{:?}", d.kind);
+    assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "Mesh".into() }]);
+    // OK with no plane is refused in the dialog, and nothing is made.
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_some(), "no plane yet");
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[1].items = vec![Sel::Plane { name: "XY".into() }];
+    if let Kind::MeshSectionStack { spacing, from, to, .. } = &mut d.kind {
+        *spacing = "10 mm".into();
+        *from = "0 mm".into();
+        *to = "30 mm".into();
+    }
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    let state = h.app.session.model.state();
+    let heights: Vec<f64> = h
+        .app
+        .session
+        .doc
+        .features
+        .iter()
+        .filter(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
+        .filter_map(|f| state.sketch(f.id).map(|sk| sk.plane.origin.z))
+        .collect();
+    assert_eq!(heights.len(), 4, "{heights:?}");
+    for (z, want) in heights.iter().zip([0.001, 10.001, 20.001, 29.999]) {
+        assert!((z - want).abs() < 1e-9, "{heights:?}");
+    }
+    assert!(state.body("Mesh").unwrap().body.is_mesh());
+    h.app.session.selection = vec![Sel::Body { name: "Mesh".into() }];
+    h.app.start("mesh.section_stack");
+    h.frames(1);
+    let d = h.app.dialog.as_ref().expect("the Section Stack dialog again");
+    let Kind::MeshSectionStack { spacing, from, to, .. } = &d.kind else { panic!("{:?}", d.kind) };
+    assert_eq!((spacing.as_str(), from.as_str(), to.as_str()), ("10 mm", "", ""));
 }
 
 /// Direct calls, previews and dialog apply all use the one source-bound naming scheme.

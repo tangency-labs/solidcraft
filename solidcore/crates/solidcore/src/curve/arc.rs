@@ -19,6 +19,7 @@
 //! `angle_on` and the arc join of its one-wall-per-circle rule). Deviations: none (no
 //! upstream counterpart). No recursion.
 
+use crate::math::det;
 use std::f64::consts::{PI, TAU};
 
 use crate::curve::curve::Curve;
@@ -141,7 +142,7 @@ impl ArcDefinition {
     pub fn point_at_bounded(&self, t: f64, t_bound: f64) -> Result<(Point3, f64)> {
         let placement = self.placement()?;
         let r = self.radius;
-        let p = placement.transform_point(Point3::new(r * t.cos(), r * t.sin(), 0.0));
+        let p = placement.transform_point(Point3::new(r * det::cos(t), r * det::sin(t), 0.0));
         let c = self.centre;
         let size = c.x.abs().max(c.y.abs()).max(c.z.abs()) + 2.0 * r.abs();
         let bound = (2.0 * gamma(4) * size
@@ -216,7 +217,7 @@ impl ArcDefinition {
     pub fn angle_of(&self, p: Point3) -> Result<f64> {
         let placement = self.placement()?;
         let d = p - self.centre;
-        let t = d.dot(placement.y_axis()).atan2(d.dot(placement.x_axis()));
+        let t = det::atan2(d.dot(placement.y_axis()), d.dot(placement.x_axis()));
         if t >= 0.0 {
             return Ok(t);
         }
@@ -260,7 +261,7 @@ impl Ellipse {
         // intervals in degrees within [-360, 360]. Both axes stay in the placement's
         // plane.
         let (x, y) = (placement.x_axis(), placement.y_axis());
-        let (cos, sin) = (arc.start.cos(), arc.start.sin());
+        let (cos, sin) = (det::cos(arc.start), det::sin(arc.start));
         let frame = Axis2Placement::new(arc.centre, x * cos + y * sin, y * cos - x * sin);
         // A full turn to within the kernel's angular tolerance at this radius (its zone
         // tolerance over the radius: the end then lies within the zone tolerance of the
@@ -649,7 +650,11 @@ mod tests {
     fn a_point_s_bound_covers_its_rounding() {
         let a = def(0.0, 1.0);
         let (p, bound) = a.point_at_bounded(1.0, 0.0).unwrap();
-        let q = Point3::new(1.0 + 2.0 * 1.0_f64.cos(), 2.0 + 2.0 * 1.0_f64.sin(), 3.0);
+        let q = Point3::new(
+            1.0 + 2.0 * det::cos(1.0_f64),
+            2.0 + 2.0 * det::sin(1.0_f64),
+            3.0,
+        );
         assert!((p - q).length() <= bound && bound < 1e-12);
         // An angle given within 1e-6: the bound grows by r 1e-6.
         let (_, wide) = a.point_at_bounded(1.0, 1e-6).unwrap();
@@ -880,7 +885,7 @@ mod tests {
             start: 0.0,
             end: 1.0,
         };
-        let (s, c) = (PI / 3.0).sin_cos();
+        let (s, c) = det::sin_cos(PI / 3.0);
         let b = ArcDefinition {
             axis: Vec3::new(0.0, s, c),
             ..a

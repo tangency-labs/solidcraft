@@ -49,16 +49,18 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Midplane => Some("construct.plane.midplane"),
         Kind::MeshConvert { .. } => Some("mesh.convert"),
         Kind::MeshReduce { .. } => Some("mesh.reduce"),
+        Kind::MeshSectionStack { .. } => Some("mesh.section_stack"),
         Kind::Construct { command, .. } => Some(command),
         Kind::ConstructAuto { command, .. } => Some(command),
         Kind::PathPlane { .. } => Some("construct.plane.along_path"),
         Kind::Split { .. } => Some("solid.split_body"),
-        Kind::DeleteFaces => Some("face.delete"),
+        Kind::DeleteFaces { .. } => Some("face.delete"),
         Kind::Move { .. } => Some("solid.move"),
         Kind::Thread { .. } => Some("solid.thread"),
         Kind::ReplaceFace => Some("solid.replace_face"),
         Kind::BoundaryFill { .. } => Some("solid.boundary_fill"),
         Kind::Align { .. } => Some("solid.align"),
+        Kind::ScanAlign(_) => Some("scan.align"),
         Kind::Remove => Some("solid.remove"),
         Kind::PathPattern { .. } => Some("solid.pattern.path"),
         Kind::Combine { .. } => Some("solid.combine"),
@@ -115,7 +117,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_assembly::Asm::NewComponent { .. } => Some("component.create"),
             crate::dialogs_assembly::Asm::Joint(f) => Some(if f.as_built { "joint.as_built" } else { "joint.create" }),
             crate::dialogs_assembly::Asm::JointOrigin { .. } => Some("joint.origin"),
-            crate::dialogs_assembly::Asm::RigidGroup => Some("joint.rigid_group"),
+            crate::dialogs_assembly::Asm::RigidGroup { .. } => Some("joint.rigid_group"),
             crate::dialogs_assembly::Asm::MotionLink { .. } => Some("joint.motion_link"),
             crate::dialogs_assembly::Asm::Coupling(f) => Some(f.command),
             crate::dialogs_assembly::Asm::Cam(_) => Some("joint.cam"),
@@ -726,6 +728,11 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             }
             if ext == 1 {
                 enter |= expr_row(ui, "To Offset", to_offset);
+                // A profile wider than the To face ends on the face's surface carried on past it.
+                let row = ui.scope(|ui| form_row(ui, "ui.extend_to_face", |ui| extra_check(ui, &mut d.extra, "extend_to_face")));
+                row.response.backing_on_hover_text(tr("ui.extrude_extend_to_face_tip"));
+            } else {
+                d.extra.remove("extend_to_face");
             }
             if two_sided(*direction) {
                 // The second side takes the extent types of the first (#18691).
@@ -1218,7 +1225,7 @@ fn coil_rows(
 /// The primitive coil's own section: its shape, where it sits on the diameter and where it starts.
 fn coil_section_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> bool {
     const POSITIONS: [(&str, &str); 3] = [("Inside", "inside"), ("Center", "center"), ("Outside", "outside")];
-    form_row(ui, "Section", |ui| extra_segments(ui, extra, "section", &[("Circular", "circular"), ("Square", "square")]));
+    form_row(ui, "Section", |ui| extra_segments(ui, extra, "section", &[("Circular", "circular"), ("Square", "square"), ("Triangle", "triangle")]));
     form_row(ui, "Section position", |ui| {
         let current =
             extra.get("section_position").and_then(Value::as_str).and_then(|v| POSITIONS.iter().position(|(_, key)| *key == v)).unwrap_or(1);
@@ -1270,6 +1277,10 @@ fn degrees(text: &str) -> Option<f64> {
 }
 
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
+    if matches!(d.kind, Kind::ScanAlign(_)) {
+        crate::dialogs_scan_align::fields(ui, app, d);
+        return false;
+    }
     let mut enter = false;
     let through_point = offset_through_point(d).is_some();
     if crate::dialogs_move::several_destinations(d) {
@@ -1368,9 +1379,19 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 enter |= expr_row(ui, "Distance", offset);
             }
         }
-        Kind::AnglePlane { angle, direction_only } => {
+        Kind::AnglePlane { angle, direction_only, through_axis } => {
             enter |= expr_row(ui, "Angle", angle);
-            ui_kit::options(ui, "plane_angle_options", &mut [("Use axis direction only", direction_only)]);
+            let was = (*through_axis, *direction_only);
+            // One column: both labels are long and would be cut short side by side.
+            ui_kit::section(ui, "plane_angle_options", "Options", true, |ui| {
+                ui_kit::checkbox_grid(ui, &mut [("Through the axis", through_axis), ("Use axis direction only", direction_only)], 1)
+            });
+            // The two exclude each other (#6180): the one just turned on wins.
+            if *through_axis && !was.0 {
+                *direction_only = false;
+            } else if *direction_only && !was.1 {
+                *through_axis = false;
+            }
             const PIVOT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS;
             set_object_accepting(&mut d.inputs, &mut d.active, "Pivot", PIVOT, *direction_only);
         }
@@ -1416,10 +1437,19 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 form_row(ui, "Triangle count", |ui| enter |= field(ui, count));
             }
         }
+        Kind::MeshSectionStack { from, to, spacing, extrude } => {
+            form_row(ui, "Spacing", |ui| enter |= field(ui, spacing));
+            form_row(ui, "From", |ui| enter |= field(ui, from));
+            form_row(ui, "To", |ui| enter |= field(ui, to));
+            ui_kit::options(ui, "section_stack_options", &mut [("Extrude slabs", extrude)]);
+        }
         Kind::Construct { t: Some(t), .. } => {
             form_row(ui, "Position (0 to 1)", |ui| enter |= field(ui, t));
         }
         Kind::ReplaceFace | Kind::Remove | Kind::Midplane | Kind::ChatContext | Kind::PluginPick { .. } | Kind::Construct { t: None, .. } => {}
+        Kind::DeleteFaces { heal } => {
+            ui_kit::options(ui, "delete_face_options", &mut [("ui.delete_face_heal", heal)]);
+        }
         Kind::Rib { thickness, depth, flip, normal, extend, .. } => {
             form_row(ui, "Direction", |ui| {
                 let mut i = usize::from(*normal);
@@ -1571,7 +1601,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Thread { designation, length, suggested, of, options, .. } => {
             let mut modeled = d.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false);
             let before = modeled;
-            let (submitted, reset) = crate::dialogs_thread::rows(ui, designation, suggested, length, options, &mut modeled);
+            let (submitted, reset) = crate::dialogs_thread::rows(ui, &app.session.doc, designation, suggested, length, options, &mut modeled);
             if modeled != before {
                 d.extra.insert("modeled".into(), json!(modeled));
             }
@@ -1579,7 +1609,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             if reset {
                 of.clear();
             }
-            crate::dialogs_thread::sync_inputs(&mut d.inputs, &mut d.active, options);
+            crate::dialogs_thread::sync_inputs(&mut d.inputs, &mut d.active, options, &app.session.doc);
         }
         Kind::Loft { operation, rail_fit } => {
             crate::op_auto::op_row(ui, "lf_op", operation);
@@ -1624,7 +1654,8 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             }
         }
         Kind::Primitive { cmd, fields, operation, at, .. } => {
-            let from_sketch = *cmd == "solid.coil" && d.inputs.first().is_some_and(|i| i.accept & selection::PROFILES != 0 && !i.items.is_empty());
+            let from_sketch =
+                *cmd == "solid.coil" && d.inputs.first().is_some_and(|i| i.items.iter().any(|item| matches!(item, Sel::Profile { .. })));
             if matches!(*cmd, "solid.cylinder" | "solid.sphere") {
                 round_size_row(ui, fields);
             }
@@ -1650,7 +1681,11 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             }
             if *cmd == "solid.coil" {
                 let picked_axis = d.inputs.get(1).is_some_and(|input| !input.items.is_empty());
-                enter |= coil_rows(ui, &mut d.extra, at.and_then(|(_, normal)| normal), picked_axis, unresolved_axis, from_sketch);
+                let placed_axis = d.inputs.first().and_then(|input| input.items.first()).and_then(|sel| match sel {
+                    Sel::Plane { name } => crate::dialogs::plane_by_name(&app.session, name).map(|plane| plane.normal()),
+                    _ => None,
+                });
+                enter |= coil_rows(ui, &mut d.extra, placed_axis.or(at.and_then(|(_, normal)| normal)), picked_axis, unresolved_axis, from_sketch);
             }
             if at.is_none() {
                 enter |= crate::primitive_placement::rows(ui, &app.session, cmd, &mut d.extra);
@@ -1738,7 +1773,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::FramePlate(k) => enter |= crate::dialogs_frame_plate::rows(app, ui, k),
         Kind::CapturePosition(k) => enter |= crate::dialogs_capture::rows(app, ui, k),
         Kind::Assembly(k) => enter |= crate::dialogs_assembly::rows(app, ui, k, &mut d.inputs, &mut d.active),
-        Kind::Measure { result, show, dual_units, .. } => measure_rows(app, ui, result.as_ref(), show, dual_units),
+        Kind::Measure { result, show, dual_units, spacing, .. } => measure_rows(app, ui, result.as_ref(), show, dual_units, spacing),
         Kind::Section { offset, flip, hatch, add, edit } => {
             enter |= expr_row(ui, "Distance", offset);
             ui_kit::options(ui, "feature_options", &mut [("Flip", flip), ("Hatch", hatch)]);
@@ -1847,101 +1882,188 @@ fn saved_section_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
     ui.data_mut(|data| data.insert_temp(id, draft));
 }
 
+/// The spacing of three or more round items in the Measure panel (#10170): what their centres
+/// lie on, each neighbouring pair's gap in order (the items numbered as the panel lists them),
+/// the span or the pitch circle, and whether the gaps are even.
+fn measure_spacing_rows(app: &SolveApp, ui: &mut egui::Ui, sp: &Value, dual: bool) {
+    let format = solidcraft_ui_text::format;
+    let mm = |x: f64| crate::prefs::show_measure(app, x, 1, dual);
+    let line = |ui: &mut egui::Ui, id: &str, text: String| ui_kit::text(ui, &text, ui_kit::Text::Report(&format!("measure_spacing_{id}"), false));
+    let order: Vec<usize> = sp["order"].as_array().into_iter().flatten().filter_map(|v| v.as_u64()).map(|i| i as usize).collect();
+    let circle = sp["pattern"].as_str() == Some("circle");
+    let pattern = match sp["pattern"].as_str() {
+        Some("line") => "measure.spacing_row",
+        Some("circle") => "measure.spacing_circle",
+        _ => "measure.spacing_none",
+    };
+    line(ui, "pattern", format(pattern, &[("count", &order.len().to_string())]));
+    let odd = |g: usize| sp["odd_gaps"].as_array().is_some_and(|o| o.iter().any(|v| v.as_u64() == Some(g as u64)));
+    for (g, gap) in sp["gaps"].as_array().into_iter().flatten().filter_map(Value::as_f64).enumerate() {
+        // The panel numbers the items from 1, in the order they were picked.
+        let number = |k: usize| order.get(k % order.len().max(1)).map(|i| (i + 1).to_string()).unwrap_or_default();
+        let id = if odd(g) { "measure.spacing_gap_odd" } else { "measure.spacing_gap" };
+        let mut text = format!("{}  {}", format(id, &[("from", &number(g)), ("to", &number(g + 1))]), mm(gap));
+        if let Some(a) = sp["angle_deg"].get(g).and_then(Value::as_f64) {
+            text.push_str(&format!("  {a:.3}°"));
+        }
+        line(ui, &format!("gap_{g}"), text);
+    }
+    if let (true, Some(d)) = (circle, sp["pcd"].as_f64()) {
+        line(ui, "pcd", format!("{}  {}", tr("measure.spacing_pcd"), mm(d)));
+    } else if let Some(span) = sp["span"].as_f64() {
+        line(ui, "span", format!("{}  {}", tr("measure.spacing_span"), mm(span)));
+    }
+    let pitch = sp["pitch"].as_f64();
+    match (sp["even"].as_bool() == Some(true), pitch) {
+        (true, Some(p)) => line(ui, "even", format!("{}  {}", tr("measure.spacing_even"), mm(p))),
+        (_, Some(p)) => line(ui, "even", format!("{}  {}", tr("measure.spacing_uneven_most"), mm(p))),
+        _ => line(ui, "even", tr("measure.spacing_uneven").to_string()),
+    };
+    if let Some(a) = sp["angle_pitch_deg"].as_f64() {
+        line(ui, "angle", format!("{}  {a:.3}°", tr("measure.spacing_angle")));
+    }
+}
+
 /// The measurement in the dialog: each item's size, then the distance (a pair of round items
-/// offers centre to centre, closest and farthest), its ΔX/Y/Z and the angle between two items.
-fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut Option<Shown>, dual: &mut bool) {
+/// offers centre to centre, closest and farthest), its ΔX/Y/Z and the angle between two items;
+/// for three or more round items, their spacing ([`measure_spacing_rows`]).
+fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut Option<Shown>, dual: &mut bool, spacing: &mut bool) {
     let toggle = ui_kit::checkbox(ui, tr("measure.dual_units"), dual);
     crate::scenario::publish_handle("measure:dual_units", toggle.rect.center());
+    let toggle = ui_kit::checkbox(ui, tr("measure.spacing_option"), spacing);
+    crate::scenario::publish_handle("measure:spacing", toggle.rect.center());
     let Some(r) = r else {
-        ui_kit::text(ui, tr("pick one or two vertices, edges or faces"), ui_kit::Text::Hint("measure"));
+        let hint = if *spacing { tr("measure.spacing_hint") } else { tr("pick one or two vertices, edges or faces") };
+        ui_kit::text(ui, hint, ui_kit::Text::Hint("measure"));
         return;
     };
     if let Some(e) = r.get("error").and_then(Value::as_str) {
         ui_kit::text(ui, e, ui_kit::Text::Report("measure_error", true));
         return;
     }
-    let mm = |v: &Value| v.as_f64().map(|x| crate::prefs::show_measure(app, x, 1, *dual)).unwrap_or_default();
-    let value = |ui: &mut egui::Ui, label: &str, text: &str| {
-        if *dual {
-            ui_kit::text(ui, &format!("{label}  {text}"), ui_kit::Text::Report(&format!("measure_value_{label}"), false));
-        } else {
-            form_row(ui, label, |ui| {
-                ui_kit::text(ui, text, ui_kit::Text::Cell);
-            });
+    if let Some(sp) = r.get("spacing").filter(|sp| sp.is_object()) {
+        // Each item's diameter only: a row's own figures follow.
+        for (i, it) in r["items"].as_array().into_iter().flatten().enumerate() {
+            let label = solidcraft_ui_text::format("measure.item", &[("number", &(i + 1).to_string())]);
+            let size = crate::quick_measure::item_lines_with_units(app, it, *dual).into_iter().next().unwrap_or_default();
+            ui_kit::text(ui, &format!("{label}  {size}"), ui_kit::Text::Report(&format!("measure_item_{i}_0"), false));
         }
-    };
-    for (i, it) in r["items"].as_array().into_iter().flatten().enumerate() {
-        let lines = crate::quick_measure::item_lines_with_units(app, it, *dual);
-        for (k, line) in lines.into_iter().enumerate() {
-            let label = if k == 0 { solidcraft_ui_text::format("measure.item", &[("number", &(i + 1).to_string())]) } else { String::new() };
-            // Coordinates need all three values; a fixed-height form cell elides the end.
-            let text = if label.is_empty() { line } else { format!("{label}  {line}") };
+        measure_spacing_rows(app, ui, sp, *dual);
+        return;
+    }
+    let mm = |value: &Value| value.as_f64().map(|value| crate::prefs::show_measure(app, value, 1, *dual)).unwrap_or_default();
+    let mut rows = Vec::new();
+    for (i, item) in r["items"].as_array().into_iter().flatten().enumerate() {
+        for (k, line) in crate::quick_measure::item_lines_with_units(app, item, *dual).into_iter().enumerate() {
+            // Item descriptions include coordinate triples: keep the complete line wrapping
+            // above the comparable results, without widening their value/action columns.
+            let text = if k == 0 {
+                let item = solidcraft_ui_text::format("measure.item", &[("number", &(i + 1).to_string())]);
+                format!("{item}  {line}")
+            } else {
+                line
+            };
             ui_kit::text(ui, &text, ui_kit::Text::Report(&format!("measure_item_{i}_{k}"), false));
         }
     }
-    if let Some((now, d, a, b)) = shown_distance(r, *show) {
+    let distance = shown_distance(r, *show);
+    let current = distance.as_ref().map(|(now, ..)| *now);
+    if let Some((_, distance, a, b)) = distance {
         if r.get("center_distance").is_some() {
-            // Centre, min and max all listed; the chosen one is drawn and broken into ΔX/Y/Z.
-            let centre_label = crate::quick_measure::centre_distance_label(r);
-            for (which, label, key) in
-                [(Shown::Centre, centre_label, "center_distance"), (Shown::Min, tr("Min"), "distance_mm"), (Shown::Max, tr("Max"), "max")]
-            {
-                let Some(v) = r.get(key).filter(|v| v.is_number()) else { continue };
-                let text = if *dual { label.to_string() } else { format!("{}  {}", label, mm(v)) };
-                if ui_kit::list_picker(ui, key, &text, now == which).clicked() {
-                    *show = Some(which);
-                }
-                if *dual {
-                    ui_kit::text(ui, &mm(v), ui_kit::Text::Report(&format!("measure_distance_{key}"), false));
+            for (which, label, key) in [
+                (Shown::Centre, crate::quick_measure::centre_distance_label(r), "center_distance"),
+                (Shown::Min, tr("Min"), "distance_mm"),
+                (Shown::Max, tr("Max"), "max"),
+            ] {
+                if let Some(value) = r.get(key).filter(|value| value.is_number()) {
+                    rows.push((key.to_owned(), label.to_owned(), mm(value), Some(which), false));
                 }
             }
         } else {
-            let text = crate::prefs::show_measure(app, d, 1, *dual);
-            if *dual {
+            rows.push((
+                "distance".to_owned(),
+                solidcraft_ui_text::tr_label("Distance").to_owned(),
+                crate::prefs::show_measure(app, distance, 1, *dual),
+                None,
+                true,
+            ));
+        }
+        let delta = b - a;
+        for (label, value) in [("ΔX", delta.x), ("ΔY", delta.y), ("ΔZ", delta.z)] {
+            rows.push((label.to_owned(), label.to_owned(), crate::prefs::show_measure(app, value.abs(), 1, *dual), None, false));
+        }
+    }
+    if let Some(angle) = r["angle_deg"].as_f64().filter(|_| r["items"].as_array().is_some_and(|items| items.len() == 2)) {
+        rows.push(("angle".to_owned(), solidcraft_ui_text::tr_label("Angle").to_owned(), format!("{angle:.3}°"), None, false));
+    }
+    if rows.is_empty() {
+        return;
+    }
+    // Dual-unit values are a wrapping report, not fixed-height cells: main keeps both units
+    // and every coordinate visible even at high precision in a narrow tool panel.
+    if *dual {
+        for (key, name, value, choice, copy) in &rows {
+            if let Some(choice) = choice {
+                if ui_kit::list_picker(ui, key, name, Some(*choice) == current).clicked() {
+                    *show = Some(*choice);
+                }
+                ui_kit::text(ui, value, ui_kit::Text::Report(&format!("measure_distance_{key}"), false));
+            } else if *copy {
                 ui.horizontal_top(|ui| {
                     let size = solidcraft_theme::Tokens::get().form_close_size;
                     let width = (ui.available_width() - size - ui.spacing().item_spacing.x).max(0.0);
                     ui.allocate_ui_with_layout(egui::vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-                        ui_kit::text(
-                            ui,
-                            &format!("{}  {text}", solidcraft_ui_text::tr_label("Distance")),
-                            ui_kit::Text::Report("measure_distance", false),
-                        );
+                        let text = ui_kit::text(ui, &format!("{name}  {value}"), ui_kit::Text::Report("measure_distance", false));
+                        crate::scenario::publish_rect(&format!("dialog:report:{key}"), text.rect);
                     });
                     let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
                     let copy = ui_kit::icon_button_at(ui, rect, "copy", solidcraft_ui_text::tr_label("Copy"));
-                    crate::scenario::publish_handle("measure:copy:distance", copy.rect.center());
+                    crate::scenario::publish_target("measure:copy:distance", copy.rect);
                     if copy.clicked() {
-                        ui.ctx().copy_text(text.clone());
+                        ui.ctx().copy_text(value.clone());
                     }
                 });
             } else {
-                form_row(ui, solidcraft_ui_text::tr_label("Distance"), |ui| {
-                    let size = solidcraft_theme::Tokens::get().form_close_size;
-                    // The value keeps the room left of the button, so the button stays inside the row.
-                    ui.scope(|ui| {
-                        ui.set_max_width((ui.available_width() - size).max(0.0));
-                        ui_kit::text(ui, &text, ui_kit::Text::Cell);
-                    });
-                    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
-                    let copy = ui_kit::icon_button_at(ui, rect, "copy", solidcraft_ui_text::tr_label("Copy"));
-                    crate::scenario::publish_handle("measure:copy:distance", copy.rect.center());
-                    if copy.clicked() {
-                        ui.ctx().copy_text(text.clone());
-                    }
-                });
+                let legacy = format!("measure_value_{name}");
+                let text = ui_kit::text(ui, &format!("{name}  {value}"), ui_kit::Text::Report(&legacy, false));
+                crate::scenario::publish_rect(&format!("dialog:report:{key}"), text.rect);
             }
         }
-        let delta = b - a;
-        for (l, v) in [("ΔX", delta.x), ("ΔY", delta.y), ("ΔZ", delta.z)] {
-            value(ui, l, &crate::prefs::show_measure(app, v.abs(), 1, *dual));
+        return;
+    }
+    let width = rows.iter().map(|(_, _, value, _, _)| ui_kit::ContentWidth::label(ui, value)).fold(ui_kit::row_height(), f32::max);
+    let columns = [
+        ui_kit::Column::new(solidcraft_ui_text::tr_label("Name"), 1.0).flex(),
+        ui_kit::Column::new(solidcraft_ui_text::tr_label("Value"), 2.0).flex().min_content_width(width),
+        ui_kit::Column::new("", 0.0).icon_only(),
+    ];
+    ui_kit::report_list(ui, "measure_results", ui_kit::table_row_height() * 10.0, &columns, "", |ui, table| {
+        for (key, name, value, choice, copy) in &rows {
+            let mut clicked = false;
+            let response = table.row(ui, key, choice.is_some() && *choice == current, |row| {
+                clicked |= row.cell(|ui| ui_kit::text(ui, name, ui_kit::Text::Cell)).clicked();
+                let cell = row.cell(|ui| ui_kit::text(ui, value, ui_kit::Text::Cell));
+                clicked |= cell.clicked();
+                crate::scenario::publish_rect(&format!("dialog:report:{key}"), cell.rect);
+                row.cell(|ui| {
+                    if *copy {
+                        let button = ui_kit::StageBar::icon_action(ui, "copy", solidcraft_ui_text::tr_label("Copy"));
+                        crate::scenario::publish_target("measure:copy:distance", button.rect);
+                        if button.clicked() {
+                            ui.ctx().copy_text(value.clone());
+                        }
+                    }
+                });
+            });
+            crate::scenario::publish_target(&format!("dialog:row:{name}"), response.rect);
+            if let Some(choice) = choice {
+                crate::scenario::publish_target(&format!("dialog:list:{key}"), response.rect);
+                if clicked || response.clicked() {
+                    *show = Some(*choice);
+                }
+            }
         }
-    }
-    if let Some(a) = r["angle_deg"].as_f64()
-        && r["items"].as_array().is_some_and(|v| v.len() == 2)
-    {
-        value(ui, solidcraft_ui_text::tr_label("Angle"), &format!("{a:.3}°"));
-    }
+    });
 }
 
 /// The origin planes the view sees edge-on, as lines with nothing to click (#17606): in a top
@@ -1980,7 +2102,7 @@ mod tests {
                             time: Some(frame as f64 / 60.0),
                             ..Default::default()
                         },
-                        |ui| measure_rows(&h.app, ui, Some(&r), &mut None, &mut true),
+                        |ui| measure_rows(&h.app, ui, Some(&r), &mut None, &mut true, &mut false),
                     );
                     if frame != 2 {
                         continue;
@@ -2008,6 +2130,66 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn measure_table_keeps_distance_selection_and_copy() {
+        let h = Harness::new();
+        let _language = solidcraft_ui_text::scope("en");
+        let undo = h.app.session.undo.len();
+        for dual in [false, true] {
+            let mut shown = None;
+            let result = json!({"items":[{"type":"point","position":[1234,5678,9012]}],
+            "distance_mm":4,"from":[0,0,0],"to":[4,0,0],
+            "center_distance":10,"center_from":[0,0,0],"center_to":[10,0,0],
+            "max":16,"max_from":[0,0,0],"max_to":[16,0,0]});
+            let draw = |shown: &mut Option<Shown>, result: &Value, events| {
+                let mut dual = dual;
+                solidcraft_ui_registry::clear_handles();
+                solidcraft_ui_kit::test_support::raw_frame(
+                    &h.ctx,
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 720.0))),
+                        events,
+                        focused: true,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        ui.set_width(520.0);
+                        ui_kit::scope(ui, |ui| measure_rows(&h.app, ui, Some(result), shown, &mut dual, &mut false));
+                    },
+                )
+            };
+            for _ in 0..3 {
+                draw(&mut shown, &result, vec![]);
+            }
+            assert_eq!(scenario::rect_of("dialog:column:measure_results:Value").is_some(), !dual);
+            assert!(scenario::rect_of("dialog:report:measure_item_0_0").is_some());
+            if dual {
+                for label in ["ΔX", "ΔY", "ΔZ"] {
+                    assert!(scenario::rect_of(&format!("dialog:report:measure_value_{label}")).is_some());
+                }
+            }
+            let pos = scenario::handle_at("dialog:list:max").unwrap();
+            for pressed in [true, false] {
+                draw(&mut shown, &result, solidcraft_ui_kit::test_support::pointer(pos, pressed));
+            }
+            assert!(shown == Some(Shown::Max));
+            let plain = json!({"items":[], "distance_mm":4,"from":[0,0,0],"to":[4,0,0]});
+            shown = None;
+            for _ in 0..3 {
+                draw(&mut shown, &plain, vec![]);
+            }
+            let pos = scenario::handle_at("measure:copy:distance").unwrap();
+            draw(&mut shown, &plain, solidcraft_ui_kit::test_support::pointer(pos, true));
+            let output = draw(&mut shown, &plain, solidcraft_ui_kit::test_support::pointer(pos, false));
+            assert!(
+                output.platform_output.commands.iter().any(
+                    |command| matches!(command, egui::OutputCommand::CopyText(text) if text == &crate::prefs::show_measure(&h.app, 4.0, 1, dual))
+                )
+            );
+        }
+        assert_eq!(h.app.session.undo.len(), undo, "report interactions do not edit the design");
     }
 
     /// #17606: Create Sketch says how to pick a plane the view shows edge-on, and only then.

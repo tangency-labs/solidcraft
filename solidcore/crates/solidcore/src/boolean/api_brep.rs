@@ -706,6 +706,538 @@ pub fn boolean_union(k: &mut Kernel, brep1: Brep, brep2: Brep) -> Result<Brep> {
     merge_boolean(k, brep1, brep2, BooleanOperation::Union, None).map(|o| o.result)
 }
 
+/// Combines non-empty mutually disjoint closed manifold solids sharing the same B-rep tolerance
+/// into one B-rep in linear time via `SmBrep::MergeBrep`, preserving every operand's attributes
+/// and running [`crate::boolean::apart`]'s merge tail and post-boolean tolerance update once on
+/// the combined result.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an empty list; otherwise those of tolerance matching,
+/// [`crate::topology::brep::p3::merge_brep`], or the union tail.
+pub fn combine_disjoint_breps(k: &mut Kernel, breps: Vec<Brep>) -> Result<Brep> {
+    use crate::topology::brep::p2::{
+        brep_ref, copy_source_ref, seed_brep_attributes, ArenaNotifyState,
+    };
+    use crate::topology::brep::p3::{merge_brep, reseed_records, KeyScheme};
+    use crate::topology::loopuse::{entity_of_notify_key, notify_ref};
+    use crate::topology::topology::NotifyRecords;
+
+    let mut it = breps.into_iter();
+    let Some(mut target) = it.next() else {
+        return Err(SolidError::invalid_input(
+            "boolean::api_brep::combine_disjoint_breps",
+            "combine_disjoint_breps requires at least one B-rep",
+        ));
+    };
+    if it.as_slice().is_empty() {
+        return Ok(target);
+    }
+    let mut state = ArenaNotifyState {
+        records: NotifyRecords::new(),
+        attributes: target.take_attributes(),
+    };
+    for mut source in it {
+        k.check_cancelled("boolean::api_brep::combine_disjoint_breps")?;
+        crate::boolean::operand_tolerances::matched_tolerances(k, &mut target, &mut source)?;
+        if !state.records.is_empty() {
+            let scheme = KeyScheme {
+                key_of: &notify_ref,
+                entity_of: &entity_of_notify_key,
+                brep_key: brep_ref(&target).key,
+                serial: k.context.issued_brep_serial(target.notify_identity()),
+            };
+            reseed_records(&mut state.records, &mut target, &scheme);
+        }
+        let src_store = source.take_attributes();
+        let src_keys: Vec<crate::geom::attribute::ObjectKey> = src_store
+            .attributed_objects()
+            .into_iter()
+            .filter_map(entity_of_notify_key)
+            .map(|e| copy_source_ref(e).key)
+            .collect();
+        if let Err(err) = seed_brep_attributes(&mut state.attributes, src_store, &copy_source_ref) {
+            let _ = state.restore_attributes(&mut target);
+            return Err(err);
+        }
+        let merged = merge_brep(
+            k,
+            &mut state.env(None),
+            &mut target,
+            &source,
+            &copy_source_ref,
+            None,
+            None,
+            false,
+        );
+        for key in src_keys {
+            let handles = state.attributes.attributes(key);
+            for h in handles {
+                let _ = state.attributes.remove_attribute(key, h, false);
+            }
+        }
+        if let Err(err) = merged {
+            let _ = state.restore_attributes(&mut target);
+            return Err(err);
+        }
+        k.work_counters.add_apart_union();
+    }
+    state.restore_attributes(&mut target)?;
+    crate::boolean::apart::finish_side_by_side_tail(k, &mut target)?;
+    let _ = crate::topology::brep::validation::update_tolerances_after_boolean(k, &mut target)?;
+    Ok(target)
+}
+
+/// Unites `breps` into a single B-rep using certified AABB connected-component decomposition
+/// ([`crate::boolean::apart`]), linear-time disjoint merges ([`combine_disjoint_breps`]),
+/// hub-and-spoke spoke batching, and 3D Morton spatial ordering for overlapping pairs.
+///
+/// Each pairwise or batched result gets
+/// [`crate::topology::brep::validation::update_tolerances_after_boolean`] before participating in
+/// the next level.
+///
+/// # Errors
+///
+/// Those of certified bounding-box queries, tolerance matching, disjoint merges, or pairwise
+/// unions.
+pub fn union_all_breps(k: &mut Kernel, breps: Vec<Brep>) -> Result<Option<Brep>> {
+    union_all_breps_with(k, breps, |kernel, pairs| {
+        let mut out = Vec::new();
+        for (a, b) in pairs {
+            out.push(union_two_breps_serial(kernel, a, b)?);
+        }
+        Ok(out)
+    })
+}
+
+/// Like [`union_all_breps`], but delegates each level's overlapping pairwise unions to
+/// `run_pairs` (e.g. `solidcore-ops` runs independent pairs on worker threads while `solidcore`
+/// itself stays serial).
+///
+/// Each pair `(a, b)` returned by `run_pairs` must already have had tolerance matching and
+/// [`crate::topology::brep::validation::update_tolerances_after_boolean`] applied, and the
+/// output vector must match the length and order of `pairs`.
+///
+/// # Errors
+///
+/// Those of certified bounding-box queries, disjoint merges, or `run_pairs`.
+pub fn union_all_breps_with<F>(
+    k: &mut Kernel,
+    breps: Vec<Brep>,
+    mut run_pairs: F,
+) -> Result<Option<Brep>>
+where
+    F: FnMut(&mut Kernel, Vec<(Brep, Brep)>) -> Result<Vec<Brep>>,
+{
+    if breps.len() <= 1 {
+        return Ok(breps.into_iter().next());
+    }
+    let mut items = Vec::new();
+    for (index, mut brep) in breps.into_iter().enumerate() {
+        let bbox = crate::boolean::apart::certified_union_box(k, &mut brep)?;
+        items.push(UnionItem { index, brep, bbox });
+    }
+    let Some(merged) = reduce_union_items(k, items, &mut run_pairs)? else {
+        return Ok(None);
+    };
+    Ok(Some(merged.brep))
+}
+
+struct UnionItem {
+    index: usize,
+    brep: Brep,
+    bbox: Option<crate::geom::extent3d::Extent3d>,
+}
+
+fn union_two_breps_serial(k: &mut Kernel, mut a: Brep, mut b: Brep) -> Result<Brep> {
+    use crate::boolean::apart::{union_if_apart, Apart};
+    crate::boolean::operand_tolerances::matched_tolerances(k, &mut a, &mut b)?;
+    let mut brep = match union_if_apart(k, a, b)? {
+        Apart::United(r) => *r,
+        Apart::NotProved(ba, bb) => boolean(k, *ba, *bb, BooleanOperation::Union)?.result,
+    };
+    let _ = crate::topology::brep::validation::update_tolerances_after_boolean(k, &mut brep)?;
+    Ok(brep)
+}
+
+fn boxes_disjoint_same_tol(a: &UnionItem, b: &UnionItem) -> bool {
+    a.brep.tolerance().partial_cmp(&b.brep.tolerance()) == Some(core::cmp::Ordering::Equal)
+        && matches!((a.bbox, b.bbox), (Some(ba), Some(bb)) if ba.are_disjoint(&bb, 0.0))
+}
+
+fn dsu_find(parent: &mut [usize], mut x: usize) -> usize {
+    while let Some(&p) = parent.get(x) {
+        if p == x {
+            break;
+        }
+        if let Some(&gp) = parent.get(p) {
+            if let Some(slot) = parent.get_mut(x) {
+                *slot = gp;
+            }
+        }
+        x = p;
+    }
+    x
+}
+
+fn dsu_union(parent: &mut [usize], u: usize, v: usize) {
+    let ru = dsu_find(parent, u);
+    let rv = dsu_find(parent, v);
+    if ru != rv {
+        let (lo, hi) = (ru.min(rv), ru.max(rv));
+        if let Some(slot) = parent.get_mut(hi) {
+            *slot = lo;
+        }
+    }
+}
+
+/// Partition `items` into connected components under AABB overlap without materializing an edge
+/// list. Items with unknown (`None`) bounding boxes are conservatively connected to all other
+/// items in O(n) unions.
+fn partition_overlap_components(items: Vec<UnionItem>) -> Vec<Vec<UnionItem>> {
+    let n = items.len();
+    if n <= 1 {
+        return if n == 0 { Vec::new() } else { vec![items] };
+    }
+    if items.iter().any(|it| it.bbox.is_none()) {
+        // Any unboxed item conservatively overlaps every other item, collapsing all items into
+        // one component without scanning boxed pairs.
+        return vec![items];
+    }
+    let mut boxed: Vec<(usize, crate::geom::extent3d::Extent3d)> = Vec::new();
+    for (i, item) in items.iter().enumerate() {
+        if let Some(b) = item.bbox {
+            boxed.push((i, b));
+        }
+    }
+    boxed.sort_by(|(_, a), (_, b)| a.min().x.total_cmp(&b.min().x));
+    let mut parent: Vec<usize> = (0..n).collect();
+    for (pos, &(i, ba)) in boxed.iter().enumerate() {
+        for &(j, bb) in boxed.iter().skip(pos + 1) {
+            if bb.min().x > ba.max().x {
+                break;
+            }
+            if dsu_find(&mut parent, i) != dsu_find(&mut parent, j) && !ba.are_disjoint(&bb, 0.0) {
+                dsu_union(&mut parent, i, j);
+            }
+        }
+    }
+    let mut groups: std::collections::BTreeMap<usize, Vec<UnionItem>> =
+        std::collections::BTreeMap::new();
+    for (i, item) in items.into_iter().enumerate() {
+        let root = dsu_find(&mut parent, i);
+        groups.entry(root).or_default().push(item);
+    }
+    let mut components: Vec<Vec<UnionItem>> = groups.into_values().collect();
+    components.sort_by_key(|c| c.iter().map(|it| it.index).min().unwrap_or(usize::MAX));
+    components
+}
+
+/// Compute each item's AABB-overlap degree saturated at `cap`, using a streaming x-sweep without
+/// retaining an edge list.
+fn saturated_overlap_degrees(items: &[UnionItem], cap: usize) -> Vec<usize> {
+    let n = items.len();
+    let mut boxed: Vec<(usize, crate::geom::extent3d::Extent3d)> = Vec::new();
+    let mut unboxed_count = 0_usize;
+    for (i, item) in items.iter().enumerate() {
+        match item.bbox {
+            Some(b) => boxed.push((i, b)),
+            None => unboxed_count += 1,
+        }
+    }
+    let mut degree = vec![unboxed_count.min(cap); n];
+    if unboxed_count > 0 {
+        let unboxed_deg = n.saturating_sub(1).min(cap);
+        for (i, item) in items.iter().enumerate() {
+            if item.bbox.is_none() {
+                if let Some(slot) = degree.get_mut(i) {
+                    *slot = unboxed_deg;
+                }
+            }
+        }
+    }
+    boxed.sort_by(|(_, a), (_, b)| a.min().x.total_cmp(&b.min().x));
+    for (pos, &(i, ba)) in boxed.iter().enumerate() {
+        for &(j, bb) in boxed.iter().skip(pos + 1) {
+            if bb.min().x > ba.max().x {
+                break;
+            }
+            let di = degree.get(i).copied().unwrap_or(cap);
+            let dj = degree.get(j).copied().unwrap_or(cap);
+            if di >= cap && dj >= cap {
+                continue;
+            }
+            if !ba.are_disjoint(&bb, 0.0) {
+                if let Some(slot) = degree.get_mut(i) {
+                    *slot = slot.saturating_add(1).min(cap);
+                }
+                if let Some(slot) = degree.get_mut(j) {
+                    *slot = slot.saturating_add(1).min(cap);
+                }
+            }
+        }
+    }
+    degree
+}
+
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::manual_clamp
+)]
+fn morton_key(p: crate::math::Point3, overall: crate::geom::extent3d::Extent3d) -> u64 {
+    fn spread(v: u64) -> u64 {
+        let mut x = v & 0x1f_ffff;
+        x = (x | (x << 32)) & 0x001f_0000_0000_ffff;
+        x = (x | (x << 16)) & 0x001f_0000_ff00_00ff;
+        x = (x | (x << 8)) & 0x100f_00f0_0f00_f00f;
+        x = (x | (x << 4)) & 0x10c3_0c30_c30c_30c3;
+        x = (x | (x << 2)) & 0x1249_2492_4924_9249;
+        x
+    }
+    const SCALE: f64 = ((1_u32 << 21) - 1) as f64;
+    let quant = |val: f64, lo: f64, hi: f64| -> u64 {
+        let span = hi - lo;
+        if !(span > 0.0 && span.is_finite()) {
+            return 0;
+        }
+        let norm = ((val - lo) / span).max(0.0).min(1.0);
+        if norm.is_nan() {
+            return 0;
+        }
+        (norm * SCALE) as u64
+    };
+    let min = overall.min();
+    let max = overall.max();
+    let qx = quant(p.x, min.x, max.x);
+    let qy = quant(p.y, min.y, max.y);
+    let qz = quant(p.z, min.z, max.z);
+    spread(qx) | (spread(qy) << 1) | (spread(qz) << 2)
+}
+
+fn sort_morton(items: &mut [UnionItem]) {
+    let mut overall = crate::geom::extent3d::Extent3d::new();
+    for it in &*items {
+        if let Some(b) = it.bbox {
+            overall = overall.union(&b);
+        }
+    }
+    if overall.has_negative_volume() {
+        items.sort_by_key(|it| it.index);
+        return;
+    }
+    items.sort_by_key(|it| match it.bbox {
+        Some(b) => (0_u8, morton_key(b.mid(), overall), it.index),
+        None => (1_u8, 0_u64, it.index),
+    });
+}
+
+fn union_two_items<F>(
+    k: &mut Kernel,
+    a: UnionItem,
+    b: UnionItem,
+    run_pairs: &mut F,
+) -> Result<UnionItem>
+where
+    F: FnMut(&mut Kernel, Vec<(Brep, Brep)>) -> Result<Vec<Brep>>,
+{
+    let index = a.index.min(b.index);
+    if boxes_disjoint_same_tol(&a, &b) {
+        let mut brep = combine_disjoint_breps(k, vec![a.brep, b.brep])?;
+        let bbox = crate::boolean::apart::certified_union_box(k, &mut brep)?;
+        return Ok(UnionItem { index, brep, bbox });
+    }
+    let mut results = run_pairs(k, vec![(a.brep, b.brep)])?;
+    let mut brep = results.pop().ok_or_else(|| {
+        SolidError::invalid_input(
+            "boolean::api_brep::union_two_items",
+            "missing pairwise union result",
+        )
+    })?;
+    let bbox = crate::boolean::apart::certified_union_box(k, &mut brep)?;
+    Ok(UnionItem { index, brep, bbox })
+}
+
+fn reduce_union_items<F>(
+    k: &mut Kernel,
+    items: Vec<UnionItem>,
+    run_pairs: &mut F,
+) -> Result<Option<UnionItem>>
+where
+    F: FnMut(&mut Kernel, Vec<(Brep, Brep)>) -> Result<Vec<Brep>>,
+{
+    if items.len() <= 1 {
+        return Ok(items.into_iter().next());
+    }
+    let components = partition_overlap_components(items);
+    if components.len() == 1 {
+        let Some(comp) = components.into_iter().next() else {
+            return Ok(None);
+        };
+        return Ok(Some(reduce_union_component(k, comp, 0, run_pairs)?));
+    }
+    let mut disjoint: Vec<UnionItem> = Vec::new();
+    for comp in components {
+        disjoint.push(reduce_union_component(k, comp, 0, run_pairs)?);
+    }
+    combine_disjoint_union_items(k, disjoint, run_pairs).map(Some)
+}
+
+fn combine_disjoint_union_items<F>(
+    k: &mut Kernel,
+    items: Vec<UnionItem>,
+    run_pairs: &mut F,
+) -> Result<UnionItem>
+where
+    F: FnMut(&mut Kernel, Vec<(Brep, Brep)>) -> Result<Vec<Brep>>,
+{
+    let mut by_tol: std::collections::BTreeMap<u64, Vec<UnionItem>> =
+        std::collections::BTreeMap::new();
+    let mut fallback = Vec::new();
+    for item in items {
+        let tol = item.brep.tolerance();
+        if item.bbox.is_some() && tol.is_finite() && tol > 0.0 {
+            by_tol.entry(tol.to_bits()).or_default().push(item);
+        } else {
+            fallback.push(item);
+        }
+    }
+    let mut merged_groups: Vec<UnionItem> = Vec::new();
+    for group in by_tol.into_values() {
+        if group.len() >= 2 {
+            let index = group.iter().map(|x| x.index).min().unwrap_or(0);
+            let breps: Vec<Brep> = group.into_iter().map(|item| item.brep).collect();
+            let mut brep = combine_disjoint_breps(k, breps)?;
+            let bbox = crate::boolean::apart::certified_union_box(k, &mut brep)?;
+            merged_groups.push(UnionItem { index, brep, bbox });
+        } else if let Some(single) = group.into_iter().next() {
+            merged_groups.push(single);
+        }
+    }
+    merged_groups.sort_by_key(|x| x.index);
+    let mut acc: Option<UnionItem> = None;
+    for item in merged_groups.into_iter().chain(fallback) {
+        acc = Some(match acc {
+            Some(prev) => union_two_items(k, prev, item, run_pairs)?,
+            None => item,
+        });
+    }
+    acc.ok_or_else(|| {
+        SolidError::invalid_input(
+            "boolean::api_brep::combine_disjoint_union_items",
+            "empty component list",
+        )
+    })
+}
+
+const MAX_HUB_SPLIT_DEPTH: usize = 16;
+
+fn reduce_union_component<F>(
+    k: &mut Kernel,
+    mut comp: Vec<UnionItem>,
+    depth: usize,
+    run_pairs: &mut F,
+) -> Result<UnionItem>
+where
+    F: FnMut(&mut Kernel, Vec<(Brep, Brep)>) -> Result<Vec<Brep>>,
+{
+    if comp.len() == 1 {
+        if let Some(only) = comp.pop() {
+            return Ok(only);
+        }
+    }
+    if depth < MAX_HUB_SPLIT_DEPTH && comp.len() >= 5 {
+        let hub_threshold = (comp.len() >> 1).max(4);
+        let degree = saturated_overlap_degrees(&comp, hub_threshold);
+        let has_hub = degree.iter().any(|&d| d >= hub_threshold);
+        let has_spoke = degree.iter().any(|&d| d < hub_threshold);
+        if has_hub && has_spoke {
+            let mut hubs = Vec::new();
+            let mut spokes = Vec::new();
+            for (item, deg) in comp.into_iter().zip(degree) {
+                if deg >= hub_threshold {
+                    hubs.push(item);
+                } else {
+                    spokes.push(item);
+                }
+            }
+            let spoke_components = partition_overlap_components(spokes);
+            if spoke_components.len() > 1 {
+                let mut reduced_spokes = Vec::new();
+                for sc in spoke_components {
+                    reduced_spokes.push(reduce_union_component(k, sc, depth + 1, run_pairs)?);
+                }
+                let combined_spokes = combine_disjoint_union_items(k, reduced_spokes, run_pairs)?;
+                let mut all = hubs;
+                all.push(combined_spokes);
+                return reduce_pairwise_morton(k, all, run_pairs);
+            }
+            let mut restored = hubs;
+            for sc in spoke_components {
+                restored.extend(sc);
+            }
+            comp = restored;
+        }
+    }
+    reduce_pairwise_morton(k, comp, run_pairs)
+}
+
+fn reduce_pairwise_morton<F>(
+    k: &mut Kernel,
+    mut level: Vec<UnionItem>,
+    run_pairs: &mut F,
+) -> Result<UnionItem>
+where
+    F: FnMut(&mut Kernel, Vec<(Brep, Brep)>) -> Result<Vec<Brep>>,
+{
+    if level.len() >= 5 {
+        sort_morton(&mut level);
+    }
+    while level.len() > 1 {
+        let mut next: Vec<UnionItem> = Vec::new();
+        let mut bool_indices: Vec<usize> = Vec::new();
+        let mut bool_pairs: Vec<(Brep, Brep)> = Vec::new();
+        let mut it = level.into_iter();
+        while let Some(a) = it.next() {
+            match it.next() {
+                Some(b) => {
+                    if boxes_disjoint_same_tol(&a, &b) {
+                        let index = a.index.min(b.index);
+                        let mut brep = combine_disjoint_breps(k, vec![a.brep, b.brep])?;
+                        let bbox = crate::boolean::apart::certified_union_box(k, &mut brep)?;
+                        next.push(UnionItem { index, brep, bbox });
+                    } else {
+                        bool_indices.push(a.index.min(b.index));
+                        bool_pairs.push((a.brep, b.brep));
+                    }
+                }
+                None => next.push(a),
+            }
+        }
+        if !bool_pairs.is_empty() {
+            let results = run_pairs(k, bool_pairs)?;
+            if results.len() != bool_indices.len() {
+                return Err(SolidError::invalid_input(
+                    "boolean::api_brep::reduce_pairwise_morton",
+                    "pairwise union runner returned mismatched count",
+                ));
+            }
+            for (index, mut brep) in bool_indices.into_iter().zip(results) {
+                let bbox = crate::boolean::apart::certified_union_box(k, &mut brep)?;
+                next.push(UnionItem { index, brep, bbox });
+            }
+        }
+        next.sort_by_key(|it| it.index);
+        level = next;
+    }
+    level.pop().ok_or_else(|| {
+        SolidError::invalid_input(
+            "boolean::api_brep::reduce_pairwise_morton",
+            "empty union level",
+        )
+    })
+}
+
 /// Subtracts `brep2` from `brep1` (`SmApiBooleanDifference`); `brep2` is consumed.
 ///
 /// # Errors
@@ -1015,6 +1547,7 @@ pub fn tessellate_boundaries(
 mod tests {
     use super::*;
     use crate::geom::context::MarkType;
+    use crate::math::det;
 
     /// A geometry curve over a cubic NURB on `knots` with the control points `pts`.
     fn cubic(pts: &[[f64; 3]], knots: Vec<f64>) -> crate::curve::curve::p2::Curve {
@@ -1253,12 +1786,12 @@ mod tests {
         // two Hermite spans of the quarter (ends and tangents on the circle)
         let along = |a0: f64, dz: f64| {
             let h = half_pi / 2.0;
-            let t = 4.0 / 3.0 * (h / 4.0).tan();
+            let t = 4.0 / 3.0 * det::tan(h / 4.0);
             let mut pts = vec![];
             for i in 0..2 {
                 let (a, b) = (a0 + h * f64::from(i), a0 + h * f64::from(i + 1));
-                let p = |u: f64| [r * u.cos(), r * u.sin()];
-                let d = |u: f64| [-r * u.sin(), r * u.cos()];
+                let p = |u: f64| [r * det::cos(u), r * det::sin(u)];
+                let d = |u: f64| [-r * det::sin(u), r * det::cos(u)];
                 let (pa, pb, da, db) = (p(a), p(b), d(a), d(b));
                 if i == 0 {
                     pts.push([pa[0], pa[1], dz]);
@@ -1278,7 +1811,7 @@ mod tests {
         let off_circle = (0..=2000)
             .map(|i| {
                 let p = b.evaluate_point(&k, f64::from(i) / 1000.0).unwrap();
-                ((p.x.hypot(p.y) - r).powi(2) + p.z * p.z).sqrt()
+                (det::powi(det::hypot(p.x, p.y) - r, 2) + p.z * p.z).sqrt()
             })
             .fold(0.0, f64::max);
         assert!(off_circle >= rise);
@@ -1634,5 +2167,95 @@ mod tests {
         assert!(boolean_trees(&mut k, &mut breps, &[0, -1]).is_err());
         assert!(breps.first().unwrap().is_none());
         assert!(breps.get(1).unwrap().is_some());
+    }
+
+    #[test]
+    fn combine_disjoint_breps_preserves_every_entity_attribute() {
+        use crate::geom::attribute::{ids, Attribute, AttributeValue, Behavior};
+        use crate::math::Point3;
+        use crate::primitive::api_primitives::create_box;
+        use crate::topology::brep::p1;
+        use crate::EntityRef;
+
+        let mut k = Kernel::default();
+        let n = 100_u32;
+        let mut breps = Vec::new();
+        for i in 0..n {
+            let mut b = create_box(
+                &mut k,
+                Point3::new(f64::from(i) * 20.0, 0.0, 0.0),
+                10.0,
+                10.0,
+                10.0,
+            )
+            .unwrap();
+            for (fi, f) in (0_u32..).zip(p1::faces(&b, None).unwrap()) {
+                b.add_attribute(
+                    EntityRef::Face(f),
+                    Attribute::with_value(
+                        ids::USER_1,
+                        Behavior::Copy,
+                        AttributeValue::Long(i64::from(i) * 100 + i64::from(fi)),
+                    ),
+                )
+                .unwrap();
+            }
+            for (ei, e) in (0_u32..).zip(p1::edges(&b, None).unwrap()) {
+                b.add_attribute(
+                    EntityRef::Edge(e),
+                    Attribute::with_value(
+                        ids::USER_1,
+                        Behavior::Copy,
+                        AttributeValue::Long(100_000 + i64::from(i) * 100 + i64::from(ei)),
+                    ),
+                )
+                .unwrap();
+            }
+            breps.push(b);
+        }
+        let merged = combine_disjoint_breps(&mut k, breps).unwrap();
+        let faces = p1::faces(&merged, None).unwrap();
+        let edges = p1::edges(&merged, None).unwrap();
+        assert_eq!(faces.len(), (n as usize) * 6);
+        assert_eq!(edges.len(), (n as usize) * 12);
+        let mut face_tags: Vec<i64> = faces
+            .iter()
+            .map(|&f| {
+                merged
+                    .entity_attributes(EntityRef::Face(f))
+                    .into_iter()
+                    .find(|(_, a)| a.attribute_id() == ids::USER_1)
+                    .and_then(|(_, a)| match a.value() {
+                        AttributeValue::Long(v) => Some(*v),
+                        _ => None,
+                    })
+                    .expect("missing face attribute")
+            })
+            .collect();
+        face_tags.sort_unstable();
+        let expected_faces: Vec<i64> = (0..n)
+            .flat_map(|i| (0..6_u32).map(move |fi| i64::from(i) * 100 + i64::from(fi)))
+            .collect();
+        assert_eq!(face_tags, expected_faces);
+
+        let mut edge_tags: Vec<i64> = edges
+            .iter()
+            .map(|&e| {
+                merged
+                    .entity_attributes(EntityRef::Edge(e))
+                    .into_iter()
+                    .find(|(_, a)| a.attribute_id() == ids::USER_1)
+                    .and_then(|(_, a)| match a.value() {
+                        AttributeValue::Long(v) => Some(*v),
+                        _ => None,
+                    })
+                    .expect("missing edge attribute")
+            })
+            .collect();
+        edge_tags.sort_unstable();
+        let expected_edges: Vec<i64> = (0..n)
+            .flat_map(|i| (0..12_u32).map(move |ei| 100_000 + i64::from(i) * 100 + i64::from(ei)))
+            .collect();
+        assert_eq!(edge_tags, expected_edges);
     }
 }

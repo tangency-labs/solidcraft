@@ -2084,7 +2084,7 @@ fn analytic_of_nurbs(k: &Kernel, nurbs: &BSplineSurface, ty: i64, tol: f64) -> R
 /// NURBS form, where the reader needs it and the kernel proves it
 /// (`Torus::from_label_unless_found_stands`). `found` is what SMLib's test ([`analytic_of_nurbs`])
 /// worked back out of the form, from circles through three points of each meridian. Where the form
-/// lies on it, it is the face's torus as this reader has always made it, to the last bit, and this
+/// proves it, it is the face's torus as this reader has always made it, to the last bit, and this
 /// is `None`. A tube that shows only a short arc fixes those circles to its rounding over the
 /// square of the arc's angle: the torus found was 1e-10 to 1e-9 off the form it was found in (a
 /// 1.2 degree arc of a tube of radius 13.7), which the body's own check then refused, and below
@@ -2384,7 +2384,7 @@ fn flat_to_brep_data(k: &Kernel, f: &In<'_>, s: &Shape) -> Result<BrepData> {
             i_torus += usize::from(ty == SURFACE_TORUS_I);
             let nurbs = bspline_surface_3d(f, &mut nurbs_cursor)?;
             let found = analytic_of_nurbs(k, &nurbs, ty, xsect)?;
-            // a torus the form does not lie on, or that was not found: the arrays' own, where
+            // a torus the form does not prove, or that was not found: the arrays' own, where
             // the kernel proves the form on it
             let found = if ty == SURFACE_TORUS_I {
                 match torus_of_arrays(k, f, j_torus, &nurbs, found.as_ref())? {

@@ -29,6 +29,7 @@
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
+use crate::math::det;
 use std::collections::BTreeMap;
 
 use super::curve::CurveEval;
@@ -377,7 +378,7 @@ fn wall(f: &Face, frame: &Frame, radius: f64, edges: &[Option<([Vec3; 2], Vec3)>
     // The two sides on one diameter: the end of an obround slot.
     let angle = |p: Vec3| {
         let d = p - point;
-        d.dot(y).atan2(d.dot(x))
+        det::atan2(d.dot(y), d.dot(x))
     };
     let (Some(first), Some(second)) = (sides.first(), sides.get(1)) else {
         return None;
@@ -532,7 +533,7 @@ fn through_cones(walls: &mut [Wall], cones: &[Cone]) {
             let (lo, hi) = (m0.min(m1), m0.max(m1));
             let radius_at = |t: f64| {
                 let s = (w.point + w.axis * t - c.point).dot(c.axis);
-                c.radius_at_origin + s * c.half_angle.tan()
+                c.radius_at_origin + s * det::tan(c.half_angle)
             };
             let rim = NEAR.max(w.radius * 2e-3);
             // A countersink or chamfer opens out: the cone's far end is no narrower than its

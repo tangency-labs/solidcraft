@@ -417,3 +417,54 @@ fn a_pick_fields_note_goes_with_a_value_field_or_a_marquee_that_takes_something(
     assert!(!d.inputs[0].items.is_empty(), "the marquee took the face");
     assert_eq!((d.awaiting_pick, d.pick_refused), (false, None), "a marquee that takes something ends the wait and its note");
 }
+
+/// At the viewport wall a reference box's ordinary clamp can cover the feature's placement
+/// marker. Both Hole and Cylinder keep the real marker exposed and the distance editable.
+#[test]
+fn floating_reference_fields_leave_hole_and_cylinder_placement_markers_clear() {
+    for command in ["solid.hole", "solid.cylinder"] {
+        let mut h = plate();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1200}));
+        h.app.preferences.placement_handles = true;
+        h.app.preferences.hole_moves = true;
+        h.step(&json!({"start":command})).unwrap();
+        if command == "solid.cylinder" {
+            h.step(&json!({"click":{"handle":"dialog:Face"}})).unwrap();
+        }
+        h.step(&json!({"click":{"world":[40,12,10]}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Reference 1"}})).unwrap();
+        h.step(&json!({"click":{"world":[50,20,10]}})).unwrap();
+        h.frames(4);
+        assert!(picked_edge(&h, "Reference 1").is_some_and(|p| (p.x - 50.0).abs() < 1e-6));
+        let view = h.app.viewport.rect.unwrap();
+        let window = h.app.viewport.dialog_rect.unwrap();
+        let title = crate::scenario::handle_at("dialog:title").unwrap();
+        let delta = egui::vec2(view.left() + 20.0 - window.left(), view.top() + 40.0 - window.top());
+        h.call("ui.drag", json!({"x0":title.x,"y0":title.y,"x1":title.x+delta.x,"y1":title.y+delta.y,"steps":8}));
+        h.frames(24);
+        h.app.cam.target = Vec3::new(40.0, 12.0, 10.0);
+        h.frames(3);
+        let marker_name = if command == "solid.hole" { "hole:0" } else { "primitive:position" };
+        let marker = crate::scenario::handle_at(marker_name).expect("the actual placement marker");
+        let px = 2.0 * h.app.cam.half_height() / f64::from(view.height());
+        h.app.cam.target += h.app.cam.basis().0 * (f64::from(marker.x - (view.right() - 60.0)) * px);
+        h.frames(24);
+        let marker = crate::scenario::handle_at(marker_name).unwrap();
+        let dialog = h.app.dialog.as_ref().unwrap();
+        let grips = crate::place_gizmo::value_box_obstacles(&h.app, dialog);
+        let grip = grips.iter().find(|r| r.contains(marker)).expect("the actual marker's registered hit region");
+        let area = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_hole_ref_area", 0usize)))).expect("the actual reference value box");
+        // Prove the wall-clamped position without marker clearance would overlap this grip.
+        let foot = screen(&mut h, Vec3::new(50.0, 12.0, 10.0));
+        let naive = egui::Rect::from_min_size(egui::pos2(foot[0] as f32 + 10.0, foot[1] as f32 - area.height() * 0.5), area.size());
+        let naive = egui::Rect::from_min_size(naive.min.clamp(view.min, (view.max - naive.size()).max(view.min)), naive.size());
+        assert!(naive.intersects(*grip), "{command}: fixture must exercise a box clamped over the actual marker: {naive:?}, {grip:?}");
+        assert!(!area.intersects(*grip), "{command}: field {area:?} covers actual placement grip {grip:?}");
+        let design = h.app.session.doc.to_json();
+        type_into(&mut h, "canvas:Distance 1", "7 mm");
+        let actual = if command == "solid.hole" { distances(&h)[0].clone() } else { cylinder_dialog(&h).0[0].clone() };
+        assert_eq!(actual, "7 mm", "{command}: reference input keeps its own text target");
+        assert_eq!(h.app.session.doc.to_json(), design, "typing into a preview does not commit the feature");
+    }
+}
