@@ -76,6 +76,7 @@ fn schemas_and_the_key_check_agree() {
             "representation",
             "reuse_import",
             "silkscreen",
+            "svg_placement",
             "tab",
             "thickness",
             "units",

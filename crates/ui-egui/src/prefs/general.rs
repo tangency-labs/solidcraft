@@ -201,6 +201,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target("prefs:right_click_confirms", right_click.rect);
             let import_options = setting::ask_import_options(app, ui);
             crate::scenario::publish_target("prefs:ask_import_options", import_options.rect);
+            if !cfg!(target_arch = "wasm32") {
+                let svg_options = setting::svg_open_options(app, ui);
+                crate::scenario::publish_target("prefs:svg_open_options", svg_options.rect);
+            }
             let first_letter = setting::dialog_first_letter_buttons(app, ui).backing_on_hover_text(app.tr("prefs.dialog_first_letter_buttons_help"));
             crate::scenario::publish_target("prefs:dialog_first_letter_buttons", first_letter.rect);
         });

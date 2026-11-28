@@ -4293,7 +4293,14 @@ impl SolveApp {
     pub fn pick_open_file(&mut self) {
         self.pick_open(|app, path| {
             if let Some(path) = path {
-                app.open_chosen_file(&path);
+                if cfg!(not(target_arch = "wasm32"))
+                    && app.preferences.svg_open_options
+                    && solidcraft_engine::cmd::drawing_import_command(&path) == Some("sketch.insert_svg")
+                {
+                    dialogs_insert_drawing::start_open(app, path);
+                } else {
+                    app.open_chosen_file(&path);
+                }
             } else {
                 app.file_load.home_at_start = false;
             }

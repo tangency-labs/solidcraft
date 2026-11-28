@@ -193,6 +193,7 @@ mod tests {
     fn place() -> Place {
         Place {
             command: "sketch.insert_svg".into(),
+            destination: crate::dialogs_insert_drawing::Destination::Insert,
             path: "a.svg".into(),
             x: 10.0,
             y: 5.0,

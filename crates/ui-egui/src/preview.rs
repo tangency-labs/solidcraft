@@ -870,6 +870,14 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     } else {
         job_key(&cmds, app.session.revision, colors)
     };
+    // The File Open placement previews the SVG in a new XY sketch, even when another sketch is
+    // active. An Insert SVG preview of the same file belongs to the active design instead.
+    let opens_drawing = app.dialog.as_ref().is_some_and(|d| matches!(&d.kind, crate::dialogs::Kind::InsertDrawing(p) if p.opens_design()));
+    if opens_drawing {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (key, "open drawing").hash(&mut h);
+        key = h.finish();
+    }
     // A reopened dialog must not inherit a result (or an in-flight run) from the old dialog.
     if let Some((id, _, _)) = &plugin {
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -917,7 +925,7 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
             app.preview.busy = false;
             return;
         }
-        let mut scratch = app.session.scratch();
+        let mut scratch = if opens_drawing { Session::default() } else { app.session.scratch() };
         if let Some((_, id, _)) = &plugin {
             crate::plugin_menu::dry_run(&mut scratch, id);
         }

@@ -641,11 +641,7 @@ impl FileAction {
         match self {
             Self::New => crate::documents::new_design(app),
             Self::NewDrawing => new_drawing(app),
-            Self::Open => app.pick_open(|app, path| {
-                if let Some(path) = path {
-                    app.open_chosen_file(&path);
-                }
-            }),
+            Self::Open => app.pick_open_file(),
             Self::Save => save(app),
             Self::SaveAs => save_as(app),
             Self::Undo => drop(app.run("edit.undo", json!({}))),
@@ -3134,13 +3130,7 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                 Key::N | Key::O | Key::S | Key::W | Key::Comma if app.embed_editor => {}
                 Key::N => crate::documents::new_design(app),
                 Key::Comma => crate::prefs::open_at(app, 0),
-                Key::O if !mods.alt => {
-                    app.pick_open(|app, path| {
-                        if let Some(path) = path {
-                            app.open_chosen_file(&path);
-                        }
-                    });
-                }
+                Key::O if !mods.alt => app.pick_open_file(),
                 // Select All's key (Ctrl+A by default) works on the drawing's sheet.
                 _ if !shown && !(drawing_history && matches!(k, Key::Z | Key::Y)) => {
                     let key = crate::keymap::key_name(k, mods);
@@ -3599,6 +3589,127 @@ mod header_report_tests {
         assert_eq!(offered.borrow().last().cloned(), Some(("Bracket.xml".to_string(), vec!["xml".to_string()])));
         let xml = std::fs::read_to_string(h.dir.join("Bracket.xml")).unwrap();
         assert!(xml.contains("<mujoco"), "an MJCF model is written: {xml}");
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn file_menu_opens_svg_with_placement_in_a_new_unsaved_design() {
+        use crate::dialogs::Kind;
+        use crate::dialogs_insert_drawing::Align;
+        use crate::scenario::{Harness, handle_at};
+
+        let mut h = Harness::new();
+        let name = "plate.SvG";
+        let path = h.dir.join(name);
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 72"><rect width="144" height="72"/></svg>"#;
+        std::fs::write(&path, svg).unwrap();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane": "YZ"})).unwrap();
+        h.settle();
+        let original = h.app.session.doc.to_json();
+        let original_id = h.app.session.document_id.clone();
+        let sketch = h.app.session.active_sketch;
+        let pick = |h: &mut Harness, shortcut: bool| {
+            h.step(&json!({"choose_file": name})).unwrap();
+            if shortcut {
+                h.step(&json!({"key": "O", "cmd": true})).unwrap();
+            } else {
+                h.step(&json!({"click": {"handle": "appbar:file"}})).unwrap();
+                h.step(&json!({"widget": "Open…"})).unwrap();
+            }
+            h.step(&json!({"until": {"count": {"name": "sketch_preview_curves", "value": 4}}})).unwrap();
+        };
+
+        pick(&mut h, false);
+        let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("the SVG placement dialog is open") };
+        assert_eq!(p.align, Align::Origin, "the default Open placement keeps file coordinates");
+        for control in ["dialog:insert:dpi", "dialog:insert:simplify", "dialog:insert:scale"] {
+            assert!(handle_at(control).is_some(), "the dialog shows {control}");
+        }
+        assert_eq!(h.app.preview.sketches[0].sketch.plane, solidcore_record::Plane::XY);
+        assert_eq!(h.app.session.doc.to_json(), original);
+        assert_eq!(h.app.docs.count(), 1);
+        h.step(&json!({"key": "Escape"})).unwrap();
+        assert!(h.app.dialog.is_none());
+        assert_eq!(h.app.session.doc.to_json(), original);
+        assert_eq!(h.app.session.active_sketch, sketch);
+        assert_eq!(h.app.docs.count(), 1);
+
+        pick(&mut h, false);
+        std::fs::remove_file(&path).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.settle();
+        assert!(h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "the failed open is reported");
+        assert_eq!(h.app.session.doc.to_json(), original);
+        assert_eq!(h.app.docs.count(), 1);
+
+        std::fs::write(&path, svg).unwrap();
+        pick(&mut h, true);
+        let Kind::InsertDrawing(p) = &mut h.app.dialog.as_mut().unwrap().kind else { panic!("the SVG placement dialog is open") };
+        assert!(p.opens_design());
+        (p.align, p.x, p.y, p.scale, p.angle, p.dpi) = (Align::Middle, 12.0, -8.0, 2.0, 90.0, 72.0);
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.settle();
+
+        assert_eq!(h.app.docs.count(), 2);
+        assert_ne!(h.app.session.document_id, original_id);
+        assert_eq!(h.app.session.doc.name, "plate");
+        assert!(h.app.session.path.is_none() && h.app.session.is_dirty());
+        let state = h.app.session.world_state().unwrap();
+        let imported = &state.sketches[0];
+        assert_eq!(imported.plane, solidcore_record::Plane::XY);
+        assert_eq!(imported.sketch.curves.len(), 4);
+        let near = |actual: f64, expected: f64| (actual - expected).abs() < 1e-6;
+        let limits = imported.sketch.points.iter().fold([f64::MAX, f64::MIN, f64::MAX, f64::MIN], |[lx, hx, ly, hy], p| {
+            [lx.min(p.pos.x), hx.max(p.pos.x), ly.min(p.pos.y), hy.max(p.pos.y)]
+        });
+        assert!(limits.into_iter().zip([-13.4, 37.4, -58.8, 42.8]).all(|(a, b)| near(a, b)), "{limits:?}");
+        crate::documents::switch(&mut h.app, 0);
+        assert_eq!(h.app.session.document_id, original_id);
+        assert_eq!(h.app.session.doc.to_json(), original);
+        assert_eq!(h.app.session.active_sketch, sketch);
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn svg_open_options_preference_keeps_direct_open_available() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        assert!(h.app.preferences.svg_open_options);
+        h.call("ui.prefs", json!({"open": "General"}));
+        crate::prefs::reveal_preference(&mut h, "prefs:svg_open_options");
+        h.step(&json!({"click": {"handle": "prefs:svg_open_options"}})).unwrap();
+        let reply = h.call("ui.prefs", json!({"button": "ok"}));
+        assert_eq!(reply["result"]["svg_open_options"], false, "{reply}");
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(!restored.preferences.svg_open_options);
+
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="10mm" viewBox="0 0 20 10"><rect width="20" height="10"/></svg>"#;
+        for (name, shortcut) in [("menu", false), ("shortcut", true)] {
+            let file = format!("{name}.svg");
+            std::fs::write(h.dir.join(&file), svg).unwrap();
+            h.step(&json!({"choose_file": file})).unwrap();
+            if shortcut {
+                h.step(&json!({"key": "O", "cmd": true})).unwrap();
+            } else {
+                h.step(&json!({"click": {"handle": "appbar:file"}})).unwrap();
+                h.step(&json!({"widget": "Open…"})).unwrap();
+            }
+            h.settle();
+            assert!(h.app.dialog.is_none(), "{name} opens directly");
+            assert_eq!(h.app.session.doc.name, name);
+            assert!(h.app.session.path.is_none() && h.app.session.is_dirty());
+            assert_eq!(h.app.session.world_state().unwrap().sketches[0].sketch.curves.len(), 4);
+        }
+
+        h.step(&json!({"choose_file": "menu.svg"})).unwrap();
+        h.app.start("sketch.insert_svg");
+        h.step(&json!({"until": {"dialog": "InsertDrawing"}})).unwrap();
+        let Some(crate::dialogs::Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| &d.kind) else {
+            panic!("Insert SVG opens the placement dialog")
+        };
+        assert!(!p.opens_design());
     }
 
     /// What an exporter leaves out is said on the status line, and each warning stays in Messages

@@ -68,6 +68,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<OpenResult>)
         .params(concat!(
             "path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.pcd/.e57/.xyz/.pts/.asc point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); ",
+            "svg_placement?: {at?, scale?, angle?, align?, dpi?, simplify?} for SolidCraft's SVG reader (see sketch.insert_svg); ",
             "new_tab?: bool (true opens the file in a tab of its own after the active one and shows it, even when the active design is empty, so the design that was open stays open; default false: a design that is not empty is kept in its tab and the file gets one, an empty one is replaced; a design already open in a tab is shown instead; a person in the middle of a dialog or tool at the window gets the tab behind the active one, so check document.list; the desktop window only); ",
             "tab?: whole number (the desktop app: open it as a design in a new tab at this place among the tabs, 0 the first, past the last at the end, never in place of the design shown; a design already open shows its tab instead; given with `new_tab`, the place wins; elsewhere ignored); ",
             "up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); ",
@@ -1937,6 +1938,11 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     // A file SolidCraft does not read itself opens with the installed importer that claims its
     // extension; `format` picks an importer even for a file SolidCraft reads.
     let format = str_(p, "format");
+    let drawing = super::drawing_import_command(path);
+    let svg_placement = p.get("svg_placement").filter(|v| !v.is_null());
+    if svg_placement.is_some() && (drawing != Some("sketch.insert_svg") || format.is_some()) {
+        return Err(bad("doc.open", "`svg_placement` applies to SolidCraft's SVG reader only"));
+    }
     if format.is_some() || !reads_natively(path) {
         if let Some(importer) = crate::plugin::importer_for(s, path, format)? {
             let options = p.get("options").filter(|o| !o.is_null()).cloned().unwrap_or_else(|| json!({}));
@@ -1956,11 +1962,20 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("doc.open", "`origin` applies to 3MF, STL, OBJ and glTF files only"));
     }
     let geometry = usd_geometry(p, path, "doc.open")?;
-    if let Some(command) = super::drawing_import_command(path) {
+    if let Some(command) = drawing {
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
         let mut fresh = Session::new(Document::new(&stem));
         fresh.set_validation(s.validation());
-        let made: DrawingInserted = reply_from(fresh.execute(command, &json!({"path": path}))?, command)?;
+        let mut params = json!({"path": path});
+        if let Some(placement) = svg_placement {
+            let placement = placement.as_object().ok_or_else(|| bad("doc.open", "`svg_placement` must be an object"))?;
+            for key in ["at", "scale", "angle", "align", "dpi", "simplify"] {
+                if let Some(value) = placement.get(key).filter(|v| !v.is_null()) {
+                    params[key] = value.clone();
+                }
+            }
+        }
+        let made: DrawingInserted = reply_from(fresh.execute(command, &params)?, command)?;
         fresh.undo.clear();
         s.replace_design(fresh);
         return reply(OpenResult::Drawing(OpenedDrawing {
