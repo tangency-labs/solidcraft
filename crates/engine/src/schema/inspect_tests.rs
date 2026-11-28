@@ -198,8 +198,10 @@ fn the_types_read_each_key_as_the_handler_does() {
     assert_eq!(issues("inspect.measure", json!({"names_only": "yes"})), ["`names_only` must be true or false"]);
     assert_eq!(issues("inspect.measure", json!({"items": null})), ["`items` must be a list of selections"]);
     assert_eq!(issues("inspect.measure", json!({"items": "x", "bodies": 5})), ["`items` must be a list of selections"]);
-    assert_eq!(issues("inspect.measure", json!({"items": []})), ["measure one or two items"]);
-    assert_eq!(issues("inspect.measure", json!({"items": vec![json!({}); 1001]})), ["measure one or two items"]);
+    assert_eq!(issues("inspect.measure", json!({"items": []})), ["measure one or two items, or three or more round edges or holes"]);
+    // Three or more are taken (round ones measure as a row or a bolt circle, #10170), up to 64.
+    assert_eq!(issues("inspect.measure", json!({"items": vec![pick[0].clone(); 64]})), none);
+    assert_eq!(issues("inspect.measure", json!({"items": vec![json!({}); 65]})), ["measure at most 64 items"]);
     // material.assign.
     assert_eq!(issues("material.assign", json!({"bodies": ["A"], "material": "Steel"})), none);
     assert_eq!(issues("material.assign", json!({"bodies": "A", "material": " steel "})), none);
