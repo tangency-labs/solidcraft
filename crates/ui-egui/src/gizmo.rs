@@ -944,7 +944,16 @@ mod tests {
                 let ctx = crate::fonts::test_context();
                 let id = egui::Id::unique(("plane_highlight", dark, plane));
                 let (_, q) = sh.planes.iter().find(|(i, _)| *i == plane).unwrap();
-                let center = Pos2::new(q.iter().map(|p| p.x).sum::<f32>() / q.len() as f32, q.iter().map(|p| p.y).sum::<f32>() / q.len() as f32);
+                let center = [0.5_f32, 0.25, 0.75, 0.15, 0.85]
+                    .into_iter()
+                    .flat_map(|u| [0.5_f32, 0.25, 0.75, 0.15, 0.85].into_iter().map(move |v| (u, v)))
+                    .map(|(u, v)| {
+                        let a = q[0].lerp(q[1], u);
+                        let b = q[3].lerp(q[2], u);
+                        a.lerp(b, v)
+                    })
+                    .find(|&p| hit(&sh, p) == Some(Handle::Plane(plane)))
+                    .unwrap_or_else(|| panic!("no unobstructed hit point on plane {name}"));
                 assert_eq!(hit(&sh, center), Some(Handle::Plane(plane)));
                 let _ = run_triad_frame(&ctx, rect, &proj, id, &triad, vec![]);
                 let clipped = run_triad_frame(&ctx, rect, &proj, id, &triad, vec![egui::Event::PointerMoved(center)]);
