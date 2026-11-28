@@ -1,0 +1,58 @@
+{
+  "en": {
+    "plugin_install.url_fetch": "Review package",
+    "plugin_install.url_hint": "owner/repo[@ref] or https://github.com/owner/repo (or a release URL)",
+    "plugin_install.url_label": "Repository on GitHub, GitLab or Codeberg",
+    "plugin_install.url_menu": "Install from URL…",
+    "plugin_install.url_title": "Install from URL"
+  },
+  "ar": {
+    "plugin_install.url_fetch": "مراجعة الحزمة",
+    "plugin_install.url_hint": "owner/repo[@ref] أو https://github.com/owner/repo (أو رابط إصدار)",
+    "plugin_install.url_label": "مستودع على GitHub أو GitLab أو Codeberg",
+    "plugin_install.url_menu": "تثبيت من رابط…",
+    "plugin_install.url_title": "تثبيت من رابط"
+  },
+  "de": {
+    "plugin_install.url_fetch": "Paket prüfen",
+    "plugin_install.url_hint": "owner/repo[@ref] oder https://github.com/owner/repo (oder eine Release-URL)",
+    "plugin_install.url_label": "Repository auf GitHub, GitLab oder Codeberg",
+    "plugin_install.url_menu": "Von URL installieren…",
+    "plugin_install.url_title": "Von URL installieren"
+  },
+  "he": {
+    "plugin_install.url_fetch": "בדיקת החבילה",
+    "plugin_install.url_hint": "owner/repo[@ref] או https://github.com/owner/repo (או כתובת של מהדורה)",
+    "plugin_install.url_label": "מאגר ב-GitHub, ב-GitLab או ב-Codeberg",
+    "plugin_install.url_menu": "התקנה מכתובת…",
+    "plugin_install.url_title": "התקנה מכתובת"
+  },
+  "ja": {
+    "plugin_install.url_fetch": "パッケージを確認",
+    "plugin_install.url_hint": "owner/repo[@ref] または https://github.com/owner/repo（またはリリースのURL）",
+    "plugin_install.url_label": "GitHub、GitLab、Codebergのリポジトリ",
+    "plugin_install.url_menu": "URLからインストール…",
+    "plugin_install.url_title": "URLからインストール"
+  },
+  "ko": {
+    "plugin_install.url_fetch": "패키지 검토",
+    "plugin_install.url_hint": "owner/repo[@ref] 또는 https://github.com/owner/repo (또는 릴리스 URL)",
+    "plugin_install.url_label": "GitHub, GitLab 또는 Codeberg 저장소",
+    "plugin_install.url_menu": "URL에서 설치…",
+    "plugin_install.url_title": "URL에서 설치"
+  },
+  "vi": {
+    "plugin_install.url_fetch": "Xem xét gói",
+    "plugin_install.url_hint": "owner/repo[@ref] hoặc https://github.com/owner/repo (hoặc URL bản phát hành)",
+    "plugin_install.url_label": "Kho trên GitHub, GitLab hoặc Codeberg",
+    "plugin_install.url_menu": "Cài đặt từ URL…",
+    "plugin_install.url_title": "Cài đặt từ URL"
+  },
+  "zh": {
+    "plugin_install.url_fetch": "审查软件包",
+    "plugin_install.url_hint": "owner/repo[@ref] 或 https://github.com/owner/repo（或发行版URL）",
+    "plugin_install.url_label": "GitHub、GitLab或Codeberg上的仓库",
+    "plugin_install.url_menu": "从URL安装…",
+    "plugin_install.url_title": "从URL安装"
+  }
+}

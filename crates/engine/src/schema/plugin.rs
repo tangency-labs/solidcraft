@@ -317,12 +317,19 @@ pub struct ImportedDesign {
     pub param_warnings: Vec<String>,
 }
 
-/// Install a plugin from a `.zip`: `plugin.json` and its component at the top or in one folder.
+/// Install a plugin from a local `.zip` or a release package of a GitHub, GitLab or Codeberg repository.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct InstallParams {
     /// The `.zip` to install; subject to the caller's file scope.
-    pub path: String,
+    #[serde(default)]
+    pub path: Option<String>,
+    /// `owner/repo[@ref]` (GitHub), or an HTTPS repository or release URL on github.com, gitlab.com or codeberg.org. Exactly one of path and url is required.
+    #[serde(default)]
+    pub url: Option<String>,
+    /// Preserve the reviewed GitHub owner/repo when installing an update from a local archive.
+    #[serde(default)]
+    pub repository: Option<String>,
     /// Exact manifest-and-component hash from a reviewed dry run; a mismatch refuses installation.
     #[serde(default)]
     pub approval: Option<String>,
@@ -344,6 +351,12 @@ pub struct InstallResult {
     /// Host-drawn panels declared by the plugin, shown during permission review.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub panels: Vec<crate::plugin::ui::PanelSpec>,
+    /// Repository recorded for updates when installed from a URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository: Option<String>,
+    /// Where a URL install came from, as `host/owner/repo`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     /// Workspaces declared by the plugin, shown during permission review. They are inert data;
     /// any enter or exit hook is a read-only entry listed in `entry_points`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

@@ -104,6 +104,8 @@ pub struct AppState {
     pub(crate) link_read_source: std::sync::Arc<BTreeMap<u64, LinkChange>>,
     /// Host-only authority marker and event payload for a listener invocation.
     pub(crate) listener_design: Option<Option<DesignToken>>,
+    /// Host fetch service for URL installation; native CLI/MCP use the bounded GitHub client by default.
+    pub http: Option<github::Client>,
     /// Set by the host for a workspace enter or exit hook: grouped commands that reach files are
     /// refused and no folder is writable, whatever the grant store says. Never guest-visible.
     pub(crate) workspace_hook: bool,
@@ -854,6 +856,9 @@ pub use events::{LinkChange, design_changed, design_notifications};
 pub(crate) use events::{record_changed_link_reads, record_link_change, record_link_reads};
 pub mod folders;
 mod form;
+pub mod github;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod github_http;
 pub mod grant_store;
 pub use form::form_errors;
 mod import;
