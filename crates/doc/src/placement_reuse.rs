@@ -540,7 +540,7 @@ pub(super) fn placement_local_feature(doc: &Document, f: &Feature, before: &Mode
                 && !bodies.is_empty()
                 && bodies.iter().all(|b| body_owned_by(doc, before, &b.0, f.component))
         }
-        FeatureKind::Split { body, plane, tool, tool_plane: _, tool_sheet: _, tool_faces: _, tool_bodies, sketch, line: _ } => {
+        FeatureKind::Split { body, plane, tool, tool_plane: _, tool_sheet: _, tool_faces: _, tool_bodies, sketch, line: _, curves: _, extend: _ } => {
             let tool_ok = if let Some(sk) = sketch {
                 own_sketch(doc, components, sk.0, f.component)
             } else if let Some(t) = tool {
