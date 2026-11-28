@@ -105,6 +105,7 @@ const PROFILE_KEYS: &[&str] = &[
     "ribbon_click_ends_tool",
     "ribbon_icon_grid",
     "ribbon_labels",
+    "ribbon_large_icons",
     "ribbon_menus_follow_hover",
     "ribbon_menus_skip_pinned",
     "ribbon_reveal",

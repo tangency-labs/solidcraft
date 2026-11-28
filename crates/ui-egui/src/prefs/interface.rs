@@ -323,6 +323,17 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 }
                             });
                         });
+                        ui_kit::row(ui, app.tr("prefs.toolbar_icon_size"), |ui| {
+                            let mut selected = usize::from(app.preferences.ribbon_large_icons);
+                            if ui_kit::segmented(
+                                ui,
+                                &mut selected,
+                                &[app.tr("prefs.toolbar_icons_standard"), app.tr("prefs.toolbar_icons_large")],
+                                ui_kit::Segments { intrinsic: true, ..Default::default() },
+                            ) {
+                                app.preferences.ribbon_large_icons = selected == 1;
+                            }
+                        });
                         let response = setting::legacy_surface_toolbar(app, ui).backing_on_hover_text(app.tr("prefs.legacy_surface_toolbar_hint"));
                         crate::scenario::publish_target("prefs:legacy_surface_toolbar", response.rect);
                         ui_kit::row(ui, app.tr("prefs.menus"), |ui| {

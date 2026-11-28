@@ -234,6 +234,7 @@ impl RowRig {
                 group("B", vec![button("b.on", true), button("b.off", false)]),
             ],
             labels: true,
+            large_icons: false,
             accent: solidcraft_theme::TabAccent::for_ramp(&t, solidcraft_theme::AccentRamp::Main),
             exit: false,
             reveal: None,
@@ -654,6 +655,37 @@ fn buttons_are_dropped_before_a_button_at_a_groups_end_or_removed_off_the_row() 
 /// A button the app paints itself is drawn as the app resolves it after the pass: pressed, it
 /// is published and counted.
 #[test]
+fn large_icons_fill_the_room_around_them_without_reaching_the_label() {
+    // Standard icons keep their sizes: 26 points, the exit button's 30.
+    assert_eq!(button_icon_side(true, false, false), 26.0);
+    assert_eq!(button_icon_side(false, false, true), 30.0);
+    // Large ones (#22061) are bigger in either layout, the exit button included.
+    for labels in [true, false] {
+        for exit in [true, false] {
+            assert!(button_icon_side(labels, true, exit) > button_icon_side(labels, false, false), "labels {labels}, exit {exit}");
+        }
+    }
+    // Above a label the icon, centred 16 points down, ends before the label starts where it is
+    // painted, a two-line label too (raised to fit the button); in an icon-only button it fits
+    // the button's height.
+    let ctx = crate::test_support::context();
+    let mut heights = Vec::new();
+    crate::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
+        for label in ["Hole", "Extrude Cut"] {
+            let galley = button_galley(ui.painter(), label, 30.0, Color32::WHITE);
+            heights.push((galley.rows.len(), galley.size().y));
+        }
+    });
+    assert_eq!(heights.iter().map(|(rows, _)| *rows).collect::<Vec<_>>(), [1, 2], "one label of each: {heights:?}");
+    let whole = Rect::from_min_size(Pos2::ZERO, vec2(BUTTON_MIN_WIDTH, BUTTON_HEIGHT));
+    for (rows, height) in heights {
+        let top = label_top(whole, height);
+        assert!(16.0 + button_icon_side(true, true, false) / 2.0 <= top, "{rows} line(s): the label starts at {top}");
+    }
+    assert!(button_icon_side(false, true, false) <= ICON_BUTTON_HEIGHT);
+}
+
+#[test]
 fn a_deferred_button_is_painted_as_the_app_resolves_it() {
     let ctx = crate::test_support::context();
     let t = Tokens::get();
@@ -662,6 +694,7 @@ fn a_deferred_button_is_painted_as_the_app_resolves_it() {
     let row = Row {
         groups: vec![group("A", vec![on, button("a.off", true)])],
         labels: true,
+        large_icons: false,
         accent: solidcraft_theme::TabAccent::for_ramp(&t, solidcraft_theme::AccentRamp::Main),
         exit: false,
         reveal: None,

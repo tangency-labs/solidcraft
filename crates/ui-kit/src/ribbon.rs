@@ -383,6 +383,8 @@ pub struct Row<'a> {
     pub groups: Vec<Group<'a>>,
     /// Buttons carry their labels (taller buttons, wider cells).
     pub labels: bool,
+    /// Buttons draw their icons larger, in the room around them, at the same button size (#22061).
+    pub large_icons: bool,
     /// The active tab's accent: pressed buttons, open and running labels.
     pub accent: TabAccent,
     /// The last group leaves the mode (Finish): room is always kept for it, it never collapses,
@@ -594,6 +596,19 @@ fn handle(prefix: &str, key: &str) -> String {
     format!("{prefix}{key}")
 }
 
+/// The side of a button's icon: 26 points, the exit button's 30. Large icons (#22061) take the
+/// room around them: 28 points above a label, so the icon, centred 16 points down, ends where a
+/// two-line label (raised to fit the button, [`label_top`]) starts, and 32 points in an icon-only
+/// button 36 points high.
+pub fn button_icon_side(labels: bool, large: bool, exit: bool) -> f32 {
+    match (large, labels) {
+        (true, true) => 28.0,
+        (true, false) => 32.0,
+        (false, _) if exit => 30.0,
+        (false, _) => 26.0,
+    }
+}
+
 /// Draws the groups in `rect` (below the tabs, from the first group's left edge), fitting them to
 /// its width ([`fit`]); the groups that do not fit go into the » menu. `more_rows` may draw a
 /// group's rows in the » menu itself: given the group's place, it returns true when it did (the
@@ -750,7 +765,7 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
                 paint_reveal(&painter, whole, &accent, r.strength, true);
                 solidcraft_ui_registry::publish_rect(h.reveal, whole);
             }
-            let side = if exit { 30.0 } else { 26.0 };
+            let side = button_icon_side(labels, row.large_icons, exit);
             let icon_rect =
                 Rect::from_center_size(pos2(br.center().x, whole.top() + if labels { 16.0 } else { button_height / 2.0 }), vec2(side, side));
             crate::tint::button(&painter, whole, t.radius_sm, t.toolbar, b.enabled);

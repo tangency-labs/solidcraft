@@ -95,7 +95,7 @@ pub const RIBBON: Page = Page {
     ],
     what: "The row of command groups under the tabs. It fits the room it has: groups give up buttons one at a time, then collapse to one button, then move into the » menu, and none is dropped.",
     usage: r#"
-let out = ui_kit::ribbon::show(ui, &ui_kit::ribbon::Row { groups, labels: true, accent, exit: false,
+let out = ui_kit::ribbon::show(ui, &ui_kit::ribbon::Row { groups, labels: true, large_icons: false, accent, exit: false,
     reveal: None, more_tip: "More", handles }, rect, &mut |ui, group| false);
 for action in out.actions { if let ui_kit::ribbon::Action::Run { id, .. } = action { run(&id) } }
 "#,
@@ -157,6 +157,7 @@ for action in out.actions { if let ui_kit::ribbon::Action::Run { id, .. } = acti
                 ),
             ],
             labels: true,
+            large_icons: false,
             accent: TabAccent::for_ramp(&t, AccentRamp::Main),
             exit: false,
             reveal: None,
