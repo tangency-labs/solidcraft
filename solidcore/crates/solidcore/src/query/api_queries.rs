@@ -2629,6 +2629,50 @@ pub fn edge_face_gap_samples(
         .collect()
 }
 
+/// A proved bound on how far the trims of edge `e` stand from it (not upstream as a
+/// query): for every use of the edge that stores a trim, and every parameter of the edge's
+/// interval, the use's face at the trim is within the returned distance of the edge's curve
+/// ([`crate::blend::blend_corner::proved_trim::proved_trim_gap`]: enclosed, rounding
+/// counted, a round kept as its definition read on its net with the net's bound added).
+/// `None` where a trim is not proved within `within`; 0 for an edge none of whose uses
+/// stores a trim.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] for an edge
+/// without a curve, a use with a trim on a face without a surface, or an empty interval;
+/// those of the enclosure.
+pub fn edge_trim_gap_bound(k: &Kernel, brep: &Brep, e: EdgeId, within: f64) -> Result<Option<f64>> {
+    let interval = brep.edge(e)?.interval;
+    let curve = brep
+        .edge(e)?
+        .curve
+        .as_ref()
+        .ok_or_else(|| SolidError::invalid_input(OP, "edge without a curve"))?;
+    if interval.max().partial_cmp(&interval.min()) != Some(core::cmp::Ordering::Greater) {
+        return Err(SolidError::invalid_input(OP, "empty edge interval"));
+    }
+    let mut largest = 0.0_f64;
+    for &used in &brep.edge(e)?.edgeuses {
+        let Some(trim) = brep.edgeuse(used)?.uv_trim_curve.as_ref() else {
+            continue;
+        };
+        let surface = eu::face(brep, used)?
+            .map(|f| brep.face(f))
+            .transpose()?
+            .and_then(|f| f.surface.as_ref())
+            .ok_or_else(|| SolidError::invalid_input(OP, "a trim on a face without a surface"))?;
+        let Some(gap) = crate::blend::blend_corner::proved_trim::proved_trim_gap(
+            k, surface, trim, curve, interval, within,
+        )?
+        else {
+            return Ok(None);
+        };
+        largest = largest.max(gap);
+    }
+    Ok(Some(largest))
+}
+
 /// The largest distance from `p` to the enclosure of S(`uv`), rounded up; `None` where
 /// S(`uv`) is not enclosed ([`crate::query::normal::surface_point`]'s `Unsupported` and
 /// `Degenerate`: that sample has no bound, the query goes on).
