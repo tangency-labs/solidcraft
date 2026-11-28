@@ -268,6 +268,9 @@ fn origin(
                     remap(datum)?;
                 }
             }
+            solidcraft_doc::joints::Snap::BetweenFaces { snap: Some(inner), .. } => {
+                datum_side(inner, occurrences, doc)?;
+            }
             _ => {}
         }
         Some(())

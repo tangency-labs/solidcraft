@@ -193,3 +193,35 @@ fn render_camera_commands_reply_with_their_schemas() {
         assert!(error.contains(expected), "{level:?}: {error}");
     }
 }
+
+/// #6455: in a design with its own frame (`view.frame`), the cameras the render camera commands
+/// give back carry `frame` and still match their output schemas, and Set Render Camera takes a
+/// camera with `frame` in strict.
+#[test]
+fn a_framed_design_s_render_cameras_match_their_schemas() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 20, "width": 15, "height": 10})).unwrap_or_else(|e| panic!("{e}"));
+    let facing = json!({"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": 100});
+    s.execute("view.frame", &json!({"set": "front", "camera": facing})).unwrap_or_else(|e| panic!("{e}"));
+    assert!(s.doc.view_frame.is_some(), "the design has its own frame");
+    s.param_check = ParamCheck::Strict;
+    let run = |s: &mut Session, id: &str, p: Value, schema: schemars::Schema| {
+        let r = s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+        let schema = schema.as_value();
+        assert!(conforms(schema, schema, &r), "{id}: {r} doesn't match {schema}");
+        r
+    };
+    let got = run(&mut s, "render.camera.get", json!({}), output_schema_for::<CameraInfo>());
+    assert!(got["camera"]["frame"].is_object(), "{got}");
+    let fitted = run(&mut s, "render.camera.fit", json!({}), output_schema_for::<CameraFitted>());
+    assert!(fitted["camera"]["frame"].is_object(), "{fitted}");
+    let given = json!({"camera": fitted["camera"]});
+    let set = input_schema_for::<SetParams>();
+    assert!(conforms(set.as_value(), set.as_value(), &given), "{given}");
+    let r = run(&mut s, "render.camera.set", given, output_schema_for::<CameraSet>());
+    assert_eq!(r["camera"]["frame"], fitted["camera"]["frame"], "{r}");
+    let saved = fitted["camera"].clone();
+    s.execute("render.settings.set", &json!({"name": "Framed", "set": {"camera": saved}})).unwrap_or_else(|e| panic!("{e}"));
+    let r = run(&mut s, "render.settings.apply", json!({"name": "Framed"}), output_schema_for::<CameraApplied>());
+    assert!(r["camera"]["frame"].is_object(), "{r}");
+}

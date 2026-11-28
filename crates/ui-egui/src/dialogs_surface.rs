@@ -58,6 +58,22 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::SurfaceMatch { order, .. }) {
             order: usize = 1 => MATCH_CONTINUITY.iter().position(|(_, word)| *word == order.as_str()).unwrap_or(1),
         } => json!({"order": MATCH_CONTINUITY.get(*order).map_or("g2", |(_, word)| *word)});
+        Morph("surface.morph", "ui.morph_surface_title", [("Surface or faces", BODIES | FACES, true), ("ui.morph_base_surface", BODIES | FACES, false), ("ui.morph_target_surface", BODIES | FACES, false)],
+            FeatureKind::SurfaceMorph { map_mode, scale, tolerance, flip_u, flip_v, swap_uv, keep_original, .. }) {
+            map_mode: usize = 0 => usize::from(matches!(map_mode, solidcraft_engine::doc::MorphMapMode::Translate)),
+            scale: String = "1".into() => scale.to_string(),
+            tolerance: String = "0.01 mm".into() => tolerance.to_string(),
+            flip_u: bool = false => *flip_u,
+            flip_v: bool = false => *flip_v,
+            swap_uv: bool = false => *swap_uv,
+            keep_original: bool = false => *keep_original,
+        } => json!({
+            "map_mode": if *map_mode == 1 { "translate" } else { "normal_to_normal" },
+            "flip_u": flip_u,
+            "flip_v": flip_v,
+            "swap_uv": swap_uv,
+            "keep_original": keep_original,
+        });
         ; custom {
             /// `direction`: an index into [`EXTRUDE_SIDES`]; `to_object`: the extent is To Object
             /// (the To Object input holds the pick), with `to_offset` past it (empty: none);
@@ -365,6 +381,21 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf, inputs: &mut Vec<SelInput>, active:
         }
         Surf::Match { order } => {
             choice_row(ui, "Continuity", "match_order", order, &MATCH_CONTINUITY.map(|(label, _)| label));
+        }
+        Surf::Morph { map_mode, scale, tolerance, flip_u, flip_v, swap_uv, keep_original } => {
+            choice_row(ui, "ui.morph_map_mode", "morph_map_mode", map_mode, &["ui.morph_normal_to_normal", "ui.morph_translate"]);
+            enter |= expr_row(ui, "ui.morph_scale", scale);
+            enter |= expr_row(ui, "Tolerance", tolerance);
+            ui_kit::options(
+                ui,
+                "morph_options",
+                &mut [
+                    ("ui.morph_flip_u", flip_u),
+                    ("ui.morph_flip_v", flip_v),
+                    ("ui.morph_swap_uv", swap_uv),
+                    ("ui.morph_keep_original", keep_original),
+                ],
+            );
         }
         Surf::Stitch { tolerance } => {
             enter |= hint_row(ui, "Tolerance", tolerance, solidcraft_ui_text::tr("ui.stitch_tolerance_hint"));
@@ -956,6 +987,26 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             }
             ("surface.match", json!({"body": body, "faces": faces, "target": target, "edges": edges}))
         }
+        Surf::Morph { scale, tolerance, .. } => {
+            let (body, faces) = body_and_faces(items(inputs, 0))?;
+            if items(inputs, 1).len() != 1 {
+                return Err("select the base reference surface".into());
+            }
+            let (base, base_faces) = body_and_faces(items(inputs, 1))?;
+            if items(inputs, 2).len() != 1 {
+                return Err("select the target reference surface".into());
+            }
+            let (control, control_faces) = body_and_faces(items(inputs, 2))?;
+            let mut p = json!({"body": body, "faces": faces, "base": base, "control": control});
+            if let Some(pt) = base_faces.first() {
+                p["base_face"] = json!(pt);
+            }
+            if let Some(pt) = control_faces.first() {
+                p["control_face"] = json!(pt);
+            }
+            put(&mut p, &[("scale", scale), ("tolerance", tolerance)]);
+            ("surface.morph", p)
+        }
         Surf::Unstitch | Surf::ReverseNormal => {
             need(0, "a body or some of its faces")?;
             let (body, faces) = body_and_faces(items(inputs, 0))?;
@@ -1382,6 +1433,32 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 fill.push(edges.iter().map(|p| crate::dialogs::edge_sel_on(s, Some(target.as_ref()), p.0)).collect::<Option<Vec<_>>>()?);
             }
             (Surf::simple_restore(kind)?, fill)
+        }
+        FeatureKind::SurfaceMorph { body, faces, base, base_face, control, control_face, projection, .. } => {
+            let source = if faces.is_empty() {
+                vec![Sel::Body { name: body.to_string() }]
+            } else {
+                faces.iter().map(|p| crate::dialogs::face_sel_on(s, Some(body.as_ref()), p.0)).collect::<Option<Vec<_>>>()?
+            };
+            let base_sel = match base_face {
+                Some(p) => vec![crate::dialogs::face_sel_on(s, Some(base.as_ref()), p.0)?],
+                None => vec![Sel::Body { name: base.to_string() }],
+            };
+            let control_sel = match control_face {
+                Some(p) => vec![crate::dialogs::face_sel_on(s, Some(control.as_ref()), p.0)?],
+                None => vec![Sel::Body { name: control.to_string() }],
+            };
+            let k = Surf::simple_restore(kind)?;
+            let mut ins = inputs(&k);
+            for (inp, items) in ins.iter_mut().zip([source, base_sel, control_sel]) {
+                inp.items = items;
+            }
+            let mut extra = Map::new();
+            if let solidcraft_engine::doc::MorphProjection::Direction { dir } = projection {
+                extra.insert("projection".into(), json!("direction"));
+                extra.insert("direction".into(), json!(dir));
+            }
+            return Some((Kind::Surface(k), ins, extra));
         }
         FeatureKind::Unstitch { body, faces } | FeatureKind::ReverseNormal { body, faces } => {
             let sels: Vec<Sel> = if faces.is_empty() {

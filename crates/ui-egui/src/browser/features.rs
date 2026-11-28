@@ -527,16 +527,20 @@ fn folder_row(app: &mut SolveApp, rows: &mut Rows<'_>, folders: &[TimelineGroup]
         pick_folder(app, rows.ui(), folder.id);
     }
     inline_rename(app, rows.ui(), r.name_at(), &folder.name);
-    if let Some(resp) = &r.resp {
-        crate::ui_kit::Menu::context(resp, |ui| {
-            if crate::ui_kit::menu::button(ui, "Rename Folder", "rename").clicked() {
+    if let Some(resp) = &r.resp
+        && (crate::ui_kit::Menu::context_active(resp))
+    {
+        let mut menu = vec![crate::ui_kit::Item::action("rename_folder", "Rename Folder", "rename")];
+        menu.extend(crate::timeline::edit_holes_item(app, folder.id));
+        menu.push(crate::ui_kit::Item::sep());
+        menu.extend(crate::timeline_left::selection_items(app, folders, false));
+        if let Some(picked) = crate::ui_kit::Menu::context_items(resp, &menu) {
+            if picked.id == "rename_folder" {
                 start_inline_rename(app, what.clone(), r.name_at());
-                ui.close();
+            } else if !crate::timeline::run_holes_item(app, &picked) {
+                crate::timeline_left::run_selection_item(app, &picked);
             }
-            crate::timeline::edit_holes_item(app, ui, folder.id);
-            ui.separator();
-            crate::timeline_left::selection_actions(app, ui, folders, false);
-        });
+        }
     }
 }
 

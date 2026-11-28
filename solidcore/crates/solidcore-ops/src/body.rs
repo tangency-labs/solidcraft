@@ -578,7 +578,7 @@ pub const REGULAR_RATIO: f64 = 1e-9;
 
 /// A conversion's refusal as the operation's: the kernel's error by its type ([`status`]), the
 /// record's by what it is.
-fn refused(e: Unsupported) -> Error {
+pub(crate) fn refused(e: Unsupported) -> Error {
     match e {
         Unsupported::Kernel(e) => status(e),
         Unsupported::Invalid(w) => Error::Record(w.to_owned()),

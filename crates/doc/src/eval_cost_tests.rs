@@ -463,6 +463,68 @@ fn placed_imports(parts: usize) -> Document {
     doc
 }
 
+#[test]
+fn deleting_an_imported_component_reuses_only_matching_pinned_slots() {
+    let mut doc = placed_imports(1);
+    let f = &mut doc.features[0];
+    let FeatureKind::Import { step, components, .. } = &mut f.kind else { panic!("expected the two-box STEP import") };
+    *components = kernel::step_import_shared(step).unwrap().tree.clone();
+    f.body_names = vec![String::new(), "small".into()];
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let before = model.state();
+    let large_name = before.bodies[0].name.clone();
+    doc.features[0].pin_body_names(&[large_name.clone(), "small".into()], &[]);
+    let old_fingerprint = model.results[0].fingerprint;
+    model.refingerprint(&doc);
+    assert_ne!(model.results[0].fingerprint, old_fingerprint, "pinning the first slot must change the import fingerprint");
+    let original = doc.clone();
+    let FeatureKind::Import { skip, .. } = &mut doc.features[0].kind else { panic!("expected the two-box STEP import") };
+    skip.push(0);
+    let (_, work) = measure(|| model.evaluate(&doc));
+    assert_eq!(work.imports_read, 0, "dropping a slot must not ask the STEP reader for the assembly");
+    let state = model.state();
+    let remaining = state.body("small").unwrap();
+    assert_eq!(state.bodies.len(), 1);
+    assert!(remaining.body.same(&before.body("small").unwrap().body));
+    let mut fresh = Model::new();
+    let (_, baseline) = measure(|| fresh.evaluate(&doc));
+    assert_eq!(baseline.imports_read, 1);
+    let reference = fresh.state();
+    let fresh_body = reference.body("small").unwrap();
+    assert_eq!(remaining.body.exact_bounds().unwrap(), fresh_body.body.exact_bounds().unwrap());
+    assert!((remaining.body.volume_at(1e-3).unwrap() - fresh_body.body.volume_at(1e-3).unwrap()).abs() < 1e-9);
+    assert_eq!(remaining.key, fresh_body.key);
+    assert_eq!(crate::naming::face_names(remaining), crate::naming::face_names(fresh_body));
+    assert_eq!(remaining.component, fresh_body.component);
+
+    // A longer skip list can also bring a body back. That body is absent from the previous result.
+    let mut swapped = doc.clone();
+    let FeatureKind::Import { skip, .. } = &mut swapped.features[0].kind else { panic!("expected the two-box STEP import") };
+    *skip = vec![1, 12];
+    let (_, work) = measure(|| model.evaluate(&swapped));
+    assert_eq!(work.imports_read, 1);
+    assert_eq!(model.state().bodies.len(), 1);
+    assert_eq!(model.state().bodies[0].name, large_name);
+
+    // A renamed pin, or a new STEP payload with the same slots, needs ordinary evaluation.
+    for change_source in [false, true] {
+        let mut model = Model::new();
+        model.evaluate(&original);
+        let mut changed = doc.clone();
+        if change_source {
+            let FeatureKind::Import { step, .. } = &mut changed.features[0].kind else { panic!("expected the two-box STEP import") };
+            *step = format!("{}\n", step).into();
+        } else {
+            changed.features[0].body_names[1] = "new".into();
+        }
+        let (_, work) = measure(|| model.evaluate(&changed));
+        assert_eq!(work.imports_read, 1);
+        let expected = if change_source { "small" } else { "new" };
+        assert_eq!(model.state().bodies[0].name, expected);
+    }
+}
+
 fn line_sketch(plane: PlaneRef, to: Vec2) -> FeatureKind {
     let mut sk = Sketch::new();
     let a = sk.add_point(Vec2::new(0.0, 0.0), None).unwrap();
@@ -2534,6 +2596,7 @@ fn marking(p: Vec3) -> FeatureKind {
         face: FacePick(p),
         designation: Some("M6".into()),
         length: None,
+        offset: None,
         modeled: false,
         from: None,
         up_to: None,
@@ -2828,7 +2891,10 @@ fn a_grouped_modelled_thread_cuts_and_checks_each_target_once() {
             .record()
             .faces
             .iter()
-            .filter(|f| f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
+            .filter(|f| {
+                matches!(f.surface, Surface::Sweep { .. })
+                    || (f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
+            })
             .count();
         if continuous_flanks {
             assert_eq!(flanks, 8, "two whole flank faces on each of the four shafts");
@@ -7910,7 +7976,7 @@ fn capture_position_keeps_the_centered_pose_after_a_wall_is_removed() {
         id: 1,
         name: "Center1".into(),
         kind: JointKind::Planar,
-        a: JointOrigin::new(wall_occ, Snap::BetweenFaces { a, b }),
+        a: JointOrigin::new(wall_occ, Snap::BetweenFaces { a, b, snap: None }),
         b: JointOrigin::new(slider_occ, Snap::Frame { origin: Vec3::ZERO, z: Vec3::X, x: None }),
         values: vec![0.0; 3],
         limits: vec![None; 3],
@@ -8513,7 +8579,7 @@ fn body_transfer_cache_invalidates_when_destination_component_is_added() {
     assert!(cached.last_recomputed >= 1);
 }
 
-// ---- from /tmp/claude-1001/-home-sean-solidcraft/7f26060c-9649-4378-a572-c43193c51840/scratchpad/net/726.diff
+// ---- sketch helpers
 
 fn add_circle_sketch(doc: &mut Document, comp: u64, plane: PlaneRef, center: Vec2, radius: f64, id_name: &str) -> u64 {
     let mut sk = Sketch::new();
