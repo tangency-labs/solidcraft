@@ -15,13 +15,13 @@
 //! reach, whose face goes round the whole turn, and profile crossings of the radius that are
 //! transversal. Anything else is `None`, and the general intersection runs as before.
 //!
-//! Deviations: none (no upstream counterpart). No recursion; the work is bounded by the
-//! profile's knot spans times [`SAMPLES`] evaluations and [`BISECTIONS`] steps per root.
+//! Deviations: none (no upstream counterpart). No recursion; the work is bounded: the roots in
+//! closed form per profile span, [`SAMPLES`] evaluations and [`BISECTIONS`] steps per clip, and
+//! the seam's samples and bisections per crossing.
 
 use super::{Motion, ProceduralSweep};
 use crate::curve::curve::Curve;
 use crate::error::Result;
-use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
@@ -34,8 +34,7 @@ use crate::surface::cone::Cone;
 use crate::surface::surface::p2::{SurfaceIntersection, TsectCurveType};
 use crate::surface::surface::Surface;
 
-/// Samples of the profile's distance from the axis per face, to bracket its crossings of the
-/// radius.
+/// Samples along a helix to check that its height runs one way.
 const SAMPLES: usize = 256;
 
 /// Bisection steps per crossing: enough to reach the last bit of a parameter.
@@ -106,9 +105,12 @@ pub(crate) fn intersect(
         let q = profile.evaluate_point(to_w(p))? - o;
         Ok((q - k_axis * q.dot(k_axis)).length() - radius)
     };
-    let Some(roots) = crossings(&gap, p_ivl.min(), p_ivl.max(), tolerance)? else {
+    let w_lo = to_w(p_ivl.min()).min(to_w(p_ivl.max()));
+    let w_hi = to_w(p_ivl.min()).max(to_w(p_ivl.max()));
+    let Some(ws) = line_crossings(profile, o, k_axis, radius, w_lo, w_hi, tolerance)? else {
         return Ok(None);
     };
+    let roots: Vec<f64> = ws.iter().map(|&w| (w - a[0]) / b[0]).collect();
     // No crossing found: leave the pair to the general intersection rather than answer that
     // there is none.
     if roots.is_empty() {
@@ -152,7 +154,8 @@ pub(crate) fn intersect(
         };
         // A cut at an end, or within rounding of one, is the end itself (a helix that starts or
         // stops on the seam).
-        let near = 1e-9 * (q1 - q0);
+        let lead = m.pitch() / std::f64::consts::TAU;
+        let near = tolerance / (radius * radius + lead * lead).sqrt();
         let mut ends = vec![q0];
         for c in cuts {
             if c - ends.last().copied().unwrap_or(q0) > near && q1 - c > near {
@@ -188,15 +191,16 @@ pub(crate) fn intersect(
                 return Ok(None);
             };
             let rounding = 64.0 * f64::EPSILON * (reach + h_hi.abs().max(h_lo.abs()));
+            let stretch_3d = iso.curve.natural_interval();
             result.curves_3d.push(Curve::from(iso.curve));
             result.curve_types.push(TsectCurveType::Crossing);
             result
                 .deviations
-                .push(residual.max(off_radius) + misaligned + rounding);
+                .push(residual.max(off_radius) + 2.0 * ARC_SLACK * radius + misaligned + rounding);
             // The wall's line, on the piece's own stretch, as the 3D curve is.
             let uv = match iso.uv_iso_curve {
                 Some(mut line) => {
-                    let mut stretch = Extent1d::from_min_max(qa, qb);
+                    let mut stretch = stretch_3d;
                     line.trim(k, &mut stretch, TrimMode::Notify)?;
                     Some(line)
                 }
@@ -231,6 +235,27 @@ fn face_heights(
         (domain.u_interval(), natural.u_interval())
     };
     let span = (whole.max() - whole.min()).abs();
+    // The surface itself goes round the whole turn: its natural angular ends are one seam.
+    let (lin_lo, lin_hi) = if linear_is_u {
+        (domain.u_interval().min(), domain.u_interval().max())
+    } else {
+        (domain.v_interval().min(), domain.v_interval().max())
+    };
+    let lin = 0.5 * (lin_lo + lin_hi);
+    let corner = |t: f64| {
+        if linear_is_u {
+            Point2::new(lin, t)
+        } else {
+            Point2::new(t, lin)
+        }
+    };
+    let gap = (surface.evaluate_point(k, corner(whole.min()))?
+        - surface.evaluate_point(k, corner(whole.max()))?)
+    .length();
+    let scale = 1.0 + (surface.evaluate_point(k, corner(whole.min()))? - origin).length();
+    if !(gap <= 1e-12 * scale) {
+        return Ok(None);
+    }
     let slack = 1e-12 * (1.0 + whole.max().abs().max(whole.min().abs()));
     let whole_turn = (turn.min() - whole.min()).abs() <= slack
         && (turn.max() - whole.max()).abs() <= slack
@@ -248,83 +273,97 @@ fn face_heights(
     Ok((lo.is_finite() && hi.is_finite() && lo < hi).then_some((lo, hi)))
 }
 
-/// The parameters in `[lo, hi]` where `f` crosses zero, each to the last bit by bisection of a
-/// sign change among [`SAMPLES`] samples; `None` (take the general way) for a sample within
-/// `tolerance` of zero without a sign change beside it (a tangent or near-tangent contact), for
-/// a sample that does not evaluate to a finite number, or for more than [`MAX_ROOTS`] crossings.
-fn crossings(
-    f: &dyn Fn(f64) -> Result<f64>,
+/// The profile parameters in `[lo, hi]` where a profile of straight spans (degree 1) crosses
+/// the cylinder of `radius` about the axis through `origin` along `axis`, in closed form: on a span
+/// from `A` to `B`, with `a`, `d` the radial parts of `A − origin` and `B − A`, the crossings of
+/// `|a + d s| = radius` are the roots of `|d|² s² + 2 a·d s + |a|² − radius² = 0` in `s ∈ [0, 1]`.
+/// `None` (take the general way) for a profile of another degree; for a root at a span's end or
+/// within `tolerance` of the stretch's ends, where a vertex or a face's edge meets the radius; for a
+/// double root or one where the profile meets the radius at less than a thousandth of a radian
+/// (a tangent or near-tangent contact); or for more than [`MAX_ROOTS`] crossings.
+///
+/// # Errors
+///
+/// Those of reading the profile.
+fn line_crossings(
+    profile: &BSplineCurve,
+    origin: Point3,
+    axis: Vec3,
+    radius: f64,
     lo: f64,
     hi: f64,
     tolerance: f64,
 ) -> Result<Option<Vec<f64>>> {
-    if !(lo < hi) {
+    let c = profile.canonical()?;
+    if c.degree != 1 || !c.weights.iter().all(|&w| w == 1.0) || !(lo < hi) {
         return Ok(None);
     }
-    let at = |i: usize| {
-        if i == SAMPLES {
-            hi
-        } else {
-            lo + (hi - lo) * (i as f64) / (SAMPLES as f64)
-        }
-    };
-    let mut values = Vec::with_capacity(SAMPLES + 1);
-    for i in 0..=SAMPLES {
-        let v = f(at(i))?;
-        if !v.is_finite() {
-            return Ok(None);
-        }
-        values.push(v);
-    }
-    let value = |i: usize| values.get(i).copied().unwrap_or(f64::NAN);
-    let opposite = |a: f64, b: f64| a != 0.0 && b != 0.0 && (a < 0.0) != (b < 0.0);
+    let radial = |v: Vec3| v - axis * v.dot(axis);
     let mut roots = Vec::new();
-    for i in 0..=SAMPLES {
-        let v = value(i);
-        if v == 0.0 {
-            // A sample on the root: a crossing only inside, with the values beside it of
-            // opposite signs (at an end, or between values of one sign, it is a contact).
-            if i == 0 || i == SAMPLES || !opposite(value(i - 1), value(i + 1)) {
+    for (i, pair) in c.control_points.windows(2).enumerate() {
+        let [pa, pb] = *pair else {
+            continue;
+        };
+        let (Some(&k0), Some(&k1)) = (c.knots.get(i), c.knots.get(i + 1)) else {
+            return Ok(None);
+        };
+        let a = radial(pa - origin);
+        let d = radial(pb - pa);
+        let (qa, qb, qc) = (d.dot(d), 2.0 * a.dot(d), a.dot(a) - radius * radius);
+        let length = d.length();
+        if !(qa > 0.0) {
+            // a span along the axis: on the radius everywhere or nowhere
+            if (a.length() - radius).abs() <= tolerance {
                 return Ok(None);
             }
-            roots.push(at(i));
-        } else if v.abs() <= tolerance {
-            // this close to zero without a sign change beside it: a near-tangent contact
-            let beside = (i > 0 && opposite(value(i - 1), v))
-                || (i < SAMPLES && opposite(v, value(i + 1)))
-                || (i > 0 && value(i - 1) == 0.0)
-                || (i < SAMPLES && value(i + 1) == 0.0);
-            if !beside {
-                return Ok(None);
-            }
-        }
-        if i == SAMPLES || !opposite(v, value(i + 1)) {
             continue;
         }
-        let (mut a, mut b, mut fa) = (at(i), at(i + 1), v);
-        for _ in 0..BISECTIONS {
-            let mid = 0.5 * (a + b);
-            if !(a < mid && mid < b) {
-                break;
-            }
-            let fm = f(mid)?;
-            if fm == 0.0 {
-                a = mid;
-                b = mid;
-                break;
-            }
-            if (fm < 0.0) == (fa < 0.0) {
-                a = mid;
-                fa = fm;
-            } else {
-                b = mid;
-            }
+        let disc = qb * qb - 4.0 * qa * qc;
+        if !disc.is_finite() {
+            return Ok(None);
         }
-        roots.push(0.5 * (a + b));
+        // tangent or nearly: the radius touches the span (its foot within tolerance of it)
+        let closest = (a - d * (a.dot(d) / qa)).length();
+        if (closest - radius).abs() <= tolerance {
+            return Ok(None);
+        }
+        if disc <= 0.0 {
+            continue;
+        }
+        let root = disc.sqrt();
+        // the two roots without cancellation
+        let q = -0.5 * (qb + qb.signum() * root);
+        for s in [q / qa, qc / q] {
+            if !s.is_finite() {
+                continue;
+            }
+            let reach = tolerance / length;
+            if s < -reach || s > 1.0 + reach {
+                continue;
+            }
+            if s <= reach || s >= 1.0 - reach {
+                return Ok(None);
+            }
+            let w = k0 + (k1 - k0) * s;
+            if w <= lo + tolerance || w >= hi - tolerance {
+                if w > lo - tolerance && w < hi + tolerance {
+                    return Ok(None);
+                }
+                continue;
+            }
+            // the profile's angle with the radius there: a grazing crossing goes the general way
+            let at = a + d * s;
+            let sine = (at.dot(d) / (at.length() * length)).abs();
+            if !(sine > 1e-3) {
+                return Ok(None);
+            }
+            roots.push(w);
+        }
     }
     if roots.len() > MAX_ROOTS {
         return Ok(None);
     }
+    roots.sort_by(f64::total_cmp);
     Ok(Some(roots))
 }
 
@@ -449,7 +488,14 @@ fn on_cylinder(
         let tangents = (q0.dot(q1 - q0).abs() / radius).max(q2.dot(q1 - q2).abs() / radius);
         let cos = q0.dot(q2) / (radius * radius);
         let weights = (w1 * w1 / (w0 * w2) - 0.5 * (1.0 + cos)).abs() * radius;
-        if !(ends <= slack && tangents <= slack && weights <= slack && w0 > 0.0 && w2 > 0.0) {
+        if !(ends <= slack
+            && tangents <= slack
+            && weights <= slack
+            && w0 > 0.0
+            && w1 > 0.0
+            && w2 > 0.0
+            && cos > 0.0)
+        {
             return Ok(None);
         }
         worst = worst.max(ends);
