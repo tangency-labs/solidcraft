@@ -79,6 +79,11 @@
 //!   ([`Surface::global_surface_intersect_with_partial`]). The general intersection
 //!   resets them first (`SmSurfaceIntersector::DoIntersection`): a special case that asks
 //!   for it keeps none of its own outputs.
+//! - **A torus second** (not upstream): a sphere, cone, cylinder or surface of revolution
+//!   first runs the torus's special cases (`torus_special_cases_into`, which also take a
+//!   cylinder) with the torus first and swaps the UV curves, so both orders take the same
+//!   closed form; upstream's dispatch of the first surface has no torus case, and the
+//!   torus's own takes no cylinder.
 //! - **Touching loops** (not upstream, WR-405, tangency-labs/solidcore#892):
 //!   `create_plane_with_3d_curves`
 //!   joins a loop touching another loop of its face at a vertex into that loop
@@ -4268,14 +4273,17 @@ impl Surface {
         }
         // (not upstream) a torus second takes the torus's special cases against a sphere,
         // a cone or cylinder and a surface of revolution, which go to the general
-        // intersection with the torus second there, so both orders give the same curves;
-        // the torus is the first surface of its cases, so the UV curves are swapped, also
-        // in a partial output
-        if let SurfaceKind::Torus(t) = other.kind_with_nurb(k)? {
-            if matches!(
-                self.kind_with_nurb(k)?,
+        // intersection with the torus second there, so both orders take the same closed
+        // form; the torus is the first surface of its cases, so the UV curves are swapped,
+        // also in a partial output. (The kinds are those of the surfaces as given: making
+        // a NURB keeps the kind.)
+        if matches!(other.kind(), SurfaceKind::Torus(_))
+            && matches!(
+                self.kind(),
                 SurfaceKind::Sphere(_) | SurfaceKind::Cone(_) | SurfaceKind::SurfOfRevolution(_)
-            ) {
+            )
+        {
+            if let SurfaceKind::Torus(t) = other.kind_with_nurb(k)? {
                 let more = torus_special_cases_into(
                     t,
                     k,
@@ -10153,10 +10161,19 @@ mod order_dependence_tests {
             .collect()
     }
 
-    /// Both orders of `a` and `b` give the same circles about the z axis, one at each
-    /// `(z, rho)` of `want` (from the closed form), as analytic circles: the special case
-    /// ran, not the general intersector, whose curves are traced B-splines.
-    fn assert_same_circles(k: &Kernel, what: &str, a: &Surface, b: &Surface, want: &[(f64, f64)]) {
+    /// What is wrong with the intersection of `a` and `b` in either order, against circles
+    /// about the z axis, one at each `(z, rho)` of `want` (from the closed form): each a
+    /// whole analytic circle (the special case ran, not the general intersector, whose
+    /// curves are traced B-splines) crossing the surfaces, the same bit for bit in both
+    /// orders.
+    fn circle_failures(
+        k: &Kernel,
+        what: &str,
+        a: &Surface,
+        b: &Surface,
+        want: &[(f64, f64)],
+    ) -> Vec<String> {
+        let mut failures = Vec::new();
         let (da, db) = (
             a.natural_uv_domain_with_nurb(k).unwrap(),
             b.natural_uv_domain_with_nurb(k).unwrap(),
@@ -10167,48 +10184,57 @@ mod order_dependence_tests {
         let ba = b
             .global_surface_intersect(k, &db, a, &da, [false; 2], None, None)
             .unwrap();
+        // A loose bound, not a derived one: the hand values and the circles' centres, radii
+        // and rational evaluation are each some dozens of rounded operations on coordinates
+        // below 20 (the largest measured distance is 3.6e-15).
+        let bound = gamma(32) * 20.0;
         for (order, out) in [("first", &ab), ("second", &ba)] {
             let kinds: Vec<_> = out
                 .curves_3d
                 .iter()
                 .map(|c| matches!(c.kind(), CurveKind::Ellipse(_)))
                 .collect();
-            assert_eq!(
-                kinds,
-                vec![true; want.len()],
-                "{what}, {order} order: circles"
-            );
-            // the closed form's circles: each point's height and distance from the axis. The
-            // circle's centre and radius (from where the generators meet) and its rational
-            // evaluation are each a few rounded operations on coordinates below 20: γ₃₂ of
-            // that size covers 32 of them.
-            let bound = gamma(32) * 20.0;
+            if kinds != vec![true; want.len()] {
+                failures.push(format!("{what}, {order} order: analytic circles {kinds:?}"));
+                continue;
+            }
+            if out.curve_types != vec![TsectCurveType::Crossing; want.len()] {
+                failures.push(format!("{what}, {order} order: {:?}", out.curve_types));
+            }
             let mut curves = points(k, out);
             curves.sort_by(|x, y| x[0].z.total_cmp(&y[0].z));
             for (curve, &(z, rho)) in curves.iter().zip(want) {
+                // on the circle: each point's height and distance from the axis
                 let off = curve
                     .iter()
                     .map(|p| (p.z - z).abs().max((det::hypot(p.x, p.y) - rho).abs()))
                     .fold(0.0f64, f64::max);
                 eprintln!("{what}, {order} order: circle at z {z}, rho {rho}: off {off:e}");
-                assert!(
-                    off <= bound,
-                    "{what}, {order} order: {off:e} off z {z}, rho {rho}"
+                // the whole circle: closed, and no half turn between two of its points
+                let (first, last) = (curve[0], curve[curve.len() - 1]);
+                let mut angles: Vec<f64> = curve.iter().map(|p| det::atan2(p.y, p.x)).collect();
+                angles.sort_by(f64::total_cmp);
+                let gap = angles.windows(2).map(|w| w[1] - w[0]).fold(
+                    angles[0] + 2.0 * core::f64::consts::PI - angles[angles.len() - 1],
+                    f64::max,
                 );
+                if off > bound || first.distance(last) > bound || gap >= core::f64::consts::PI {
+                    failures.push(format!(
+                        "{what}, {order} order: circle at z {z}, rho {rho}: {off:e} off it,                          ends {:e} apart, largest angle gap {gap}",
+                        first.distance(last)
+                    ));
+                }
             }
         }
-        // the same special case in either order: the same curves bit for bit, the UV curves
-        // swapped
-        assert_eq!(points(k, &ab), points(k, &ba), "{what}: the same curves");
-        assert_eq!(ab.curve_types, ba.curve_types, "{what}");
-        assert_eq!(ab.deviations, ba.deviations, "{what}");
-        for (x, y) in [
-            (&ab.surface1_uv_curves, &ba.surface2_uv_curves),
-            (&ab.surface2_uv_curves, &ba.surface1_uv_curves),
-        ] {
-            let some = |v: &Vec<Option<Curve>>| v.iter().map(Option::is_some).collect::<Vec<_>>();
-            assert_eq!(some(x), some(y), "{what}: the UV curves swapped");
+        // the same special case in either order: the same curves bit for bit (the UV curves
+        // of these cases are all `None`, so their swap is not seen here)
+        if points(k, &ab) != points(k, &ba)
+            || ab.curve_types != ba.curve_types
+            || ab.deviations != ba.deviations
+        {
+            failures.push(format!("{what}: the two orders differ"));
         }
+        failures
     }
 
     /// A sphere or torus meets a cylinder, a cone, a sphere or a surface of revolution
@@ -10216,48 +10242,50 @@ mod order_dependence_tests {
     #[test]
     fn coaxial_sphere_and_torus_pairs_take_their_closed_form_in_either_order() {
         let k = Kernel::default();
+        let mut failures = Vec::new();
         // sphere x² + y² + z² = 25 and cylinder rho = 3: z = ±4
-        assert_same_circles(
+        failures.extend(circle_failures(
             &k,
             "sphere/cylinder",
             &sphere(&k, 5.0),
             &cylinder(&k, 3.0),
             &[(-4.0, 3.0), (4.0, 3.0)],
-        );
+        ));
         // the torus (rho - 10)² + z² = 9 and rho = 12: z = ±√5
         let s5 = 5.0f64.sqrt();
-        assert_same_circles(
+        failures.extend(circle_failures(
             &k,
             "torus/cylinder",
             &torus(&k),
             &cylinder(&k, 12.0),
             &[(-s5, 12.0), (s5, 12.0)],
-        );
-        assert_same_circles(
+        ));
+        failures.extend(circle_failures(
             &k,
             "torus/revolved line",
             &torus(&k),
             &revolved_line(&k),
             &[(-s5, 12.0), (s5, 12.0)],
-        );
+        ));
         // and rho = 10 + z: 2z² = 9
         let h = 3.0 / 2.0f64.sqrt();
-        assert_same_circles(
+        failures.extend(circle_failures(
             &k,
             "torus/cone",
             &torus(&k),
             &cone(&k),
             &[(-h, 10.0 - h), (h, 10.0 + h)],
-        );
+        ));
         // and rho² + z² = 100: 20 rho - 100 = 91
         let rho: f64 = 191.0 / 20.0;
         let z = (100.0 - rho * rho).sqrt();
-        assert_same_circles(
+        failures.extend(circle_failures(
             &k,
             "torus/sphere",
             &torus(&k),
             &sphere(&k, 10.0),
             &[(-z, rho), (z, rho)],
-        );
+        ));
+        assert!(failures.is_empty(), "{failures:#?}");
     }
 }
