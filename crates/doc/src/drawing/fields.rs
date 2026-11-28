@@ -32,7 +32,7 @@ use solidcraft_geom::title_block::{CellKind, TitleBlock};
 
 use super::Drawing;
 use crate::display_units::format_length;
-use crate::{DocError, Metadata, Result};
+use crate::{ComponentNameSplit, DocError, Metadata, Result};
 
 const COMPONENT: [&str; 7] = ["name", "part_number", "description", "revision", "finish", "material", "mass"];
 /// A component's sheet metal fields ([`SheetMetal`]).
@@ -52,6 +52,8 @@ pub struct Component<'a> {
     pub metadata: &'a Metadata,
     /// Its free-text properties (the design's own: none).
     pub properties: Option<&'a std::collections::BTreeMap<String, String>>,
+    /// An optional fallback from the current name for missing free-text properties.
+    pub name_split: Option<&'a ComponentNameSplit>,
     /// What it is made of, as its bill of materials row would say: none when nothing is assigned.
     pub material: Option<&'a str>,
     /// What one of it weighs, written for the sheet: none when it can't be weighed.
@@ -318,7 +320,14 @@ impl Values<'_> {
                     "part_number" | "description" | "revision" => c.metadata.text(key).map(str::to_string),
                     _ if SHEET_METAL.contains(&key) => c.sheet_metal?.get(key).map(str::to_string),
                     "finish" => c.metadata.finish().or_else(|| c.properties?.get(key).map(String::as_str)).map(str::to_string),
-                    _ => key.strip_prefix(PROPERTIES).and_then(|name| c.properties?.get(name)).cloned(),
+                    _ => {
+                        let property = key.strip_prefix(PROPERTIES)?;
+                        c.properties
+                            .and_then(|properties| properties.get(property))
+                            .map(String::as_str)
+                            .or_else(|| c.name_split?.property(c.name, property))
+                            .map(str::to_string)
+                    }
                 }
             }
             Source::Prompt | Source::Row => None,

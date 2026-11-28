@@ -682,6 +682,14 @@ pub struct FilletSolver {
     /// Fork `m_abTraceAcross` (WR-609): `[surface][u, v]`, whether that parameter
     /// direction runs across the edge (gets [`FilletSolver::trace_reach`]).
     pub trace_across: [[bool; 2]; 2],
+    /// How far (3D) the trace's base surface domains reach past their own at least along
+    /// the filleted edge (`0` = by the extension factor alone;
+    /// [`FilletSolver::domain_extension`]), when a side edge leaves a corner vertex
+    /// obliquely backward past the filleted edge's end.
+    pub trace_reach_along: f64,
+    /// `[surface][u, v]`, whether that parameter direction runs along the filleted edge
+    /// (gets [`FilletSolver::trace_reach_along`]).
+    pub trace_along: [[bool; 2]; 2],
     /// `m_dConversionTol` (`SM_EFF_ZERO / 10`).
     pub conversion_tol: f64,
     /// `m_bReverseTrim`.
@@ -724,6 +732,26 @@ pub struct FilletSolver {
     /// (`ball_section_at`) is solved, extended past it (as upstream) for every other solve, the
     /// trace's included.
     pub seam_domain: SeamDomain,
+    /// Not upstream (tangency-labs/solidcraft#21940): how the rail ends' feet on a closed base
+    /// are named before the trace ([`RailEndNames`]).
+    pub rail_end_names: RailEndNames,
+}
+
+/// Not upstream (tangency-labs/solidcraft#21940): how [`FilletSolver`]'s rail ends' feet on a
+/// closed base are named before the trace (`c1_collect_points`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RailEndNames {
+    /// On their edge use's trim curve's side of the seam where some lie across it and some do
+    /// not: the ball's contact crosses the seam between the rail's ends.
+    #[default]
+    TrimCurveSide,
+    /// On the base of rail `rail` (0 or 1), in its natural domain: the rails never cross its
+    /// seam, which ends short of them (a closed blend's Join whose side seam ends inside the
+    /// band, `FilletCorner::seam_short_of_rails`); the other base as [`Self::TrimCurveSide`].
+    InDomain {
+        /// The rail whose base's seam ends short of the rails.
+        rail: usize,
+    },
 }
 
 impl FilletSolver {
@@ -779,6 +807,8 @@ impl FilletSolver {
             surface_extension_factor: 0.5,
             trace_reach: 0.0,
             trace_across: [[true, true], [true, true]],
+            trace_reach_along: 0.0,
+            trace_along: [[false, false]; 2],
             conversion_tol: EFF_ZERO / 10.0,
             reverse_trim: false,
             extend_before: false,
@@ -791,6 +821,7 @@ impl FilletSolver {
             rolled_faces: [None, None],
             rollover_proof: RolloverProof::AfterTrace,
             seam_domain: SeamDomain::Extended,
+            rail_end_names: RailEndNames::TrimCurveSide,
             chamfer: None,
             law_corner_pieces: Vec::new(),
         }

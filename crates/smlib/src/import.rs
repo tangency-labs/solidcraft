@@ -251,8 +251,11 @@ fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool, bare: &HashSet<(u32, 
         // parameterised on, whose range and trims these are (FACE_NURBS_FORM). A revolution
         // (SMLib has no class for one) is that form alone, a NURBS face. A ball patch is its form
         // too, as a NURBS face's block under its own kind, with its sphere as its definition.
-        let form_is_face =
-            f.nurbs.is_some() && matches!(f.surface, b::Surface::PlacedRevolution { .. } | b::Surface::BallPatch { .. } | b::Surface::Blend { .. });
+        let form_is_face = f.nurbs.is_some()
+            && matches!(
+                f.surface,
+                b::Surface::PlacedRevolution { .. } | b::Surface::BallPatch { .. } | b::Surface::Blend { .. } | b::Surface::Sweep { .. }
+            );
         let spline = match (&f.nurbs, &f.surface) {
             (Some(n), b::Surface::BallPatch { center, radius }) => ball_patch(&mut a, n, *center, *radius, f.domain)?,
             (Some(n), _) if form_is_face => surface(&mut a, n, f.domain, analytic)?,
@@ -466,6 +469,7 @@ fn surface(a: &mut Arrays, s: &b::Surface, domain: [[f64; 2]; 2], analytic_plane
         b::Surface::PlacedRevolution { profile, origin, axis, matrix, forward } => revolution(a, profile, *origin, *axis, matrix, *forward, domain)?,
         b::Surface::BallPatch { .. } => return Err(Unsupported::Invalid("a ball patch without its NURBS form")),
         b::Surface::Blend { .. } => return Err(Unsupported::Invalid("a blend without its NURBS form")),
+        b::Surface::Sweep { .. } => return Err(Unsupported::Invalid("a sweep without its NURBS form")),
     }
     Ok(false)
 }
@@ -599,17 +603,24 @@ fn plane(a: &mut Arrays, origin: [f64; 3], u: [f64; 3], v: [f64; 3], domain: [[f
     }
     let (x, z) = (scale(u, 1.0 / lu), scale(n, 1.0 / ln));
     let y = cross(z, x);
-    let corners = [[u0, v0], [u0, v1], [u1, v0], [u1, v1]].map(|[s, t]| {
-        let d = add(scale(u, s), scale(v, t));
-        [dot(d, x), dot(d, y)]
-    });
-    let lo = |k: usize| corners.iter().map(|c| c[k]).fold(f64::INFINITY, f64::min);
-    let hi = |k: usize| corners.iter().map(|c| c[k]).fold(f64::NEG_INFINITY, f64::max);
+    let range = if x == u && y == v {
+        // Equal surface coefficients mean equal parameters. Projecting onto the same
+        // rounded axes again changes the domain on every record import.
+        [u0, v0, u1, v1]
+    } else {
+        let corners = [[u0, v0], [u0, v1], [u1, v0], [u1, v1]].map(|[s, t]| {
+            let d = add(scale(u, s), scale(v, t));
+            [dot(d, x), dot(d, y)]
+        });
+        let lo = |k: usize| corners.iter().map(|c| c[k]).fold(f64::INFINITY, f64::min);
+        let hi = |k: usize| corners.iter().map(|c| c[k]).fold(f64::NEG_INFINITY, f64::max);
+        [lo(0), lo(1), hi(0), hi(1)]
+    };
     a.i(flat::FACE_SURFACE_TYPE).push(i64::from(flat::SURFACE_PLANE));
     a.r3(flat::FACE_PLANE_ORIGIN, origin);
     a.r3(flat::FACE_PLANE_AXIS, z);
     a.r3(flat::FACE_PLANE_REF_DIRECTION, x);
-    a.r(flat::FACE_RANGE).extend([lo(0), lo(1), hi(0), hi(1)]);
+    a.r(flat::FACE_RANGE).extend(range);
     Ok(())
 }
 

@@ -280,24 +280,22 @@ pub(crate) fn sections(app: &mut SolveApp, rows: &mut Rows<'_>) {
                 super::switch_shot(app, name.clone());
             }
             if let Some(response) = row.resp {
-                ui_kit::Menu::context(&response, |ui| {
-                    for (command, key) in [
-                        ("render.settings.apply", "render.tree_switch"),
-                        ("render.shot.rename", "render.shot_rename"),
-                        ("render.shot.duplicate", "render.shot_duplicate"),
-                        ("render.shot.remove", "render.shot_remove"),
-                    ] {
-                        let item = Item::action(command, app.tr(key), "");
-                        if crate::ui_kit::menu::list_row(ui, &item).is_some() {
-                            if command == "render.settings.apply" {
-                                super::switch_shot(app, name.clone());
-                            } else {
-                                inspector::shot_row_action(app, name.clone(), command);
-                            }
-                            ui.close();
-                        }
+                let items: Vec<_> = [
+                    ("render.settings.apply", "render.tree_switch"),
+                    ("render.shot.rename", "render.shot_rename"),
+                    ("render.shot.duplicate", "render.shot_duplicate"),
+                    ("render.shot.remove", "render.shot_remove"),
+                ]
+                .into_iter()
+                .map(|(command, key)| Item::action(command, app.tr(key), ""))
+                .collect();
+                if let Some(picked) = ui_kit::Menu::context_items(&response, &items) {
+                    if picked.id == "render.settings.apply" {
+                        super::switch_shot(app, name.clone());
+                    } else {
+                        inspector::shot_row_action(app, name.clone(), &picked.id);
                     }
-                });
+                }
             }
         }
     }
@@ -407,7 +405,7 @@ fn wear(app: &mut SolveApp, rows: &mut Rows<'_>) {
 
 /// Returns true when the object section is closed or the By look lens drew its objects.
 pub(crate) fn objects(app: &mut SolveApp, rows: &mut Rows<'_>, hover_bodies: &mut Vec<String>, hovered: &mut bool) -> bool {
-    if app.tree.reveal.is_some() {
+    if app.tree.reveal.is_some() || (app.tree.reveal_occurrence.is_some() && !app.render_workspace.view.by_look) {
         app.tree.collapsed.remove("render:tree:objects");
     }
     if !section(app, rows, "objects") {
@@ -465,15 +463,12 @@ pub(crate) fn objects(app: &mut SolveApp, rows: &mut Rows<'_>, hover_bodies: &mu
             let _ = app.run("select.same_look", params.clone());
         }
         if let Some(response) = row.resp {
-            ui_kit::Menu::context(&response, |ui| {
-                let item = context_menu::cmd(app, "select.same_look", "Select Same Look");
-                if crate::ui_kit::menu::list_row(ui, &item).is_some()
-                    && let Some(params) = &source
-                {
-                    let _ = app.run("select.same_look", params.clone());
-                    ui.close();
-                }
-            });
+            let item = context_menu::cmd(app, "select.same_look", "Select Same Look");
+            if ui_kit::Menu::context_items(&response, &[item]).is_some()
+                && let Some(params) = &source
+            {
+                let _ = app.run("select.same_look", params.clone());
+            }
         }
         if open {
             for name in group.objects {

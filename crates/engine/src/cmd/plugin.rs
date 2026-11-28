@@ -2,8 +2,8 @@
 use super::CommandSpec;
 use crate::schema::plugin::{
     CheckParams, EditParams, FormValidation, GrantStatus, GrantsParams, GrantsResult, ImportParams, ImportedDesign, InspectParams, InspectResult,
-    InstallParams, InstallResult, ListParams, ListResult, ListedPlugin, MeshParams, MeshResult, RemoveParams, RemoveResult, RevokeParams,
-    RevokeResult, RunParams, RunResult, StoredGrant, ToolsParams, ToolsResult,
+    InstallParams, InstallResult, ListParams, ListResult, ListedPlugin, MeshParams, MeshResult, PreviewParams, PreviewResult, RemoveParams,
+    RemoveResult, RevokeParams, RevokeResult, RunParams, RunResult, StoredGrant, ToolsParams, ToolsResult,
 };
 use crate::{
     Result, Session, checked,
@@ -38,6 +38,9 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("plugin.list", "List Plugins", checked!("plugin.list", list)).icon("inspect").noundo().doc_only()
         .contract(&TypedContract::<ListParams>::new()).output(output_schema_for::<ListResult>)
         .params("List inspected and installed plugin manifests, namespaced entries, declared effects and input schemas; no plugin code runs"),
+    CommandSpec::new("plugin.preview", "Plugin Preview", checked!("plugin.preview", preview)).icon("inspect").noundo().read_only()
+        .contract(&TypedContract::<PreviewParams>::new()).output(output_schema_for::<PreviewResult>)
+        .params("No parameters. For a plugin's own code: preview is true while a plugin dialog's live preview runs the entry on a scratch design that is thrown away, so the entry can leave out detail the preview does not need (small holes, fastener models); false in a run whose result is kept. Needs no command group"),
     CommandSpec::new("plugin.remove", "Remove Plugin", checked!("plugin.remove", remove)).icon("delete").noundo().doc_only()
         .contract(&TypedContract::<RemoveParams>::new()).output(output_schema_for::<RemoveResult>)
         .params("id: installed plugin id, remove_user_data: optional bool (omitted or false keeps per-user settings, true deletes them too); removes its folder and stored grants without executing code or prompting"),
@@ -65,7 +68,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         .manifest
         .runtime
         .as_ref()
-        .and_then(|r| limits.check(&r.limits).err())
+        .and_then(|r| if r.is_importer() { limits.check_importer(&r.limits) } else { limits.check(&r.limits) }.err())
         .map(|error| plugin::PluginFailure { plugin: package.manifest.name.clone(), file: None, exporting: false, error }.text());
     serde_json::to_value(InspectResult {
         granted_capabilities: package.manifest.granted_capabilities(),
@@ -148,6 +151,7 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
     };
     serde_json::to_value(InstallResult {
         panels: runtime.and_then(|r| r.ui.as_ref()).map(|ui| ui.panels.clone()).unwrap_or_default(),
+        workspaces: runtime.and_then(|r| r.ui.as_ref()).map(|ui| ui.workspaces.clone()).unwrap_or_default(),
         approval: plugin.approval.clone(),
         archive: plugin.archive.clone(),
         id: manifest.id.clone(),
@@ -231,11 +235,21 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     let manifest = p.named.then(|| package.manifest.clone());
-    let result = plugin::run_with_ui_event(s, package, &p.entry, &p.params, p.ui_event.as_ref()).map_err(|e| match &manifest {
+    // The run's scratch session is a copy of this one: it carries the flag into the run.
+    let was_preview = s.plugin_state.preview;
+    s.plugin_state.preview |= p.preview;
+    let result = plugin::run_with_ui_event(s, package, &p.entry, &p.params, p.ui_event.as_ref());
+    s.plugin_state.preview = was_preview;
+    let result = result.map_err(|e| match &manifest {
         Some(manifest) => plugin::explain_named(s, manifest, &p.entry, e),
         None => e,
     })?;
     serde_json::to_value(result).map_err(|e| bad("plugin.run", e.to_string()))
+}
+
+fn preview(s: &mut Session, p: &Value) -> Result<Value> {
+    let _: PreviewParams = serde_json::from_value(p.clone()).map_err(|e| bad("plugin.preview", e.to_string()))?;
+    serde_json::to_value(PreviewResult { preview: s.plugin_state.preview, param_warnings: vec![] }).map_err(|e| bad("plugin.preview", e.to_string()))
 }
 
 fn tools(s: &mut Session, p: &Value) -> Result<Value> {

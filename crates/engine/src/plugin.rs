@@ -104,6 +104,9 @@ pub struct AppState {
     pub(crate) link_read_source: std::sync::Arc<BTreeMap<u64, LinkChange>>,
     /// Host-only authority marker and event payload for a listener invocation.
     pub(crate) listener_design: Option<Option<DesignToken>>,
+    /// Set by the host for a workspace enter or exit hook: grouped commands that reach files are
+    /// refused and no folder is writable, whatever the grant store says. Never guest-visible.
+    pub(crate) workspace_hook: bool,
     pub packages: BTreeMap<String, String>,
     /// Transient, host-drawn panel state. Never serialised into a design.
     pub panels: BTreeMap<String, PanelPackage>,
@@ -114,6 +117,9 @@ pub struct AppState {
     pub file_grants: Vec<FileGrant>,
     /// Legacy embedding state. Runtime permissions come exclusively from grants bound to package hashes.
     pub command_groups: BTreeSet<String>,
+    /// This session runs a plugin dialog's live preview, whose result is thrown away: what
+    /// `plugin.preview` answers to the plugin.
+    pub preview: bool,
     /// Where `plugin.install` writes and `plugin.list` looks; `None`: the per-user
     /// `plugins` folder ([`crate::recovery::data_dir`]).
     pub plugins_dir: Option<PathBuf>,
@@ -298,6 +304,10 @@ pub const COMMAND_GROUPS: &[&str] = &["app", "doc", "file", "plugin"];
 const FILE_COMMANDS: &[&str] = &[
     "canvas.insert",
     "component.insert_design",
+    "component.links",
+    "component.relink",
+    "component.replace_with_link",
+    "component.update_links",
     "motion.export",
     "motion.export_animation",
     "parameters.export",
@@ -319,6 +329,10 @@ fn input_only_command(id: &str) -> bool {
     matches!(
         id,
         "component.insert_design"
+            | "component.links"
+            | "component.relink"
+            | "component.replace_with_link"
+            | "component.update_links"
             | "file.insert_step"
             | "file.insert_mesh"
             | "file.insert_gerber"
@@ -330,6 +344,18 @@ fn input_only_command(id: &str) -> bool {
 
 /// Both the manifest and the user must approve a folder for the intended access.
 /// Writers retain the existing requirement that both read and write are approved.
+/// Whether a plugin run's scratch session `computed` changed what [`Session::accept_computed`]
+/// takes into `live`: the design, the sketch being edited, pending moves or what is shown (#22153).
+fn changed_by(live: &Session, computed: &Session) -> bool {
+    !std::sync::Arc::ptr_eq(&live.doc, &computed.doc)
+        || live.active_sketch != computed.active_sketch
+        || live.sketching_view != computed.sketching_view
+        || !computed.sketch_finish_events.is_empty()
+        || computed.edit_start_sequence != 0
+        || live.pending_moves != computed.pending_moves
+        || live.visibility != computed.visibility
+}
+
 fn approved_file_folders(granted: &[FileGrant], requested: &[craft_plugin::FilePermission], write: bool) -> Vec<PathBuf> {
     granted
         .iter()
@@ -358,6 +384,10 @@ fn resolve_grant_paths(params: &Value, grants: &[(&str, &Path)]) -> std::io::Res
 
 /// The sensitive group of a command, or `None` when it acts on the open design alone.
 pub fn command_group(id: &str) -> Option<&'static str> {
+    // Whether the run is a preview: it reads nothing past the run itself.
+    if id == "plugin.preview" {
+        return None;
+    }
     let family = id.split_once('.').map_or(id, |(family, _)| family);
     match family {
         "plugin" => Some("plugin"),
@@ -563,7 +593,135 @@ pub fn run_with_ui_event(
     ui_event: Option<&ui::UiEvent>,
 ) -> Result<crate::schema::plugin::RunResult> {
     let name = package.manifest.name.clone();
-    run_package(session, package, entry, params, ui_event).map_err(messages::named(&name, None))
+    run_package(session, package, entry, params, ui_event, false).map_err(messages::named(&name, None))
+}
+
+/// What a workspace hook changed in its own plugin's panels. Nothing else leaves a hook.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PanelUpdates {
+    pub plugin: String,
+    /// The package approval the hook ran against; updates for another approval are dropped.
+    pub approval: String,
+    pub data: BTreeMap<String, ui::PanelData>,
+    /// Panels the hook asked to show or hide.
+    pub visible: BTreeMap<String, bool>,
+}
+
+impl PanelUpdates {
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty() && self.visible.is_empty()
+    }
+}
+
+/// Run a workspace's optional enter or exit entry against a discarded snapshot.
+///
+/// The window calls this on its worker, so switching never waits for guest code. Hooks have
+/// at most one second, one million fuel and 32 MiB, or the package's or user's lower budget.
+/// The execution copy retains the original approval hash: narrowing a call's limits never
+/// changes which exact package the user approved. A hook is read-only: no folder is writable
+/// and no command that reaches files runs. It adopts no computed state, camera or history, even
+/// if a host command classified as read changes transient session state. Its panel updates are
+/// returned as [`PanelUpdates`]; [`adopt_panel_updates`] applies them to the live session.
+pub fn run_workspace_hook(
+    session: &mut Session,
+    mut package: Package,
+    workspace: &str,
+    entering: bool,
+) -> Result<(crate::schema::plugin::RunResult, PanelUpdates)> {
+    let name = package.manifest.name.clone();
+    let result = (|| {
+        let mut scratch = session.scratch();
+        scratch.plugin_state.refresh_stored();
+        if scratch.disabled_plugins.contains(&package.manifest.id) {
+            return Err(error("plugin is disabled"));
+        }
+        let declarations = package
+            .manifest
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.ui.as_ref())
+            .filter(|_| package.manifest.capabilities.iter().any(|capability| capability.starts_with("ui@")))
+            .ok_or_else(|| error("workspace hooks require ui@0.1"))?;
+        let workspace_spec = declarations.workspaces.iter().find(|spec| spec.id == workspace).ok_or_else(|| error("unknown workspace"))?;
+        let hook = if entering { &workspace_spec.on_enter } else { &workspace_spec.on_exit };
+        let hook = hook.clone();
+        let plugin = package.manifest.id.clone();
+        let approval = package.approval.clone();
+        let Some(entry) = hook else {
+            return Ok((
+                crate::schema::plugin::RunResult {
+                    forms: vec![],
+                    form_validation: None,
+                    result: json!({}),
+                    sketch_exits: vec![],
+                    view: None,
+                    param_warnings: vec![],
+                    messages: vec![],
+                },
+                PanelUpdates { plugin, approval, ..Default::default() },
+            ));
+        };
+        let ceilings = host_limits_for(&scratch, &package.manifest.id, &package.approval);
+        let runtime = package.manifest.runtime.as_mut().ok_or_else(|| error("no executable runtime"))?;
+        let declared = runtime.entries.iter().find(|declared| declared.name == entry).ok_or_else(|| error("unknown workspace hook entry"))?;
+        if declared.kind != EntryKind::Command || declared.effect != Effect::Read {
+            return Err(error("workspace hooks must be read-only command entries"));
+        }
+        let params = json!({"workspace": workspace});
+        craft_plugin::check_input(&declared.input_schema, &params)
+            .map_err(|reason| error(format!("the hook entry {entry} must accept {{\"workspace\": <id>}}: {reason}")))?;
+        runtime.limits = workspace_hook_limits(&runtime.limits, ceilings);
+        let before = scratch.plugin_state.panels.get(&plugin).cloned();
+        let result = run_package(&mut scratch, package, &entry, &params, None, true)?;
+        let mut updates = PanelUpdates { plugin: plugin.clone(), approval, ..Default::default() };
+        if let Some(after) = scratch.plugin_state.panels.get(&plugin) {
+            for (id, data) in &after.data {
+                if before.as_ref().and_then(|b| b.data.get(id)).unwrap_or(&ui::PanelData::default()) != data {
+                    updates.data.insert(id.clone(), data.clone());
+                }
+            }
+            for (id, revision) in &after.visibility_revision {
+                if before.as_ref().and_then(|b| b.visibility_revision.get(id)).copied().unwrap_or(0) != *revision {
+                    updates.visible.insert(id.clone(), after.visible.get(id).copied().unwrap_or(true));
+                }
+            }
+        }
+        // A hook is observational: it adopts no form, sketch exit or camera move.
+        let mut result = result;
+        result.forms.clear();
+        result.form_validation = None;
+        result.sketch_exits.clear();
+        result.view = None;
+        Ok((result, updates))
+    })();
+    result.map_err(messages::named(&name, None))
+}
+
+/// Apply the panel changes a workspace hook made, to the live session. Only the plugin's own
+/// panels change, and only when the package is the one the hook ran against.
+pub fn adopt_panel_updates(session: &mut Session, updates: PanelUpdates) {
+    let Some(package) = session.plugin_state.panels.get_mut(&updates.plugin).filter(|package| package.approval == updates.approval) else { return };
+    for (id, data) in updates.data {
+        if let Some(slot) = package.data.get_mut(&id) {
+            *slot = data;
+        }
+    }
+    for (id, visible) in updates.visible {
+        if let Some(revision) = package.visibility_revision.get_mut(&id) {
+            *revision = revision.saturating_add(1);
+            package.visible.insert(id, visible);
+        }
+    }
+}
+
+fn workspace_hook_limits(requested: &Limits, ceilings: HostLimits) -> Limits {
+    Limits {
+        fuel: requested.fuel.min(1_000_000).min(ceilings.max_fuel),
+        memory_mib: requested.memory_mib.min(32).min(ceilings.max_memory_mib),
+        deadline_ms: requested.deadline_ms.min(ui::WORKSPACE_HOOK_DEADLINE_MS),
+        host_calls: requested.host_calls.min(ceilings.max_host_calls),
+        stack_kib: requested.stack_kib.map(|kib| kib.min(256)),
+    }
 }
 
 fn run_package(
@@ -572,6 +730,7 @@ fn run_package(
     entry: &str,
     params: &serde_json::Value,
     ui_event: Option<&ui::UiEvent>,
+    read_only: bool,
 ) -> Result<crate::schema::plugin::RunResult> {
     let consent = session.plugin_state.user.dialog_folders.take();
     session.plugin_state.refresh_stored();
@@ -608,10 +767,17 @@ fn run_package(
     {
         // What this call may reach: the groups both the manifest asks for and the user granted,
         // and for `file` commands the granted folders the manifest may both read and write.
-        let grants = session.plugin_state.grants.get(&package.manifest.id).cloned().unwrap_or_default();
+        let mut grants = session.plugin_state.grants.get(&package.manifest.id).cloned().unwrap_or_default();
+        if read_only {
+            // After the last grant-store refresh, so nothing can restore write access.
+            for folder in &mut grants.folders {
+                folder.write = false;
+            }
+        }
         let groups: BTreeSet<String> = rt.permissions.command_groups.intersection(&grants.command_groups).cloned().collect();
         let mut scratch = session.scratch();
         panels::register_package(&mut scratch, &package)?;
+        scratch.plugin_state.workspace_hook = read_only;
         scratch.plugin_state.ui_caller = Some(package.manifest.id.clone());
         scratch.plugin_state.file_grants = grants.folders;
         scratch.plugin_state.user.user_storage_caller =
@@ -646,13 +812,7 @@ fn run_package(
         let value = result?;
         session.plugin_state.user.pending_user_settings = host.session.plugin_state.user.pending_user_settings.clone();
         session.plugin_state.panels.clone_from(&host.session.plugin_state.panels);
-        if !std::sync::Arc::ptr_eq(&session.doc, &host.session.doc)
-            || session.active_sketch != host.session.active_sketch
-            || session.sketching_view != host.session.sketching_view
-            || !host.session.sketch_finish_events.is_empty()
-            || host.session.edit_start_sequence != 0
-            || session.pending_moves != host.session.pending_moves
-        {
+        if changed_by(session, &host.session) {
             session.accept_computed(host.session)?;
         } else {
             session.plugin_state.link_changes = host.session.plugin_state.link_changes;
@@ -673,7 +833,7 @@ fn run_package(
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
     {
-        let _ = (params, input_folders, ui_event);
+        let _ = (params, input_folders, ui_event, read_only);
         Err(error("plugin execution requires an x86-64 or AArch64 native build with the plugins feature"))
     }
 }
@@ -793,6 +953,10 @@ fn storage_error(call: &str, error: crate::EngineError) -> HostError {
 /// `timeline.roll_to` moves only that private session's marker.
 pub const EVALUATE_COMMANDS: &[&str] = &["document.inspect", "inspect.measure", "model.edges", "model.faces", "timeline.roll_to"];
 impl PluginHost for SolidCraftHost {
+    fn importer_stage(&mut self, plugin: &str, preparing: bool) {
+        solidcraft_doc::progress::importer_stage(Some((plugin, preparing)));
+    }
+
     fn open_form(&mut self, entry: &str, params: &Value) -> craft_plugin::Result<()> {
         self.request_form(entry, params)
     }
@@ -878,6 +1042,13 @@ impl PluginHost for SolidCraftHost {
                 || catalog_command(name).is_none_or(|command| command.effect != Effect::Read))
         {
             return Err(HostError::PermissionDenied { permission: format!("edit command {name} from read entry") });
+        }
+        // A workspace hook may not reach files: only the input readers, which are confined to
+        // read-only folders, and no other grouped command, whatever its declared effect.
+        if self.session.plugin_state.workspace_hook
+            && command_group(name).is_some_and(|group| !(matches!(group, "file" | "doc") && input_only_command(name)))
+        {
+            return Err(HostError::PermissionDenied { permission: format!("command {name} from a workspace hook") });
         }
         if catalog_command(name).is_none() {
             return Err(HostError::PermissionDenied { permission: format!("command {name} is not granted") });
@@ -988,13 +1159,7 @@ impl PluginHost for SolidCraftHost {
         computed.redo.clear();
         self.session.plugin_state.panels.clone_from(&computed.plugin_state.panels);
         // Session::execute(plugin.run) owns the one outer undo step.
-        if !std::sync::Arc::ptr_eq(&self.session.doc, &computed.doc)
-            || self.session.active_sketch != computed.active_sketch
-            || self.session.sketching_view != computed.sketching_view
-            || !computed.sketch_finish_events.is_empty()
-            || computed.edit_start_sequence != 0
-            || self.session.pending_moves != computed.pending_moves
-        {
+        if changed_by(&self.session, &computed) {
             self.session
                 .accept_computed(computed)
                 .map_err(|error| HostError::InvalidInput { field: "transaction".into(), reason: error.to_string() })?;
@@ -1100,16 +1265,20 @@ pub fn require_folder_grant(grants: &[FileGrant], path: &Path) -> craft_plugin::
     if grant_covers(grants, path, false).is_ok() || grant_covers(grants, path, true).is_ok() { Ok(()) } else { grant_covers(grants, path, false) }
 }
 
+fn grant_covers(grants: &[FileGrant], path: &Path, write: bool) -> craft_plugin::Result<()> {
+    grant_covers_or(grants, path, write, || "file path has no applicable folder grant".into())
+}
+
 /// The approved root and its ancestors are explicit, even in AppData or a hidden folder.
 /// Inspect only names beneath the most specific grant for this operation.
-fn grant_covers(grants: &[FileGrant], path: &Path, write: bool) -> craft_plugin::Result<()> {
+fn grant_covers_or(grants: &[FileGrant], path: &Path, write: bool, missing: impl FnOnce() -> String) -> craft_plugin::Result<()> {
     let relative = grants
         .iter()
         .filter(|grant| if write { grant.write } else { grant.read })
         .filter_map(|grant| path.strip_prefix(&grant.folder).ok().map(|relative| (grant.folder.components().count(), relative)))
         .max_by_key(|(depth, _)| *depth)
         .map(|(_, relative)| relative)
-        .ok_or_else(|| HostError::PermissionDenied { permission: "file path has no applicable folder grant".into() })?;
+        .ok_or_else(|| HostError::PermissionDenied { permission: missing() })?;
     if relative.components().any(|c| {
         let name = c.as_os_str().to_string_lossy();
         name.starts_with('.') || (cfg!(windows) && name.eq_ignore_ascii_case("AppData"))

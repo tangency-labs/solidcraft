@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.drawing_hole_callout": "Hole Callout"
+  },
+  "de": {
+    "cmd.drawing_hole_callout": "Bohrungsangabe"
+  },
+  "ja": {
+    "cmd.drawing_hole_callout": "穴の注記"
+  },
+  "zh": {
+    "cmd.drawing_hole_callout": "孔标注"
+  },
+  "ar": {
+    "cmd.drawing_hole_callout": "ملاحظة الثقب"
+  },
+  "he": {
+    "cmd.drawing_hole_callout": "הערת חור"
+  },
+  "vi": {
+    "cmd.drawing_hole_callout": "Chú thích lỗ"
+  },
+  "ko": {
+    "cmd.drawing_hole_callout": "구멍 주석"
+  }
+}

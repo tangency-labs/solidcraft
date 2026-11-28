@@ -17,7 +17,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use wasmtime::component::{Component, Linker};
-use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder, UpdateDeadline};
+use wasmtime::{CallHook, Config, Engine, Store, StoreLimits, StoreLimitsBuilder, UpdateDeadline};
 
 mod bindings {
     wasmtime::component::bindgen!({ path: "../craft-plugin/wit", world: "command-plugin" });
@@ -58,9 +58,8 @@ fn link_host_query<H: PluginHost + 'static>(linker: &mut Linker<State<H>>, grant
 include!(concat!(env!("OUT_DIR"), "/panels.rs"));
 include!(concat!(env!("OUT_DIR"), "/exporter.rs"));
 
-const MAX_CALLS: usize = 256;
 /// An importer streams its file in chunks and reports progress as it goes.
-const MAX_IMPORT_CALLS: usize = 1 << 20;
+const MAX_IMPORT_CALLS: u64 = 1 << 20;
 /// Files an importer may look at beside the one it imports, and names a folder listing reads.
 const MAX_IMPORT_FILES: usize = 4096;
 /// `O_NONBLOCK` for the platforms the runtime targets (the flag is not in `std`).
@@ -189,6 +188,34 @@ fn host_error(error: PluginError) -> HostError {
         PluginError::Unsupported(reason) => HostError::Unsupported { reason },
     }
 }
+/// Accumulates only time spent executing Wasm, including instantiation and post-return.
+/// A duration budget avoids overflowing an Instant for large user-approved deadlines.
+struct GuestDeadline {
+    remaining: Duration,
+    running_since: Option<Instant>,
+}
+impl GuestDeadline {
+    fn new(milliseconds: u64) -> Self {
+        Self { remaining: Duration::from_millis(milliseconds), running_since: None }
+    }
+    /// The budget that is left until `end`: a dialog's source reads and guest hook share one deadline.
+    fn until(end: Instant) -> Self {
+        Self { remaining: end.saturating_duration_since(Instant::now()), running_since: None }
+    }
+    fn transition(&mut self, hook: CallHook, now: Instant) {
+        if hook.entering_host() {
+            if let Some(started) = self.running_since.take() {
+                self.remaining = self.remaining.saturating_sub(now.saturating_duration_since(started));
+            }
+        } else {
+            self.running_since.get_or_insert(now);
+        }
+    }
+    fn expired(&self, now: Instant) -> bool {
+        self.running_since.map_or(Duration::ZERO, |started| now.saturating_duration_since(started)) >= self.remaining
+    }
+}
+
 struct Folder {
     dir: Dir,
     path: PathBuf,
@@ -197,7 +224,7 @@ struct Folder {
 }
 struct PendingWrite {
     temporary: PathBuf,
-    order: usize,
+    order: u64,
 }
 struct State<H> {
     host: H,
@@ -220,10 +247,10 @@ struct State<H> {
     forms: bool,
     limits: StoreLimits,
     failed: Option<HostError>,
-    calls: usize,
-    max_calls: usize,
+    calls: u64,
+    max_calls: u64,
     log_bytes: usize,
-    deadline: Instant,
+    deadline: GuestDeadline,
     /// The file an importer reads and the design it writes; `None` for a command.
     import: Option<ImportState>,
     panels: Option<craft_plugin::ui::Declarations>,
@@ -256,13 +283,17 @@ impl<H: PluginHost> State<H> {
         if self.host.is_cancelled() {
             return Err(self.fail(HostError::Cancelled));
         }
-        if Instant::now() >= self.deadline {
+        if self.deadline.expired(Instant::now()) {
             return Err(self.fail(deadline()));
         }
-        self.calls = self.calls.saturating_add(1);
-        if self.calls > self.max_calls {
-            return Err(self.fail(limit("host call count")));
+        if self.calls >= self.max_calls {
+            let error = match self.effect {
+                Effect::Open => limit("host call count"),
+                _ => HostError::Exhausted { limit: "host_calls".into(), allowed: self.max_calls },
+            };
+            return Err(self.fail(error));
         }
+        self.calls = self.calls.saturating_add(1);
         Ok(())
     }
     fn file_path(&mut self, grant: &str, path: &str, write: bool) -> std::result::Result<(), PluginError> {
@@ -531,7 +562,12 @@ impl<H: PluginHost> files::Host for State<H> {
         let read = (|| -> std::io::Result<Option<Vec<u8>>> {
             let folder = self.folders.get(&grant).ok_or_else(|| std::io::Error::other("grant disappeared"))?;
             let staged = self.staged.get(&(grant.clone(), Path::new(&path).components().collect()));
-            let file = match folder.dir.open(staged.map(|pending| pending.temporary.as_path()).unwrap_or(Path::new(&path))) {
+            // Reject named pipes without waiting for a writer before checking the opened handle.
+            let mut options = OpenOptions::new();
+            options.read(true);
+            #[cfg(unix)]
+            options.custom_flags(O_NONBLOCK);
+            let file = match folder.dir.open_with(staged.map(|pending| pending.temporary.as_path()).unwrap_or(Path::new(&path)), &options) {
                 Err(error) if staged.is_none() && error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
                 opened => opened?,
             };
@@ -718,34 +754,37 @@ impl<H: PluginHost> source::Host for State<H> {
             return Ok(Some(String::new()));
         }
         let import = self.import.as_ref().ok_or_else(|| PluginError::Trap("not an import".into()))?;
-        if import.dir.metadata(&target).is_ok_and(|m| m.is_file()) {
-            return Ok(Some(target.to_string_lossy().replace('\\', "/")));
-        }
-        // The one file in that folder whose name matches ignoring case: a part an assembly
-        // spelled differently from the disk (made on a case-insensitive system).
-        let (Some(parent), Some(wanted)) = (target.parent(), target.file_name().map(|n| n.to_string_lossy().to_lowercase())) else {
-            return Ok(None);
+        // The listing decides the spelling, because a disk that ignores case opens a file under any
+        // spelling: the entry spelled as typed, else the one file whose name matches ignoring case
+        // (a part an assembly spelled differently from the disk). The path as typed is the answer
+        // only when it opens a file and the listing cannot tell.
+        let typed = import.dir.metadata(&target).is_ok_and(|m| m.is_file()).then(|| target.to_string_lossy().replace('\\', "/"));
+        let (Some(parent), Some(typed_name)) = (target.parent(), target.file_name().map(|n| n.to_string_lossy().into_owned())) else {
+            return Ok(typed);
         };
+        let wanted = typed_name.to_lowercase();
         let listing = if parent.as_os_str().is_empty() { import.dir.entries() } else { import.dir.read_dir(parent) };
-        let Ok(listing) = listing else { return Ok(None) };
+        let Ok(listing) = listing else { return Ok(typed) };
         let mut found = None;
+        let mut matches = 0;
         let mut scanned = 0;
         for entry in listing.flatten() {
             scanned += 1;
             if scanned > MAX_IMPORT_FILES {
                 // A partial scan cannot show the match is the only one.
-                return Ok(None);
+                return Ok(typed);
             }
             let name = entry.file_name().to_string_lossy().into_owned();
             if name.starts_with('.') || name.to_lowercase() != wanted || !entry.file_type().is_ok_and(|t| t.is_file()) {
                 continue;
             }
-            if found.is_some() {
-                return Ok(None);
+            if name == typed_name {
+                return Ok(Some(target.to_string_lossy().replace('\\', "/")));
             }
+            matches += 1;
             found = Some(parent.join(name).to_string_lossy().replace('\\', "/"));
         }
-        Ok(found)
+        Ok(if matches == 1 { found } else { typed })
     }
 }
 impl<H: PluginHost> design::Host for State<H> {
@@ -1162,8 +1201,12 @@ fn execute<H: PluginHost + 'static>(
     dialog: bool,
 ) -> (State<H>, Result<Value>) {
     let limits = &runtime.limits;
-    // A long job runs for its fixed deadline, and reports its progress as often as it likes.
-    let (deadline_ms, max_calls) = if entry.job { (options.job_deadline_ms, MAX_JOB_CALLS) } else { (limits.deadline_ms, MAX_CALLS) };
+    // A long job runs for its fixed deadline, and reports its progress as often as it likes. The
+    // deadline counts guest (Wasm) running time like every other entry's, so one mechanism covers
+    // both. The manifest's host-call budget, already held under the user's ceiling, still applies
+    // and a job never has fewer calls than its progress reports need.
+    let (deadline_ms, max_calls) =
+        if entry.job { (options.job_deadline_ms, limits.host_calls.max(MAX_JOB_CALLS as u64)) } else { (limits.deadline_ms, limits.host_calls) };
     let state = State {
         host,
         commands,
@@ -1184,7 +1227,7 @@ fn execute<H: PluginHost + 'static>(
         calls: 0,
         max_calls,
         log_bytes: 0,
-        deadline: Instant::now() + Duration::from_millis(deadline_ms),
+        deadline: GuestDeadline::new(deadline_ms),
         limits: store_limits(limits, 10_000),
         import: None,
         panels: runtime.ui.clone(),
@@ -1238,7 +1281,7 @@ fn execute<H: PluginHost + 'static>(
         if store.data().host.is_cancelled() {
             return Err(HostError::Cancelled);
         }
-        if Instant::now() >= store.data().deadline {
+        if store.data().deadline.expired(Instant::now()) {
             return Err(deadline());
         }
         let value = if dialog {
@@ -1260,7 +1303,7 @@ fn execute<H: PluginHost + 'static>(
     })();
     // Fuel can run out between epoch ticks. If a hook has also crossed its deadline, report
     // the typed timeout even when the fuel trap was the first opportunity to stop it.
-    let expired = dialog && Instant::now() >= store.data().deadline;
+    let expired = dialog && store.data().deadline.expired(Instant::now());
     (store.into_data(), outcome.map_err(|error| with_limits(if expired { deadline() } else { error }, deadline_ms)))
 }
 
@@ -1280,13 +1323,17 @@ fn prepare_store<H: PluginHost + 'static>(store: &mut Store<State<H>>, limits: &
     store.limiter(|s| &mut s.limits);
     store.set_fuel(limits.fuel).map_err(|e| trap(e.to_string()))?;
     store.set_epoch_deadline(1);
+    store.call_hook(|mut context, hook| {
+        context.data_mut().deadline.transition(hook, Instant::now());
+        Ok(())
+    });
     store.epoch_deadline_callback(|mut context| {
         let state = context.data_mut();
         if state.host.is_cancelled() {
             state.failed.get_or_insert(HostError::Cancelled);
             return Err(wasmtime::Error::msg("plugin cancelled"));
         }
-        if Instant::now() >= state.deadline {
+        if state.deadline.expired(Instant::now()) {
             state.failed.get_or_insert_with(deadline);
             return Err(wasmtime::Error::msg("plugin deadline exceeded"));
         }
@@ -1557,8 +1604,13 @@ thread_local! {
 /// it, so the first call waits about a second rather than the tens of seconds Cranelift takes for a
 /// large importer, and [`optimize_in_background`] later swaps in Cranelift's code and caches it.
 fn compile(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
+    compile_reporting(bytes, stack_bytes, || {})
+}
+
+fn compile_reporting(bytes: &[u8], stack_bytes: usize, preparing: impl FnOnce()) -> Result<(Engine, Component)> {
     #[cfg(test)]
     if let Some(tier) = FORCED_TIER.with(std::cell::Cell::get) {
+        preparing();
         return compile_with(bytes, stack_bytes, tier);
     }
     let cache = cache();
@@ -1569,7 +1621,7 @@ fn compile(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
     {
         return Ok((cached.engine.clone(), cached.component.clone()));
     }
-    let (engine, component, tier) = compile_fresh(bytes, stack_bytes, cache.disk())?;
+    let (engine, component, tier) = compile_fresh_reporting(bytes, stack_bytes, cache.disk(), preparing)?;
     if let Ok(mut compiled) = cache.compiled.lock() {
         *compiled = Some(Compiled { bytes: Arc::from(bytes), stack_bytes, engine: engine.clone(), component: component.clone(), tier });
     }
@@ -1580,6 +1632,15 @@ fn compile(bytes: &[u8], stack_bytes: usize) -> Result<(Engine, Component)> {
 /// Winch's; else, when Winch refuses the component (a WebAssembly feature it lacks on this
 /// processor) or anything else goes wrong, Cranelift's, as before Winch, and cached.
 fn compile_fresh(bytes: &[u8], stack_bytes: usize, disk: Option<wasmtime::Cache>) -> Result<(Engine, Component, Tier)> {
+    compile_fresh_reporting(bytes, stack_bytes, disk, || {})
+}
+
+fn compile_fresh_reporting(
+    bytes: &[u8],
+    stack_bytes: usize,
+    disk: Option<wasmtime::Cache>,
+    preparing: impl FnOnce(),
+) -> Result<(Engine, Component, Tier)> {
     if let Some(disk) = &disk
         && let Ok(engine) = engine_for(stack_bytes, Tier::Optimized, true, Some(disk.clone()))
         && optimized_marker(disk, &engine, bytes).is_some_and(|marker| marker.is_file())
@@ -1589,6 +1650,7 @@ fn compile_fresh(bytes: &[u8], stack_bytes: usize, disk: Option<wasmtime::Cache>
         let component = compile_component(&engine, bytes)?;
         return Ok((engine, component, Tier::Optimized));
     }
+    preparing();
     match compile_on(bytes, stack_bytes, Tier::Baseline, true, None) {
         Ok((engine, component)) => Ok((engine, component, Tier::Baseline)),
         Err(error) => {
@@ -1759,13 +1821,27 @@ fn engine_for(stack_bytes: usize, tier: Tier, parallel: bool, disk: Option<wasmt
 
 fn compile_component(engine: &Engine, bytes: &[u8]) -> Result<Component> {
     check_outer_interfaces(bytes)?;
-    Component::from_binary(engine, bytes).map_err(|e| {
-        // Inspect the parser error itself, not plugin names in the compilation context.
-        if let Some(error) = e.downcast_ref::<wasmtime::wasmparser::BinaryReaderError>() {
-            return component_parse_error(error);
-        }
-        trap(format!("component compilation failed: {e:#}"))
-    })
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Component::from_binary(engine, bytes))) {
+        Ok(compiled) => compiled.map_err(|e| {
+            // Inspect the parser error itself, not plugin names in the compilation context.
+            if let Some(error) = e.downcast_ref::<wasmtime::wasmparser::BinaryReaderError>() {
+                return component_parse_error(error);
+            }
+            trap(format!("component compilation failed: {e:#}"))
+        }),
+        Err(panic) => refuse_multi_memory(panic),
+    }
+}
+
+/// Lowering between two inner instances that each have their own memory takes an adapter over
+/// both, which Wasmtime writes whatever the engine allows and then panics on, multi-memory being
+/// off (#23498). That one panic is the component's doing; any other goes on unwinding.
+fn refuse_multi_memory<T>(panic: Box<dyn std::any::Any + Send>) -> Result<T> {
+    let text = panic.downcast_ref::<String>().map(String::as_str).or_else(|| panic.downcast_ref::<&str>().copied());
+    if text.is_some_and(|text| text.starts_with("invalid adapter module generated: multiple memories")) {
+        return Err(component_error("this component needs WebAssembly multi-memory, which SolidCraft does not enable"));
+    }
+    std::panic::resume_unwind(panic)
 }
 
 enum ImportOutput {
@@ -1860,7 +1936,14 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
         }
         let folder = request.path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")).to_path_buf();
         let stack = stack_bytes(&runtime.limits, runtime_options, true)?;
-        let (engine, component) = compile(bytes, stack)?;
+        let (engine, component) = compile_reporting(bytes, stack, || {
+            if !dialog {
+                host.importer_stage(&manifest.name, true);
+            }
+        })?;
+        if !dialog {
+            host.importer_stage(&manifest.name, false);
+        }
         check_dialog_export(manifest, &engine, &component)?;
         // Compilation is cached and happens outside the execution budget. Every source I/O
         // operation and guest execution share one deadline, including open/stat on a slow mount.
@@ -1945,9 +2028,9 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
         forms: false,
         failed: None,
         calls: 0,
-        max_calls: if dialog { MAX_CALLS } else { MAX_IMPORT_CALLS },
+        max_calls: if dialog { limits.host_calls } else { MAX_IMPORT_CALLS },
         log_bytes: 0,
-        deadline: dialog_deadline.unwrap_or_else(|| Instant::now() + Duration::from_millis(limits.deadline_ms)),
+        deadline: dialog_deadline.map_or_else(|| GuestDeadline::new(limits.deadline_ms), GuestDeadline::until),
         // A large converter has a large indirect-call table.
         limits: store_limits(limits, 1_000_000),
         import: Some(import),
@@ -1996,7 +2079,7 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
             if text.len() > craft_plugin::dialog::MAX_UPDATE_BYTES {
                 return Err(limit("dialog reply exceeds 64 KiB"));
             }
-            if Instant::now() >= store.data().deadline {
+            if store.data().deadline.expired(Instant::now()) {
                 return Err(deadline());
             }
             let fields = serde_json::from_str(&text).map_err(|e| component_error(format!("dialog reply is not JSON: {e}")))?;
@@ -2009,8 +2092,8 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
         if design.is_empty() {
             return Err(HostError::InvalidInput { field: "design".into(), reason: "the importer wrote no design".into() });
         }
-        // A last host call can finish after the deadline, before the next epoch tick sees it.
-        if Instant::now() >= store.data().deadline {
+        // Check guest compute since the last epoch, including guest post-return work.
+        if store.data().deadline.expired(Instant::now()) {
             return Err(deadline());
         }
         Ok(ImportOutput::Design(Imported { design, report }))
@@ -2100,7 +2183,7 @@ pub(super) fn run_export<H: PluginHost + 'static>(
         calls: 0,
         max_calls: MAX_IMPORT_CALLS,
         log_bytes: 0,
-        deadline: Instant::now() + Duration::from_millis(limits.deadline_ms),
+        deadline: GuestDeadline::new(limits.deadline_ms),
         limits: store_limits(limits, 1_000_000),
         import: None,
         panels: None,
@@ -2128,7 +2211,7 @@ pub(super) fn run_export<H: PluginHost + 'static>(
             return Err(HostError::Cancelled);
         }
         // A last host call can finish after the deadline, before the next epoch tick sees it.
-        if Instant::now() >= store.data().deadline {
+        if store.data().deadline.expired(Instant::now()) {
             return Err(deadline());
         }
         Ok(file)

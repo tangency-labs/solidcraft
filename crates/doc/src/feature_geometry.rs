@@ -85,7 +85,8 @@ impl FeatureKind {
             | FeatureKind::SurfaceOffset { .. }
             | FeatureKind::SurfaceMidsurface { .. }
             | FeatureKind::SurfaceMatch { .. }
-            | FeatureKind::SurfaceFair { .. } => &["faces"],
+            | FeatureKind::SurfaceFair { .. }
+            | FeatureKind::SurfaceMorph { .. } => &["faces"],
             FeatureKind::SplitFace { .. } => &["faces", "tool"],
             FeatureKind::Split { .. } => &["tool", "tool_faces"],
             FeatureKind::SurfaceTrim { .. } => &["tool"],
@@ -113,6 +114,7 @@ impl FeatureKind {
             FeatureKind::Shell { body, .. }
             | FeatureKind::Dome { body, .. }
             | FeatureKind::Draft { body, .. }
+            | FeatureKind::Dogbone { body, .. }
             | FeatureKind::SplitFace { body, .. }
             | FeatureKind::OffsetFace { body, .. }
             | FeatureKind::DeleteFace { body, .. }

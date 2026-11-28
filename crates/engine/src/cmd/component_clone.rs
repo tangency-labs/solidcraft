@@ -302,6 +302,7 @@ pub(super) fn build(
         if let Some(added) = scratch.doc_mut().components.iter_mut().find(|x| x.id == new) {
             added.metadata = c.metadata.clone();
             added.properties = c.properties.clone();
+            added.name_split = c.name_split.clone();
             added.identification_color = c.identification_color;
             added.physical_override = c.physical_override;
         }
@@ -493,7 +494,7 @@ pub(super) fn build(
                     if scratch.doc.params.len() >= solidcraft_doc::MAX_PARAMS {
                         return Err(bad(CMD, "too many copied parameters"));
                     }
-                    let new = scratch.doc_mut().new_model_param(&p.expr, &p.unit);
+                    let new = scratch.doc_mut().new_model_param(&p.expr, &p.unit)?;
                     parameters.insert(name.clone(), new);
                 }
             }

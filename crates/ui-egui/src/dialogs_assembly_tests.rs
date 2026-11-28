@@ -2150,6 +2150,58 @@ fn component_picks_become_occurrences() {
     assert_eq!(c[0].0, "component.create");
 }
 
+/// Once the first instance of a component has a joint, a face picked on a further instance still
+/// joints that instance at the face picked, and the preview moves it (#5406, #5653).
+#[test]
+fn joint_on_a_further_instance_after_the_first_is_jointed() {
+    let mut app = two_boxes();
+    let run_dialog = |app: &mut SolveApp, picks: [Vec3; 2]| {
+        app.start("joint.create");
+        let mut d = app.dialog.take().unwrap();
+        for p in picks {
+            d.pick(&app.session, face_sel(&app.session, p).unwrap());
+        }
+        d
+    };
+    // B:1's bottom on A's top: B:1 sits on A, 10 to 20 high.
+    let d = run_dialog(&mut app, [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)]);
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    let first = occ(&app, "B");
+    let component = app.session.doc.find_component("B").unwrap();
+    let copy = app.run("occurrence.copy", json!({"component": component, "translate": [0, 40, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+    assert_ne!(copy, first);
+    // Component 1 is the copy's bottom, component 2 A's +X side, as in the report.
+    let bottom = Vec3::new(10.0, 50.0, 10.0);
+    let pick = face_sel(&app.session, bottom).unwrap();
+    assert!(matches!(&pick, Sel::Face { body, .. } if body.contains("B:2")), "{pick:?}");
+    let d = run_dialog(&mut app, [bottom, Vec3::new(20.0, 10.0, 5.0)]);
+    let Kind::Assembly(k) = &d.kind else { panic!("{:?}", d.kind) };
+    assert_eq!(joint_problem(&app, k, &d.inputs), None);
+    let preview = preview_commands(&app, &d).unwrap();
+    let params = &preview[0].1;
+    let side_on_copy = |p: &Value| ["a", "b"].into_iter().find(|s| p[*s]["occurrence"] == copy);
+    assert!(side_on_copy(params).is_some(), "the copy is a side: {params}");
+    assert!(["a", "b"].iter().all(|s| params[*s]["occurrence"] != first), "B:1 is not a side: {params}");
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    let joint = app.session.doc.assembly.joints.last().unwrap();
+    let side = if joint.a.occurrence == copy { &joint.a } else { &joint.b };
+    assert_eq!(side.occurrence, copy, "{joint:?}");
+    let solve = app.run("joint.solve", json!({})).unwrap();
+    assert_eq!(solve["conflicts"], json!([]), "{solve}");
+    assert_eq!(solve["errors"], json!([]), "{solve}");
+    // The copy moved: its bottom now lies on A's +X side, at x = 20.
+    let frames = app.session.doc.body_frames(&app.session.model.state());
+    let body = frames.iter().find(|f| f.2.last() == Some(&copy)).map(|f| f.0.clone()).unwrap();
+    let bb = app.run("inspect.measure", json!({})).unwrap();
+    let measured = bb["bodies"].as_array().unwrap().iter().find(|b| b["name"] == body.as_str()).unwrap();
+    let min_x = measured["bbox"]["min"][0].as_f64().unwrap();
+    assert!((min_x - 20.0).abs() < 1e-6, "{bb}");
+}
+
 /// A body of a further instance of a component belongs to that instance, not the first (#3857).
 #[test]
 fn body_of_a_further_instance_is_its_own_occurrence() {
@@ -2318,6 +2370,146 @@ fn picks_on_one_component_say_why_and_offer_components() {
     assert!(text_at(&out, &why).is_none(), "nothing left to say");
 }
 
+/// #12867: a joint between two grounded parts moves neither. The Joint dialog says so under the
+/// picks and offers to unground the second part; after that the note is gone. A joint made
+/// between them anyway says the same in Messages, as an error.
+#[test]
+fn picks_on_two_grounded_parts_say_the_joint_moves_neither_and_offer_to_unground_one() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        s.execute("component.create", &json!({"name": name})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    for name in ["A", "B"] {
+        let o = occ(&app, name);
+        app.run("occurrence.ground", json!({"occurrence": o, "grounded": true})).unwrap();
+    }
+    let why = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid1"), ("a", "A:1"), ("b", "B:1")]);
+
+    // Made anyway (as a script or the dialog's OK would): Messages says why, as an error.
+    app.messages.clear();
+    let r = app
+        .run(
+            "joint.create",
+            json!({"type": "rigid", "name": "Rigid1", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 10]}}),
+        )
+        .unwrap();
+    assert!(r["conflicts"].as_array().is_some_and(|c| c.len() == 1), "{r}");
+    assert!(app.messages.iter().any(|m| m.text == why && m.error), "{:?}", app.messages.iter().map(|m| &m.text).collect::<Vec<_>>());
+    app.run("edit.undo", json!({})).unwrap();
+
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(5.0, 5.0, 10.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(25.0, 5.0, 10.0)).unwrap());
+    let Kind::Assembly(Asm::Joint(f)) = &d.kind else { panic!("{:?}", d.kind) };
+    // The dialog names the joint it would make (its default name).
+    let why = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid Joint1"), ("a", "A:1"), ("b", "B:1")]);
+    let held = grounded_sides(&app, f, &d.inputs).expect("both picks are grounded");
+    assert_eq!((held.why.as_str(), held.occurrence, held.name.as_str()), (why.as_str(), occ(&app, "B"), "B:1"));
+    app.dialog = Some(d);
+    let ctx = crate::fonts::test_context();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    let frame = |app: &mut SolveApp, events: Vec<egui::Event>| {
+        let input = egui::RawInput { screen_rect: Some(screen), events, ..Default::default() };
+        let mut out = ctx.run_ui(input, |ui| crate::dialogs::show(app, ui.ctx()));
+        // Nothing is painted: drop the texture changes (an unapplied delta panics on drop).
+        out.textures_delta.clear();
+        out
+    };
+    // The auto-sized dialog takes a few frames to settle its width.
+    for _ in 0..3 {
+        frame(&mut app, vec![]);
+    }
+    let out = frame(&mut app, vec![]);
+    assert!(text_at(&out, &why).is_some(), "the dialog says why");
+    let label = solidcraft_ui_text::format("joint.unground_part", &[("occurrence", "B:1")]);
+    let at = text_at(&out, &label).expect("and offers to unground the second part");
+    let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+    frame(&mut app, vec![egui::Event::PointerMoved(at)]);
+    frame(&mut app, vec![button(true)]);
+    frame(&mut app, vec![button(false)]);
+    let b = occ(&app, "B");
+    assert!(app.session.doc.occurrences.iter().any(|o| o.id == b && !o.grounded), "B is ungrounded");
+    assert!(app.dialog.is_some(), "the dialog stays open");
+    let out = frame(&mut app, vec![]);
+    assert!(text_at(&out, &why).is_none(), "nothing left to say");
+}
+
+/// #12867: the Joint dialog's note covers every pick a joint takes, not only faces: a grounded
+/// component's plane or axis is a side on that part. The root's own bodies never move, so a
+/// grounded part picked against them gets the note too, and the button ungrounds the part,
+/// whichever was picked first. Editing a joint that doesn't hold says why in Messages too.
+#[test]
+fn grounded_note_covers_datum_picks_the_root_and_edits() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        s.execute("component.create", &json!({"name": name})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    // A body of the root's own, away from both parts.
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [0, 40, 0]})).unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    for name in ["A", "B"] {
+        let o = occ(&app, name);
+        app.run("occurrence.ground", json!({"occurrence": o, "grounded": true})).unwrap();
+    }
+    let note = |app: &mut SolveApp, a: Sel, b: Sel| {
+        app.start("joint.create");
+        let mut d = app.dialog.take().unwrap();
+        d.pick(&app.session, a);
+        d.pick(&app.session, b);
+        let Kind::Assembly(Asm::Joint(f)) = &d.kind else { panic!("{:?}", d.kind) };
+        let held = grounded_sides(app, f, &d.inputs);
+        app.dialog = None;
+        held
+    };
+    let face = |app: &SolveApp, x: f64, y: f64| face_sel(&app.session, Vec3::new(x, y, 10.0)).unwrap();
+    let both = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid Joint1"), ("a", "A:1"), ("b", "B:1")]);
+
+    // A component plane or axis of a grounded part is a side on that part, as a face is.
+    for (a, b) in [
+        (Sel::Plane { name: "A/XY".into() }, face(&app, 25.0, 5.0)),
+        (face(&app, 5.0, 5.0), Sel::Axis { name: "B/Z".into() }),
+        (Sel::Plane { name: "A/XZ".into() }, Sel::Axis { name: "B/X".into() }),
+    ] {
+        let held = note(&mut app, a.clone(), b.clone()).unwrap_or_else(|| panic!("{a:?} and {b:?} are both on grounded parts"));
+        assert_eq!((held.why.as_str(), held.occurrence), (both.as_str(), occ(&app, "B")), "{a:?}, {b:?}");
+    }
+
+    // The root against a grounded part, in either order: the button frees the part.
+    let root_note = solidcraft_ui_text::format("joint.moves_neither_root", &[("joint", "Rigid Joint1"), ("occurrence", "B:1")]);
+    for (a, b) in [(face(&app, 5.0, 45.0), face(&app, 25.0, 5.0)), (face(&app, 25.0, 5.0), face(&app, 5.0, 45.0))] {
+        let held = note(&mut app, a, b).expect("the root never moves");
+        assert_eq!((held.why.as_str(), held.occurrence, held.name.as_str()), (root_note.as_str(), occ(&app, "B"), "B:1"));
+    }
+    // A part that can move gets no note.
+    let a = occ(&app, "A");
+    app.run("occurrence.ground", json!({"occurrence": a, "grounded": false})).unwrap();
+    let (root_face, a_face, b_face) = (face(&app, 5.0, 45.0), face(&app, 5.0, 5.0), face(&app, 25.0, 5.0));
+    assert_eq!(note(&mut app, root_face, a_face), None);
+    assert_eq!(note(&mut app, Sel::Plane { name: "A/XY".into() }, b_face), None);
+    app.run("occurrence.ground", json!({"occurrence": a, "grounded": true})).unwrap();
+
+    // An edit that leaves the joint not holding says why in Messages, as a new joint does.
+    let texts = |app: &SolveApp| app.messages.iter().filter(|m| m.error).map(|m| m.text.clone()).collect::<Vec<_>>();
+    app.run(
+        "joint.create",
+        json!({"type": "rigid", "name": "Rigid1", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 10]}}),
+    )
+    .unwrap();
+    app.messages.clear();
+    let r = app.run("joint.edit", json!({"joint": "Rigid1", "offset": 2})).unwrap();
+    assert!(r["joint"].as_u64().is_some(), "the edit names its joint: {r}");
+    let why = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid1"), ("a", "A:1"), ("b", "B:1")]);
+    assert!(texts(&app).contains(&why), "{:?}", texts(&app));
+}
+
 /// Stand with two bodies and Umbrella with one, both placed at the top level, which is active.
 fn stand_and_umbrella() -> (crate::scenario::Harness, u64, u64) {
     let mut h = crate::scenario::Harness::new();
@@ -2337,7 +2529,11 @@ fn stand_and_umbrella() -> (crate::scenario::Harness, u64, u64) {
 }
 
 fn click_row(h: &mut crate::scenario::Harness, occurrence: u64) {
-    let at = h.call("ui.at", json!({"occurrence": [occurrence], "control": "row"}));
+    click_row_at(h, &[occurrence]);
+}
+
+fn click_row_at(h: &mut crate::scenario::Harness, path: &[u64]) {
+    let at = h.call("ui.at", json!({"occurrence": path, "control": "row"}));
     assert_eq!(at["ok"], true, "{at}");
     let clicked = h.call("ui.click", json!({"x": at["result"][0], "y": at["result"][1]}));
     assert_eq!(clicked["ok"], true, "{clicked}");
@@ -2377,6 +2573,158 @@ fn as_built_takes_a_two_body_component_as_one() {
         assert_eq!(c[0].0, "joint.as_built");
         assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(stand), json!(umbrella)));
     }
+}
+
+/// Component Outer holding sub-component Inner, and component Other beside them.
+fn outer_inner_other() -> (crate::scenario::Harness, u64, u64, u64) {
+    outer_inner_other_with(true)
+}
+
+/// As [`outer_inner_other`]; without `outer_body` Outer holds Inner and no body of its own.
+fn outer_inner_other_with(outer_body: bool) -> (crate::scenario::Harness, u64, u64, u64) {
+    let mut h = crate::scenario::Harness::new();
+    let component = |h: &mut crate::scenario::Harness, name: &str, corner: Option<[f64; 3]>| {
+        let occ = h.app.run("component.create", json!({ "name": name })).unwrap()["occurrence"].as_u64().unwrap();
+        if let Some(corner) = corner {
+            h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": corner, "operation": "new_body"})).unwrap();
+        }
+        occ
+    };
+    let outer = component(&mut h, "Outer", outer_body.then_some([0.0, 0.0, 0.0]));
+    let inner = component(&mut h, "Inner", Some([0.0, 0.0, 10.0]));
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let other = component(&mut h, "Other", Some([40.0, 0.0, 0.0]));
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.preferences.browser_components_open = true;
+    h.frames(3);
+    let held = if outer_body { 2 } else { 1 };
+    assert_eq!(h.app.session.occurrence_bodies(&[outer], true).unwrap().len(), held, "Outer holds Inner's body too");
+    assert_eq!(h.app.session.occurrence_bodies(&[outer, inner], true).unwrap().len(), 1);
+    (h, outer, inner, other)
+}
+
+/// A component that holds a sub-component, picked by its Browser row or selected when As-Built
+/// starts, is one component: the body its sub-component places counts as the picked component,
+/// so Components waits for the second one. The sub-component picked by its own row is itself, also
+/// before or after Outer's row; a body picked in the canvas counts as its own component.
+#[test]
+fn as_built_takes_a_component_with_a_sub_component_as_one() {
+    for preselected in [false, true] {
+        let (mut h, outer, _, other) = outer_inner_other();
+        if preselected {
+            h.app.session.selection = vec![Sel::Occurrence { path: vec![outer] }];
+        }
+        h.app.start("joint.as_built");
+        h.frames(2);
+        if !preselected {
+            click_row(&mut h, outer);
+        }
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs[0].items.len(), 2, "Outer's body and Inner's");
+        assert_eq!(d.active, 0, "one component: Components stays active (preselected {preselected})");
+        assert_eq!(as_built_hint(&h), None, "nothing to split (preselected {preselected})");
+        assert_eq!(apply_commands(&h.app, d).unwrap_err(), "select two components", "preselected {preselected}");
+        click_row(&mut h, other);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.active, 1, "two components: Position is next");
+        let c = apply_commands(&h.app, d).unwrap();
+        assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(outer), json!(other)));
+    }
+    let (mut h, outer, inner, other) = outer_inner_other();
+    h.app.start("joint.as_built");
+    h.frames(2);
+    click_row_at(&mut h, &[outer, inner]);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "Inner's body alone");
+    click_row(&mut h, other);
+    let d = h.app.dialog.as_ref().unwrap();
+    let c = apply_commands(&h.app, d).unwrap();
+    assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(inner), json!(other)), "the sub-component by its own row");
+
+    // Outer by its row, then Inner by its own: Inner is the second component, not a click that
+    // takes its body out again.
+    let (mut h, outer, inner, _) = outer_inner_other();
+    h.app.start("joint.as_built");
+    h.frames(2);
+    click_row(&mut h, outer);
+    click_row_at(&mut h, &[outer, inner]);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!((d.inputs[0].items.len(), d.active), (2, 1), "Inner's body stays, Position is next");
+    let c = apply_commands(&h.app, d).unwrap();
+    assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(outer), json!(inner)), "Outer, then Inner by its own row");
+
+    // The other order: Inner by its own row, then Outer by its row, are two components too.
+    let (mut h, outer, inner, _) = outer_inner_other();
+    h.app.start("joint.as_built");
+    h.frames(2);
+    click_row_at(&mut h, &[outer, inner]);
+    click_row(&mut h, outer);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!((d.inputs[0].items.len(), d.active), (2, 1), "both bodies, Position is next");
+    let c = apply_commands(&h.app, d).unwrap();
+    assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(inner), json!(outer)), "Inner, then Outer by its row");
+
+    // Outer by its row, then a body of Other picked in the canvas.
+    let (mut h, outer, _, other) = outer_inner_other();
+    h.app.start("joint.as_built");
+    h.frames(2);
+    click_row(&mut h, outer);
+    let body = h.app.session.occurrence_bodies(&[other], true).unwrap()[0].clone();
+    let mut d = h.app.dialog.take().unwrap();
+    d.pick(&h.app.session, Sel::Body { name: body });
+    h.app.dialog = Some(d);
+    h.frames(2);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.active, 1, "two components: Position is next");
+    let c = apply_commands(&h.app, d).unwrap();
+    assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(outer), json!(other)), "with a body picked in the canvas");
+
+    // Outer with no body of its own: its row and Inner's hold the same body, and are still two
+    // components, in the order clicked.
+    for outer_first in [true, false] {
+        let (mut h, outer, inner, other) = outer_inner_other_with(false);
+        h.app.start("joint.as_built");
+        h.frames(2);
+        let (first, second) = if outer_first { (vec![outer], vec![outer, inner]) } else { (vec![outer, inner], vec![outer]) };
+        click_row_at(&mut h, &first);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.active, 0, "one component so far (Outer first {outer_first})");
+        click_row_at(&mut h, &second);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!((d.inputs[0].items.len(), d.active), (1, 1), "Inner's one body, Position is next (Outer first {outer_first})");
+        let c = apply_commands(&h.app, d).unwrap();
+        let want = if outer_first { (json!(outer), json!(inner)) } else { (json!(inner), json!(outer)) };
+        assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), want, "Outer with no body (Outer first {outer_first})");
+        if outer_first {
+            // Position is active, so Other's row is not a third component, and picks no position.
+            click_row(&mut h, other);
+            let d = h.app.dialog.as_ref().unwrap();
+            assert_eq!((d.inputs[0].items.len(), d.active, d.inputs[1].items.len()), (1, 1, 0), "Other's row changes nothing");
+            let c = apply_commands(&h.app, d).unwrap();
+            assert_eq!((c[0].1["a"].clone(), c[0].1["b"].clone()), (json!(outer), json!(inner)), "Other's row leaves the two components");
+        }
+    }
+}
+
+/// Both grounded: Outer, which holds a sub-component, picked by its row, and Other make a joint
+/// that moves neither, as OK counts them; Outer alone is one component, with nothing to say yet.
+#[test]
+fn as_built_grounded_note_counts_a_component_with_a_sub_component_as_one() {
+    let (mut h, outer, _, other) = outer_inner_other();
+    for o in [outer, other] {
+        h.app.run("occurrence.ground", json!({"occurrence": o, "grounded": true})).unwrap();
+    }
+    h.frames(2);
+    h.app.start("joint.as_built");
+    h.frames(2);
+    click_row(&mut h, outer);
+    let held = |h: &crate::scenario::Harness| {
+        let d = h.app.dialog.as_ref().unwrap();
+        let Kind::Assembly(Asm::Joint(f)) = &d.kind else { panic!("{:?}", d.kind) };
+        grounded_sides(&h.app, f, &d.inputs).map(|g| g.occurrence)
+    };
+    assert_eq!(held(&h), None, "Outer alone");
+    click_row(&mut h, other);
+    assert_eq!(held(&h), Some(other), "two grounded components: the note, and Unground frees the second");
 }
 
 /// #21842: the hint stays for its own case, the bodies of one component picked one by one, and a
@@ -2461,6 +2809,94 @@ fn rigid_group_preserves_two_instances_of_one_component() {
     assert_eq!(commands, vec![("joint.rigid_group".into(), json!({"occurrences": [first, second]}))]);
     crate::dialogs::run_dialog(&mut app, &d).unwrap();
     assert_eq!(app.session.doc.assembly.joints.len(), 1);
+}
+
+/// #23189: Rigid Group counts a component picked whole (its Browser row, or selected when the
+/// window opens) as that component, as As-Built does: Outer, which holds sub-component Inner, is
+/// one component, and OK waits for a second. Inner's own row adds Inner on purpose, before or
+/// after Outer's; a body picked in the canvas counts as its own component.
+#[test]
+fn rigid_group_takes_a_component_with_a_sub_component_as_one() {
+    let group = |h: &crate::scenario::Harness| apply_commands(&h.app, h.app.dialog.as_ref().unwrap());
+    let want = |occurrences: [u64; 2]| Ok(vec![("joint.rigid_group".to_string(), json!({ "occurrences": occurrences }))]);
+    let select = Err("Select two or more components.".to_string());
+    for preselected in [false, true] {
+        let (mut h, outer, _, other) = outer_inner_other();
+        if preselected {
+            h.app.session.selection = vec![Sel::Occurrence { path: vec![outer] }];
+        }
+        h.app.start("joint.rigid_group");
+        h.frames(2);
+        if !preselected {
+            click_row(&mut h, outer);
+        }
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 2, "Outer's body and Inner's (preselected {preselected})");
+        assert_eq!(group(&h), select, "one component (preselected {preselected})");
+        click_row(&mut h, other);
+        assert_eq!(group(&h), want([outer, other]), "Outer and Other (preselected {preselected})");
+    }
+
+    // Outer by its row, then Inner by its own: Inner is a second component, not a click that takes
+    // its body out again. The other order too.
+    for outer_first in [true, false] {
+        let (mut h, outer, inner, _) = outer_inner_other();
+        h.app.start("joint.rigid_group");
+        h.frames(2);
+        let (first, second) = if outer_first { (vec![outer], vec![outer, inner]) } else { (vec![outer, inner], vec![outer]) };
+        click_row_at(&mut h, &first);
+        click_row_at(&mut h, &second);
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 2, "both bodies (Outer first {outer_first})");
+        let order = if outer_first { [outer, inner] } else { [inner, outer] };
+        assert_eq!(group(&h), want(order), "in the order clicked (Outer first {outer_first})");
+    }
+
+    // Outer by its row, then a body of Other picked in the canvas.
+    let (mut h, outer, _, other) = outer_inner_other();
+    h.app.start("joint.rigid_group");
+    h.frames(2);
+    click_row(&mut h, outer);
+    let body = h.app.session.occurrence_bodies(&[other], true).unwrap()[0].clone();
+    let mut d = h.app.dialog.take().unwrap();
+    d.pick(&h.app.session, Sel::Body { name: body });
+    h.app.dialog = Some(d);
+    h.frames(2);
+    assert_eq!(group(&h), want([outer, other]), "with a body picked in the canvas");
+
+    // Outer by its row, then Outer's own body taken out in the canvas: what is left is Inner's
+    // body, which counts as Inner again, not as the whole pick that no longer holds.
+    let (mut h, outer, inner, other) = outer_inner_other();
+    h.app.start("joint.rigid_group");
+    h.frames(2);
+    click_row(&mut h, outer);
+    let own = h.app.session.occurrence_bodies(&[outer], false).unwrap()[0].clone();
+    let mut d = h.app.dialog.take().unwrap();
+    d.pick(&h.app.session, Sel::Body { name: own });
+    h.app.dialog = Some(d);
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "Inner's body alone");
+    click_row(&mut h, other);
+    assert_eq!(group(&h), want([inner, other]), "Outer's body taken out");
+
+    // Outer with no body of its own: its row alone is one component, and its row and Inner's,
+    // which hold the same body, are two, in the order clicked.
+    let (mut h, outer, _, other) = outer_inner_other_with(false);
+    h.app.start("joint.rigid_group");
+    h.frames(2);
+    click_row(&mut h, outer);
+    assert_eq!(group(&h), select, "Outer with no body alone");
+    click_row(&mut h, other);
+    assert_eq!(group(&h), want([outer, other]), "Outer with no body, then Other");
+    for outer_first in [true, false] {
+        let (mut h, outer, inner, _) = outer_inner_other_with(false);
+        h.app.start("joint.rigid_group");
+        h.frames(2);
+        let (first, second) = if outer_first { (vec![outer], vec![outer, inner]) } else { (vec![outer, inner], vec![outer]) };
+        click_row_at(&mut h, &first);
+        click_row_at(&mut h, &second);
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "Inner's one body (Outer first {outer_first})");
+        let order = if outer_first { [outer, inner] } else { [inner, outer] };
+        assert_eq!(group(&h), want(order), "Outer with no body and Inner (Outer first {outer_first})");
+    }
 }
 
 /// Two top faces mate face to face: B ends up upside down on A, not inside it;
@@ -4190,4 +4626,84 @@ fn a_mistyped_dynamics_value_is_refused_with_a_message() {
         }
         assert!(apply_commands(&app, &d).is_err(), "{typed}");
     }
+}
+
+/// #22615: Joint Origin dialog's Between Two Faces mode picks two planar faces and an optional
+/// snap reference, creating a persistent `Snap::BetweenFaces` with `snap: Some(_)`.
+#[test]
+fn joint_origin_dialog_between_two_faces_mode_with_snap() {
+    let mut app = two_boxes();
+    app.start("joint.origin");
+    let mut d = app.dialog.take().unwrap();
+    let Kind::Assembly(Asm::JointOrigin { between_faces, name, .. }) = &mut d.kind else {
+        panic!("not JointOrigin");
+    };
+    *between_faces = true;
+    *name = "MidA".into();
+    sync_joint_origin_inputs(&app, true, &mut d.inputs, &mut d.active);
+    assert_eq!(d.inputs.len(), 3);
+    assert_eq!(d.inputs[0].accept, PLANAR_FACES);
+    assert_eq!(d.inputs[1].accept, PLANAR_FACES);
+    assert_eq!(d.inputs[2].accept, SNAPS);
+
+    // Pick left face (x = 0) and right face (x = 20) of A, plus top face (z = 10) as snap.
+    d.inputs[0].items.push(face_sel(&app.session, Vec3::new(0.0, 10.0, 5.0)).unwrap());
+    d.inputs[1].items.push(face_sel(&app.session, Vec3::new(20.0, 10.0, 5.0)).unwrap());
+    d.inputs[2].items.push(face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].0, "joint.origin");
+    assert!(cmds[0].1["faces"].is_array(), "{cmds:?}");
+    assert!(cmds[0].1["snap"].is_object(), "{cmds:?}");
+    for (id, p) in cmds {
+        app.run(&id, p).unwrap();
+    }
+    let made = app.session.doc.assembly.origins.iter().find(|o| o.name == "MidA").unwrap();
+    assert!(matches!(made.origin.snap, Snap::BetweenFaces { snap: Some(_), .. }), "{:?}", made.origin.snap);
+    let m = app.session.doc.origin_world(&app.session.model.state(), &made.origin).unwrap();
+    let at = solidcraft_engine::doc::apply_point(&m, Vec3::ZERO);
+    assert!(at.dist(Vec3::new(10.0, 10.0, 10.0)) < 1e-6, "{at:?}");
+}
+
+/// #22615: Joint dialog's Between Two Faces side mode creates a joint with `faces` + `snap`, and
+/// Edit Joint reloads both faces and the snap while preserving the origin on offset-only edits.
+#[test]
+fn joint_dialog_between_two_faces_create_and_edit_roundtrip() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        let was = f.between_faces;
+        f.between_faces[0] = true;
+        sync_joint_side_inputs(&app, was, f, &mut d.inputs, &mut d.active);
+        assert_eq!(f.alignment_base(), 4);
+    }
+    assert_eq!(d.inputs.len(), 6);
+    // Side 1 (A): x = 0 and x = 20 faces + top face snap; Side 2 (B): bottom face at z = 0.
+    d.inputs[0].items.push(face_sel(&app.session, Vec3::new(0.0, 10.0, 5.0)).unwrap());
+    d.inputs[1].items.push(face_sel(&app.session, Vec3::new(20.0, 10.0, 5.0)).unwrap());
+    d.inputs[2].items.push(face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+    d.inputs[3].items.push(face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].0, "joint.create");
+    assert!(cmds[0].1["a"]["faces"].is_array(), "{cmds:?}");
+    assert!(cmds[0].1["a"]["snap"].is_object(), "{cmds:?}");
+    for (id, p) in cmds {
+        app.run(&id, p).unwrap();
+    }
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut edit = edit_joint(&app, id).unwrap();
+    let Kind::Assembly(Asm::Joint(f)) = &mut edit.kind else { panic!("not Joint") };
+    assert_eq!(f.between_faces, [true, false]);
+    assert_eq!(edit.inputs.len(), 6);
+    assert_eq!(edit.inputs[0].items.len(), 1);
+    assert_eq!(edit.inputs[1].items.len(), 1);
+    assert_eq!(edit.inputs[2].items.len(), 1);
+    // Changing only offset does not resend `a`, preserving the saved BetweenFaces origin.
+    f.offset[2] = "5 mm".into();
+    let edit_cmds = apply_commands(&app, &edit).unwrap();
+    assert_eq!(edit_cmds[0].0, "joint.edit");
+    assert!(edit_cmds[0].1.get("a").is_none(), "{edit_cmds:?}");
+    assert_eq!(edit_cmds[0].1["offset"], json!("5 mm"));
 }

@@ -202,16 +202,23 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     // built on it (an offset of it, a plane through one of its points).
     for joint in &mut scratch.doc_mut().assembly.joints {
         for side in [&mut joint.a, &mut joint.b] {
-            use solidcraft_doc::joints::{AxisRef, AxisTarget, Snap};
-            match &mut side.snap {
-                Snap::Plane { plane, .. } => nested_too_deep |= !plane_paths(plane, &mut rebase, 0),
-                Snap::Axis { axis, .. } => match axis.as_mut() {
-                    AxisRef::Target(AxisTarget::Datum { datum }) => rebase(&mut datum.path),
-                    AxisRef::Target(AxisTarget::Geo { geo }) => nested_too_deep |= !geo_paths(geo, &mut rebase, 0),
-                    _ => {}
-                },
-                _ => {}
+            fn rebase_snap(snap: &mut solidcraft_doc::joints::Snap, rebase: &mut impl FnMut(&mut Vec<u64>)) -> bool {
+                use solidcraft_doc::joints::{AxisRef, AxisTarget, Snap};
+                match snap {
+                    Snap::Plane { plane, .. } => !plane_paths(plane, rebase, 0),
+                    Snap::Axis { axis, .. } => match axis.as_mut() {
+                        AxisRef::Target(AxisTarget::Datum { datum }) => {
+                            rebase(&mut datum.path);
+                            false
+                        }
+                        AxisRef::Target(AxisTarget::Geo { geo }) => !geo_paths(geo, rebase, 0),
+                        _ => false,
+                    },
+                    Snap::BetweenFaces { snap: Some(inner), .. } => rebase_snap(inner, rebase),
+                    _ => false,
+                }
             }
+            nested_too_deep |= rebase_snap(&mut side.snap, &mut rebase);
         }
     }
     if too_deep || nested_too_deep {
@@ -229,6 +236,9 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(active) = scratch.active_occurrence_path.as_deref().and_then(|path| rebased(path, &old_path, &new_path)) {
         scratch.active_occurrence_path = Some(active);
     }
+    // Hidden placements follow too, or the refresh drops their old paths and accepting reads
+    // that as the move showing them (#22153).
+    follow_visibility(&mut scratch, &old_path, &new_path);
     scratch.refresh();
     for f in &scratch.doc.features {
         let broke = scratch.model.result(f.id).and_then(|r| r.error.as_ref());
@@ -242,8 +252,8 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"occurrence": id, "parent": to, "path": new_path, "transform": transform}))
 }
 
-/// Hidden placements and folders under `old_path` follow it to `new_path`. `accept_computed` does
-/// not carry them, so whoever accepts a computed move into a session does this after.
+/// Hidden placements and folders under `old_path` follow it to `new_path`: in the computed copy
+/// before its refresh, and in the session after accepting it, for what was hidden meanwhile.
 pub(super) fn follow_visibility(s: &mut Session, old_path: &[u64], new_path: &[u64]) {
     for hidden in &mut s.visibility.hidden_occurrences {
         if let Some(moved) = rebased(hidden, old_path, new_path) {

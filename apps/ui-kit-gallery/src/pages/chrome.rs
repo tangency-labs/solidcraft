@@ -185,7 +185,7 @@ for action in out.actions { if let ui_kit::ribbon::Action::Run { id, .. } = acti
             state(ui, name, |ui| {
                 let (rect, _) = ui.allocate_exact_size(vec2(width, ribbon::GROUP_HEIGHT), egui::Sense::hover());
                 ui.painter().rect_filled(rect, t.radius_sm, t.toolbar);
-                let out = ribbon::show(ui, &row, rect, &mut |_, _| false);
+                let out = ribbon::show(ui, &row, rect, &mut |_| None);
                 for action in out.actions {
                     d.said(format!("{action:?}"));
                 }

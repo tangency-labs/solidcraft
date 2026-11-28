@@ -6,14 +6,16 @@
 //! sweep (`SmApiCreateLinearSweep`) of the region's curves.
 //!
 //! The levels of an extrude's ends on planes at a slant to it ([`level_on_plane`],
-//! [`plane_rise`], [`plane_gap`]) were SolidCraft's extrude From/To code, moved into the kernel
-//! the same way (#21934).
+//! [`plane_rise`], [`plane_gap`]), and the planes and sides an extrude's tools are cut between
+//! ([`plane_raised`], [`slab_sides`]), were SolidCraft's extrude From/To code, moved into the
+//! kernel the same way (#21934).
 //!
 //! Deviations: none (no upstream counterpart). No recursion; the search over a free-form span
 //! is bounded by [`MAX_HALVINGS`] and [`MAX_PIECES`] and refuses past them.
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
 
+use crate::math::det;
 use std::f64::consts::{PI, TAU};
 
 use super::profile::{axes, curve_on_frame, gamma, halves, point_of, Region2, Seg2, H2};
@@ -91,6 +93,8 @@ pub fn symmetric_offset_probe_points(
 const OP_LEVEL: &str = "prism::extrude::level_on_plane";
 const OP_RISE: &str = "prism::extrude::plane_rise";
 const OP_GAP: &str = "prism::extrude::plane_gap";
+const OP_RAISED: &str = "prism::extrude::plane_raised";
+const OP_SLAB: &str = "prism::extrude::slab_sides";
 
 /// Halvings of a free-form span past which [`span_extremes`] refuses: at 2^-60 of the span's
 /// parameter a piece's enclosure has long reached its rounding (it shrinks to about a quarter
@@ -115,13 +119,12 @@ impl Level {
     /// (`x × y`) through each sketch point: `(P - o)·n + t (n·n)` at `P = o + x q.x + y q.y`,
     /// where the line `P + t n` meets `plane` (`t = (p - P)·m / (n·m)`, `p` and `m` the plane's
     /// origin and normal). Whether the line meets the plane is decided only past the rounding of
-    /// the normals' dot product, `gamma(3) |n| |m|` (Higham §3.1), and the origins are
-    /// subtracted before anything is scaled, so the rounding follows the part's size, not its
-    /// distance from the world origin.
+    /// `n·m` ([`meeting`]), and the origins are subtracted before anything is scaled, so the
+    /// rounding follows the part's size, not its distance from the world origin.
     fn of(frame: &Frame, plane: &Frame, op: &'static str) -> Result<Self> {
         let (o, x, y, n) = axes(frame);
-        let (p, _, _, m) = axes(plane);
-        let across = meeting(n, m, op)?;
+        let (p, _, _, _) = axes(plane);
+        let (across, m) = meeting(n, plane, op)?;
         let nn = n.dot(n);
         let level = Self {
             at0: (p - o).dot(m) / across * nn,
@@ -142,17 +145,25 @@ impl Level {
     }
 }
 
-/// `n·m`, refused where its sign is within its rounding, `gamma(3) |n| |m|`: there the line
-/// along `n` may run along the plane of normal `m` and never meet it.
-fn meeting(n: Vec3, m: Vec3, op: &'static str) -> Result<f64> {
+/// `n·m` and `m`, the normal `x × y` of `plane` as computed, refused where the sign of `n·m` is
+/// within its rounding: there the line along `n` may run along the plane and never meet it.
+/// `n` is the direction as given. The rounding counts the dot product, `gamma(3) |n| |m|`, and
+/// the cross product's own error, each component of `m` within `gamma(2) |x| |y|` of `x × y`
+/// (Higham §3.1; Cauchy-Schwarz on the component's two products), so `gamma(2) |n|_1 |x| |y|`
+/// through the dot product. Both terms take `gamma(5)`, which also covers the few roundings of
+/// the bound itself.
+fn meeting(n: Vec3, plane: &Frame, op: &'static str) -> Result<(f64, Vec3)> {
+    let (_, x, y, m) = axes(plane);
     let across = n.dot(m);
-    if !(across.abs() > gamma(3) * n.length() * m.length()) {
+    let n_1 = n.x.abs() + n.y.abs() + n.z.abs();
+    let rounding = gamma(5) * (n.length() * m.length() + n_1 * x.length() * y.length());
+    if !(across.abs() > rounding) {
         return Err(SolidError::invalid_input(
             op,
             "the plane runs along the extrusion",
         ));
     }
-    Ok(across)
+    Ok((across, m))
 }
 
 /// Where the line along `frame`'s normal through `point` meets `plane` (the plane through
@@ -166,8 +177,8 @@ fn meeting(n: Vec3, m: Vec3, op: &'static str) -> Result<f64> {
 /// level that is not finite.
 pub fn level_on_plane(frame: &Frame, point: Point3, plane: &Frame) -> Result<f64> {
     let (o, _, _, n) = axes(frame);
-    let (p, _, _, m) = axes(plane);
-    let across = meeting(n, m, OP_LEVEL)?;
+    let (p, _, _, _) = axes(plane);
+    let (across, m) = meeting(n, plane, OP_LEVEL)?;
     let level = (point - o).dot(n) + (p - point).dot(m) / across * n.dot(n);
     if !level.is_finite() {
         return Err(SolidError::invalid_input(
@@ -216,6 +227,54 @@ pub fn plane_gap(
     affine_extremes(gap, regions, OP_GAP)
 }
 
+/// `plane` moved by `by` along `frame`'s normal `n` (`x × y`): its origin moved to
+/// `origin + by n`, its axes kept. Its level above `frame` is `by` (times `n·n`, 1 for an
+/// orthonormal frame) more than `plane`'s at every sketch point: an extrude's end on a slanted
+/// face moved along the extrusion.
+///
+/// # Errors
+///
+/// `InvalidInput` for a frame with no normal, axes that are not finite, or a distance or an
+/// origin that is not finite.
+pub fn plane_raised(frame: &Frame, plane: &Frame, by: f64) -> Result<Frame> {
+    let (_, _, _, n) = axes(frame);
+    let (_, x, y, _) = axes(plane);
+    let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+    if !(finite(n) && n.length() > 0.0 && finite(x) && finite(y)) {
+        return Err(SolidError::invalid_input(
+            OP_RAISED,
+            "a frame with no normal or axes that are not finite",
+        ));
+    }
+    let origin = Vec3::from(plane.origin) + n * by;
+    if !(by.is_finite() && finite(origin)) {
+        return Err(SolidError::invalid_input(
+            OP_RAISED,
+            "a distance or an origin that is not finite",
+        ));
+    }
+    Ok(Frame {
+        origin: origin.to_array(),
+        ..*plane
+    })
+}
+
+/// Which side of each plane holds what lies past `from` and short of `to` along `travel`: an
+/// extrude's tools cut between its two ends. Each answer is `true` for the side the plane's
+/// normal (`x × y`) points to: past `from` when `travel` runs with `from`'s normal, short of
+/// `to` when it runs against `to`'s. A plane is refused as running along `travel` only where the
+/// sign of their dot product is within its rounding ([`meeting`], as [`level_on_plane`]
+/// refuses it): there the travel may never cross the plane.
+///
+/// # Errors
+///
+/// `InvalidInput` for a plane along `travel` (or a `travel` that is zero or not finite).
+pub fn slab_sides(travel: Vec3, from: &Frame, to: &Frame) -> Result<(bool, bool)> {
+    let past_from = meeting(travel, from, OP_SLAB)?.0 > 0.0;
+    let short_of_to = meeting(travel, to, OP_SLAB)?.0 < 0.0;
+    Ok((past_from, short_of_to))
+}
+
 /// The least and the most of `level` over the outer loops of `regions`. Over a line they lie at
 /// its ends; over an arc at its ends or at its points farthest along and against the level's
 /// slope where the arc passes them. Over a free-form piece (cubic, conic, Bézier) they are
@@ -223,8 +282,8 @@ pub fn plane_gap(
 fn affine_extremes(level: Level, regions: &[Region2], op: &'static str) -> Result<(f64, f64)> {
     let malformed = || SolidError::invalid_input(op, "a malformed profile segment");
     // the angle of the sketch direction along which the level rises fastest
-    let rise =
-        (level.slope.x != 0.0 || level.slope.y != 0.0).then(|| level.slope.y.atan2(level.slope.x));
+    let rise = (level.slope.x != 0.0 || level.slope.y != 0.0)
+        .then(|| det::atan2(level.slope.y, level.slope.x));
     let mut range: Option<(f64, f64)> = None;
     let mut take = |v: f64| -> Result<()> {
         if !v.is_finite() {
@@ -255,7 +314,7 @@ fn affine_extremes(level: Level, regions: &[Region2], op: &'static str) -> Resul
                     let toward = if radius < 0.0 { angle + PI } else { angle };
                     let turn = (toward - start) * sweep.signum();
                     if turn.rem_euclid(TAU) <= sweep.abs() {
-                        take(level.at(center + Vec2::new(toward.cos(), toward.sin()) * radius))?;
+                        take(level.at(center + Vec2::new(det::cos(toward), det::sin(toward)) * radius))?;
                     }
                 }
             }

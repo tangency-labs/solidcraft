@@ -6,7 +6,7 @@ members = ["crates/*", "apps/*", "xtask"]
 exclude = ["solidcore", "vendor"]
 
 [workspace.package]
-version = "0.50.0"
+version = "0.51.2"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -83,6 +83,7 @@ solidcraft-testkit = { path = "crates/testkit" }
 
 # foundation
 thiserror = "2"
+unicode-general-category = "1"
 serde = { version = "1", features = ["derive", "rc"] }
 # derive macros (crates/derive); already in the tree through serde_derive
 proc-macro2 = "1"

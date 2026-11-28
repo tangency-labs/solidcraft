@@ -248,6 +248,144 @@ pub(crate) fn hover(app: &mut SolveApp, ctx: &Context, view: Option<u64>) {
     }
 }
 
+/// How long the pointer rests on a view tab before its view's outline starts, so sweeping along
+/// the strip flashes nothing.
+const OUTLINE_REST: f32 = 0.07;
+/// How long the outline and tint take to fade in, and to fade out once the tab is left.
+const OUTLINE_IN: f32 = 0.12;
+const OUTLINE_OUT: f32 = 0.15;
+/// After it shows at half strength, the outline comes to full over this long, from this soon.
+const OUTLINE_RISE_FROM: f32 = 0.05;
+const OUTLINE_RISE: f32 = 0.45;
+/// Its corner radius, and the tint inside it as a fraction of the accent.
+const OUTLINE_RADIUS: u8 = 11;
+const OUTLINE_TINT: f32 = 0.035;
+
+fn smooth(x: f32) -> f32 {
+    let x = if x.is_finite() { x.clamp(0.0, 1.0) } else { 1.0 };
+    x * x * (3.0 - 2.0 * x)
+}
+
+/// One view's outline, fading in while its tab is hovered and out after.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Outline {
+    pub view: u64,
+    /// How long its tab has been hovered before the outline started.
+    pub held: f32,
+    /// Seconds since the current fade (in or out) began.
+    pub t: f32,
+    /// Seconds since the outline last started fading in; its strength rises with it.
+    pub age: f32,
+    pub leaving: bool,
+    /// How far in the outline was when the current fade began.
+    pub from: f32,
+}
+
+impl Outline {
+    fn started(&self) -> bool {
+        self.held >= OUTLINE_REST
+    }
+
+    /// How far in the outline and tint are: 0 gone, 1 shown.
+    pub(crate) fn shown(&self) -> f32 {
+        if !self.started() {
+            0.0
+        } else if self.leaving {
+            self.from * (1.0 - smooth(self.t / OUTLINE_OUT))
+        } else {
+            self.from + (1.0 - self.from) * smooth(self.t / OUTLINE_IN)
+        }
+    }
+
+    /// The outline's strength: it shows at half and comes to full.
+    pub(crate) fn strength(&self) -> f32 {
+        self.shown() * (0.5 + 0.5 * smooth((self.age - OUTLINE_RISE_FROM) / OUTLINE_RISE))
+    }
+}
+
+/// Move each outline one frame of `dt` seconds towards shown (the hovered view's) or gone,
+/// dropping the gone ones. `animate` false (reduced motion) shows and hides at once. Returns
+/// whether any outline is still changing.
+pub(crate) fn step_outlines(outlines: &mut Vec<Outline>, hovered: Option<u64>, dt: f32, animate: bool) -> bool {
+    let dt = if dt.is_finite() { dt.clamp(0.0, 0.1) } else { 0.0 };
+    let settled = OUTLINE_RISE_FROM + OUTLINE_RISE;
+    if let Some(view) = hovered
+        && !outlines.iter().any(|outline| outline.view == view)
+    {
+        outlines.push(Outline { view, held: 0.0, t: 0.0, age: 0.0, leaving: false, from: 0.0 });
+    }
+    let mut changing = false;
+    for outline in outlines.iter_mut() {
+        outline.age += dt;
+        if hovered == Some(outline.view) {
+            if !animate {
+                *outline = Outline { held: OUTLINE_REST, t: 2.0 * settled, age: 2.0 * settled, leaving: false, from: 1.0, ..*outline };
+            } else if outline.leaving {
+                // Back on the tab while it fades: it comes back from where it is.
+                *outline = Outline { t: 0.0, leaving: false, from: outline.shown(), ..*outline };
+            } else if outline.started() {
+                outline.t += dt;
+            } else {
+                outline.held += dt;
+                // The part of this frame past the rest already counts.
+                outline.t = (outline.held - OUTLINE_REST).max(0.0);
+                outline.age = outline.t;
+            }
+            changing |= !outline.started() || outline.age < settled;
+        } else if outline.started() && animate {
+            if outline.leaving {
+                outline.t += dt;
+            } else {
+                *outline = Outline { t: 0.0, leaving: true, from: outline.shown(), ..*outline };
+            }
+            changing |= outline.t < OUTLINE_OUT;
+        }
+    }
+    outlines.retain(|outline| hovered == Some(outline.view) || (animate && outline.started() && outline.t < OUTLINE_OUT));
+    changing
+}
+
+/// Outline and tint the part of the window the hovered view tab's view fills, fading in after a
+/// short rest and out when the pointer leaves. A view no longer hovered fades while the next
+/// fades in.
+pub(crate) fn paint_hover_outline(app: &SolveApp, ui: &egui::Ui) {
+    let ctx = ui.ctx();
+    let key = Id::unique("view_hover_outline").with(ctx.viewport_id());
+    let hovered = hovered_view(app);
+    let mut outlines = ctx.data(|data| data.get_temp::<Vec<Outline>>(key)).unwrap_or_default();
+    if outlines.is_empty() && hovered.is_none() {
+        return;
+    }
+    let animate = solidcraft_theme::panel_motion_duration(ctx, false) > 0.0;
+    let changing = step_outlines(&mut outlines, hovered, ctx.input(|input| input.stable_dt), animate);
+    let t = Tokens::get();
+    for outline in &outlines {
+        let rect = if outline.view == app.docs.views.active().id {
+            app.viewport.rect
+        } else {
+            app.viewport.cards.iter().find(|(id, _)| *id == outline.view).map(|(_, rect)| *rect)
+        };
+        let Some(rect) = rect.filter(|rect| rect.is_positive()).map(|rect| rect.shrink(2.0)) else { continue };
+        ui.painter().rect_filled(rect, OUTLINE_RADIUS, t.accent.gamma_multiply(OUTLINE_TINT * outline.shown().clamp(0.0, 1.0)));
+        ui.painter().rect_stroke(
+            rect,
+            OUTLINE_RADIUS,
+            Stroke::new(2.0, t.accent.gamma_multiply(outline.strength().clamp(0.0, 1.0))),
+            StrokeKind::Inside,
+        );
+    }
+    ctx.data_mut(|data| {
+        if outlines.is_empty() {
+            data.remove::<Vec<Outline>>(key);
+        } else {
+            data.insert_temp(key, outlines);
+        }
+    });
+    if changing {
+        ctx.request_repaint();
+    }
+}
+
 fn repaint_viewports(ctx: &Context) {
     for viewport in ctx.input(|input| input.raw.viewports.keys().copied().collect::<Vec<_>>()) {
         ctx.request_repaint_of(viewport);
@@ -885,7 +1023,7 @@ fn draw_shape(ctx: &Context, painter: &egui::Painter, view: &DesignView, rect: R
     }
     let body = Rect::from_min_max(header.left_bottom(), rect.max).shrink(3.0);
     if body.is_positive() && detail > 0.03 {
-        solidcraft_viewport_egui::paint_background(painter, body, t.viewport_top, t.viewport_bottom);
+        solidcraft_viewport_egui::paint_background(painter, body, t.viewport_top, t.viewport_middle, t.viewport_bottom);
         paint_kind(painter, body.center(), view, t.text_dim.gamma_multiply(0.4 * detail), 32.0_f32.min(body.height()));
         if form == Form::Window && body.height() > 65.0 {
             let name = painter.layout_no_wrap(view.name.clone(), crate::ui_kit::type_face::semibold(t.font_button), t.text);
@@ -1364,5 +1502,72 @@ mod tests {
         assert_eq!(strip.drop_at(pos2(145.0, 45.0), Some(first)).unwrap().index, 0);
         assert_eq!(strip.drop_at(pos2(147.0, 45.0), Some(first)).unwrap().index, 1);
         assert!(strip.drop_at(pos2(147.0, 47.0), None).is_none());
+    }
+
+    /// Run `frames` frames of `dt` seconds with `hovered` hovered.
+    fn run(outlines: &mut Vec<Outline>, hovered: Option<u64>, frames: usize, dt: f32) {
+        for _ in 0..frames {
+            step_outlines(outlines, hovered, dt, true);
+        }
+    }
+
+    fn shown(outlines: &[Outline], view: u64) -> f32 {
+        outlines.iter().find(|outline| outline.view == view).map_or(-1.0, Outline::shown)
+    }
+
+    /// A view tab's outline waits for the pointer to rest, fades in at half strength and comes to
+    /// full, fades once the pointer leaves, then is gone.
+    #[test]
+    fn a_hovered_view_tab_fades_its_views_outline_in_and_out() {
+        let mut outlines = Vec::new();
+        run(&mut outlines, Some(7), 3, 0.016);
+        assert_eq!(shown(&outlines, 7), 0.0, "a pointer passing over the tab starts nothing");
+        run(&mut outlines, None, 1, 0.016);
+        assert!(outlines.is_empty(), "nothing had started, so nothing is left to fade");
+
+        run(&mut outlines, Some(7), 5, 0.016);
+        assert!(shown(&outlines, 7) > 0.0);
+        run(&mut outlines, Some(7), 10, 0.016);
+        assert_eq!(shown(&outlines, 7), 1.0, "faded in after {OUTLINE_IN} s");
+        assert!((outlines[0].strength() - 0.5).abs() < 0.15, "the outline is still near half strength: {}", outlines[0].strength());
+        run(&mut outlines, Some(7), 30, 0.016);
+        assert_eq!(outlines[0].strength(), 1.0);
+        assert!(!step_outlines(&mut outlines, Some(7), 0.016, true), "a settled outline does not ask for frames");
+
+        assert!(step_outlines(&mut outlines, None, 0.016, true));
+        run(&mut outlines, None, 5, OUTLINE_OUT * 0.25);
+        assert!(outlines.is_empty(), "{outlines:?}");
+    }
+
+    /// Moving straight to another view's tab fades the first outline while the second fades in,
+    /// and returning mid-way picks up from where the outline is.
+    #[test]
+    fn moving_between_view_tabs_hands_the_outline_over_without_a_jump() {
+        let mut outlines = Vec::new();
+        run(&mut outlines, Some(1), 60, 0.016);
+        run(&mut outlines, Some(2), 6, 0.016);
+        let (first, second) = (shown(&outlines, 1), shown(&outlines, 2));
+        assert!(first > 0.0 && first < 1.0, "{first}");
+        assert!(second > 0.0 && second < 1.0, "{second}");
+        run(&mut outlines, Some(1), 1, 0.0);
+        let back = shown(&outlines, 1);
+        assert!((back - first).abs() < 1e-4, "{first} then {back}: no wait, no jump");
+    }
+
+    /// With motion turned down the outline shows and hides at once; a broken clock moves nothing.
+    #[test]
+    fn view_tab_outlines_respect_reduced_motion_and_a_broken_clock() {
+        let mut outlines = Vec::new();
+        assert!(!step_outlines(&mut outlines, Some(3), 0.016, false));
+        assert_eq!((shown(&outlines, 3), outlines[0].strength()), (1.0, 1.0));
+        step_outlines(&mut outlines, None, 0.016, false);
+        assert!(outlines.is_empty());
+        for dt in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -1.0] {
+            let mut outlines = Vec::new();
+            step_outlines(&mut outlines, Some(3), dt, true);
+            step_outlines(&mut outlines, Some(3), dt, true);
+            assert_eq!(outlines.len(), 1, "{dt}");
+            assert!(outlines[0].shown().is_finite() && outlines[0].strength().is_finite(), "{dt}: {outlines:?}");
+        }
     }
 }

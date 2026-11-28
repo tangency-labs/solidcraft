@@ -257,6 +257,23 @@ fn tolerances(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>) -> Result<bool> {
     validate_and_update(k, b, &mut cx.rep, true).map(|(ok, _)| ok)
 }
 
+/// (not upstream) [`tolerances`] for the uses of `edges` and of no other edge: the same tests,
+/// run and reported as the whole pass runs and reports them (each use pair of an edge once, on
+/// the faces that use it in the B-rep's face order): its vertex/edge and vertex/face gaps at
+/// both ends over half the vertex tolerance (tests 0-3) and its edge/face gap over the edge
+/// tolerance (test 4). Validating only: no tolerance grows and no UV trim built on the way
+/// raises one. Returns false for an end without vertex, as [`tolerances`].
+pub(super) fn edge_tolerances(
+    k: &mut Kernel,
+    b: &mut Brep,
+    cx: &mut Cx<'_>,
+    edges: &[EdgeId],
+) -> Result<bool> {
+    let only: BTreeSet<EdgeId> = edges.iter().copied().collect();
+    k.with_held_trim_raise(|k| validate_and_update_body(k, b, &mut cx.rep, true, None, Some(&only)))
+        .map(|(ok, _)| ok)
+}
+
 /// The outputs of `SmBrep::ValidateAndUpdateTolerances` (see
 /// [`validate_and_update_tolerances`](super::validate_and_update_tolerances)).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -291,10 +308,28 @@ pub(super) fn validate_and_update(
     // built during the pass raises no tolerance; here the pass's argument holds the raise on
     // the kernel for the pass instead, and the B-rep it checks is not written.
     if validate_only {
-        k.with_held_trim_raise(|k| validate_and_update_body(k, b, rep, true))
+        k.with_held_trim_raise(|k| validate_and_update_body(k, b, rep, true, None, None))
     } else {
-        validate_and_update_body(k, b, rep, false)
+        validate_and_update_body(k, b, rep, false, None, None)
     }
+}
+
+/// [`validate_and_update`] growing tolerances (not validating only), the edge use pairs it found
+/// with no gap over its tolerance on a body before skipped (not upstream): a pair whose digest
+/// ([`crate::geom::check_memo::update_pair_digest`], taken as the update comes to it) names one
+/// the update found clean would be found clean again, since its tests read only what the digest
+/// names, so the update grows and reports nothing there. What the pair's update writes on other
+/// uses is kept as it writes it: its vertex/edge gaps are still measured (a measured one goes to
+/// every use of the vertex on the edge), and a pair whose uncached vertex/face gap would clear
+/// another use's cached one is not skipped ([`skips_alike`]). `salt` is the update's
+/// ([`crate::geom::check_memo::update_salt`]).
+pub(super) fn validate_and_update_remembering(
+    k: &mut Kernel,
+    b: &mut Brep,
+    rep: &mut Rep<'_>,
+    salt: crate::geom::content::ContentId,
+) -> Result<(bool, ToleranceGaps)> {
+    validate_and_update_body(k, b, rep, false, Some(salt), None)
 }
 
 use super::super::pointers::{edge_tube_reaches, vertex_ball_reaches, GROWTH_PAST_RATIO};
@@ -304,12 +339,21 @@ fn validate_and_update_body(
     b: &mut Brep,
     rep: &mut Rep<'_>,
     validate_only: bool,
+    memo: Option<crate::geom::content::ContentId>,
+    only: Option<&BTreeSet<EdgeId>>,
 ) -> Result<(bool, ToleranceGaps)> {
     // init outputs
     let mut out = ToleranceGaps::default();
 
-    // get all faces
-    let faces = p1::faces(b, None)?;
+    // get all faces (not upstream: with `only`, the faces that use one of its edges)
+    let mut faces = p1::faces(b, None)?;
+    if let Some(only) = only {
+        let mut using = BTreeSet::new();
+        for &e in only {
+            using.extend(tedge::faces(b, e, None)?);
+        }
+        faces.retain(|f| using.contains(f));
+    }
 
     // get bounding box and its size (used only when fixing)
     let size = if validate_only {
@@ -352,9 +396,14 @@ fn validate_and_update_body(
             )?;
             let mate = eu1::mate(b, eu)?;
 
-            // skip marked edgeuses
+            // skip marked edgeuses (not upstream: and those of an edge `only` leaves out)
             if marked.contains(&eu) {
                 continue;
+            }
+            if let Some(only) = only {
+                if !eu1::edge(b, eu)?.is_some_and(|e| only.contains(&e)) {
+                    continue;
+                }
             }
 
             // mark these edgeuses
@@ -378,6 +427,23 @@ fn validate_and_update_body(
             if crate::geom::check_memo::face_clean(k, f) {
                 continue;
             }
+            // not upstream: an edge use pair the update found clean on a body before
+            // ([`validate_and_update_remembering`])
+            let digest = match memo {
+                Some(salt) => crate::geom::check_memo::update_pair_digest(b, f, eu, mate, salt),
+                None => None,
+            };
+            if digest.is_some_and(|d| crate::geom::check_memo::update_clean(k, d))
+                && skips_alike(b, f, start_vu, start_v, &marked)?
+                && skips_alike(b, f, end_vu, end_v, &marked)?
+            {
+                // the only gaps the pair's update keeps on other uses than its own: a
+                // vertex/edge gap measured goes to every use of the vertex on the edge
+                tvu::vertex_edge_gap(k, b, start_vu, false)?;
+                tvu::vertex_edge_gap(k, b, end_vu, false)?;
+                continue;
+            }
+            let mut grew_or_violated = false;
 
             // get all edgeuse start/end vertex gaps: upstream keeps pointers into the
             // vertex uses' caches and reads their lengths below, so a later refresh that
@@ -385,7 +451,22 @@ fn validate_and_update_body(
             // every use of the vertex on the same face / edge, e.g. both ends of a
             // closed edge) shows in an earlier gap
             let start_edge_gap = tvu::vertex_edge_gap(k, b, start_vu, false)?.is_some();
-            let start_face_gap = tvu::vertex_face_gap(k, b, start_vu, false)?.is_some();
+            // On a closed edge (`start_v == end_v`), `end_vu`'s calculation below clears
+            // `start_vu`'s cached vertex/face gap on the same face. When `end_vu` is already
+            // cached and `start_vu` is already reset, computing `start_vu` only to wipe
+            // `end_vu` and immediately recompute `end_vu` produces the exact same state.
+            let closed_end_face_cached = start_v == end_v
+                && start_vu != end_vu
+                && tvu::has_vertex_face_gap(b, start_vu)?
+                && tvu::has_vertex_face_gap(b, end_vu)?
+                && !b.vertexuse(start_vu)?.vertex_face_gap.is_init()
+                && b.vertexuse(start_vu)?.vertex_face_gap.gap_3d == -UNDEF_DOUBLE
+                && b.vertexuse(end_vu)?.vertex_face_gap.is_init();
+            let start_face_gap = if closed_end_face_cached {
+                true
+            } else {
+                tvu::vertex_face_gap(k, b, start_vu, false)?.is_some()
+            };
             let end_edge_gap = tvu::vertex_edge_gap(k, b, end_vu, false)?.is_some();
             let end_face_gap = tvu::vertex_face_gap(k, b, end_vu, false)?.is_some();
             let (start, end) = (b.vertexuse(start_vu)?, b.vertexuse(end_vu)?);
@@ -403,6 +484,7 @@ fn validate_and_update_body(
                 let tol = b.vertex(v)?.tolerance;
                 if bad_vertex_gap(edge_gap, tol) || bad_vertex_gap(face_gap, tol) {
                     out.violated_or_updated = true;
+                    grew_or_violated = true;
                     if !validate_only {
                         let gap = 2.0 * edge_gap.unwrap_or(0.0).max(face_gap.unwrap_or(0.0));
                         // A tolerance grows to absorb a rounding or intersection gap, not a
@@ -485,6 +567,7 @@ fn validate_and_update_body(
             let e = super::super::required(eu1::edge(b, eu)?)?;
             if max_gap > tedge::tolerance(b, e)? {
                 out.violated_or_updated = true;
+                grew_or_violated = true;
                 // (its vertices grow with it, so under the vertices' bound as well)
                 let grown = tol::zone_tol3d(k, 2.0 * max_gap);
                 if !validate_only
@@ -513,11 +596,45 @@ fn validate_and_update_body(
             // save max edge/face gap: upstream compares the gap with itself
             // (`pMaxEdgeFaceGap->GetLength() > dMaxEdgeFaceGap`), so its
             // `pOptMaxEdgeFaceGap` stays 0 and is not kept
+
+            if let (Some(d), false) = (digest, grew_or_violated) {
+                crate::geom::check_memo::keep_update_clean(k, d);
+            }
         }
     }
 
     // all done
     Ok((true, out))
+}
+
+/// Whether skipping vertex use `vu`'s vertex/face gap leaves the rest of the update as measuring
+/// it would. A cached gap is read as it is, with nothing written. An uncached one is measured
+/// after clearing the cached gaps of the vertex's other uses on face `f`; that clearing only
+/// matters for a use whose own pair the update has still to come to (not in `marked`), which
+/// would then measure its gap instead of reading the one it cached.
+fn skips_alike(
+    b: &Brep,
+    f: crate::topology::FaceId,
+    vu: VertexuseId,
+    v: VertexId,
+    marked: &BTreeSet<EdgeuseId>,
+) -> Result<bool> {
+    if b.vertexuse(vu)?.vertex_face_gap.is_init() {
+        return Ok(true);
+    }
+    for other in crate::topology::vertex::vertexuses_of_face(b, v, Some(f), None)? {
+        if other == vu || !b.vertexuse(other)?.vertex_face_gap.is_init() {
+            continue;
+        }
+        let pending = match tvu::edgeuse(b, other)? {
+            Some(eu) => !marked.contains(&eu),
+            None => true,
+        };
+        if pending {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// A `SM_ASSERT_OBJ_VALUE_REPORT(this, SM_LIST_2, index, ...)` of the tolerance pass.

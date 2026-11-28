@@ -45,9 +45,9 @@ thread_local! {
     /// The 3D view's own dark or light when Preferences give it one ([`ViewportTheme`], #4146),
     /// per thread like the rest. `None`: the view is as dark as the window.
     static VIEWPORT_DARK: Cell<Option<bool>> = const { Cell::new(None) };
-    /// The 3D view's background colour when Preferences give it one (#7688), per thread like the
+    /// The 3D view's background when Preferences give it one (#7688, #9230), per thread like the
     /// rest. `None`: the theme's gradient.
-    static VIEWPORT_BACKGROUND: Cell<Option<[u8; 3]>> = const { Cell::new(None) };
+    static VIEWPORT_BACKGROUND: Cell<Option<ViewBackground>> = const { Cell::new(None) };
     /// The last published frame, guarded by every palette input so another app/context cannot
     /// reuse it after changing the thread's theme. Resolution/fade state lives in that context.
     static PUBLISHED: Cell<Option<PublishedTab>> = const { Cell::new(None) };
@@ -62,7 +62,7 @@ pub struct Environment {
     pub logo: bool,
     pub accent: Option<Color32>,
     pub viewport: Option<bool>,
-    pub background: Option<[u8; 3]>,
+    pub background: Option<ViewBackground>,
 }
 
 impl Environment {
@@ -417,7 +417,8 @@ pub fn accent() -> Option<Color32> {
 /// `#rrggbb` as an opaque accent; anything else (an empty preference: the theme's) is `None`.
 pub fn parse_accent(s: &str) -> Option<Color32> {
     let hex = s.trim().strip_prefix('#').filter(|h| h.len() == 6)?;
-    Color32::from_hex(&format!("#{hex}")).ok()
+    let ([r, g, b], _) = solidcraft_color::hex::parse_digits(hex)?;
+    Some(Color32::from_rgb(r, g, b))
 }
 
 /// The File view's unset colours follow the theme's panel, border, accent and text, not its base's (#4868).
@@ -895,8 +896,25 @@ pub fn viewport_dark() -> bool {
     VIEWPORT_DARK.get().unwrap_or_else(is_dark)
 }
 
-/// The 3D view's own background colour, or `None` for the theme's gradient (#7688).
-pub fn viewport_background() -> Option<[u8; 3]> {
+/// The 3D view's background of the user's own (Preferences › Interface › Background): top to
+/// bottom, with an optional colour halfway. Top and bottom alike are one colour (#7688), different
+/// ones a gradient (#9230).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ViewBackground {
+    pub top: [u8; 3],
+    pub middle: Option<[u8; 3]>,
+    pub bottom: [u8; 3],
+}
+
+impl ViewBackground {
+    /// One colour over the whole view.
+    pub fn flat(colour: [u8; 3]) -> Self {
+        Self { top: colour, middle: None, bottom: colour }
+    }
+}
+
+/// The 3D view's own background, or `None` for the theme's gradient (#7688, #9230).
+pub fn viewport_background() -> Option<ViewBackground> {
     VIEWPORT_BACKGROUND.get()
 }
 
@@ -1285,6 +1303,8 @@ pub struct Tokens {
     /// Viewport background (top and bottom of the gradient; equal for a flat fill).
     pub viewport_top: Color32,
     pub viewport_bottom: Color32,
+    /// A colour halfway down the viewport's gradient, the user's own (#9230). Themes have none.
+    pub viewport_middle: Option<Color32>,
     pub grid: Color32,
     pub grid_major: Color32,
     /// A whole selected body.
@@ -1611,13 +1631,18 @@ impl Tokens {
         if let Some(inset) = &mut self.borders.primary_inset {
             adjust(&mut inset.stroke.color);
         }
+        if let Some(middle) = &mut self.viewport_middle {
+            adjust(middle);
+        }
     }
 
-    /// These tokens with the 3D view's background one flat colour (#7688), or as they are for `None`.
-    pub fn with_background(mut self, colour: Option<[u8; 3]>) -> Tokens {
-        if let Some([r, g, b]) = colour {
+    /// These tokens with the 3D view's background the user's own: one flat colour (#7688) or a
+    /// gradient, with or without a colour halfway (#9230). As they are for `None`.
+    pub fn with_background(mut self, background: Option<ViewBackground>) -> Tokens {
+        if let Some(ViewBackground { top: [r, g, b], middle, bottom: [r2, g2, b2] }) = background {
             self.viewport_top = Color32::from_rgb(r, g, b);
-            self.viewport_bottom = self.viewport_top;
+            self.viewport_middle = middle.map(|[r, g, b]| Color32::from_rgb(r, g, b));
+            self.viewport_bottom = Color32::from_rgb(r2, g2, b2);
         }
         self
     }
@@ -1665,6 +1690,7 @@ impl Tokens {
             navigator_text: view.navigator_text,
             navigator_hover: view.navigator_hover,
             viewport_top: view.viewport_top,
+            viewport_middle: view.viewport_middle,
             viewport_bottom: view.viewport_bottom,
             grid: view.grid,
             grid_major: view.grid_major,
@@ -1804,9 +1830,9 @@ pub fn set_viewport_dark(dark: Option<bool>) {
     VIEWPORT_DARK.set(dark);
 }
 
-/// Give the 3D view a background colour of its own (#7688), or `None` for the theme's gradient.
-pub fn set_viewport_background(colour: Option<[u8; 3]>) {
-    VIEWPORT_BACKGROUND.set(colour);
+/// Give the 3D view a background of its own (#7688, #9230), or `None` for the theme's gradient.
+pub fn set_viewport_background(background: Option<ViewBackground>) {
+    VIEWPORT_BACKGROUND.set(background);
 }
 
 fn visuals(dark: bool) -> egui::Visuals {
@@ -1852,6 +1878,12 @@ pub fn apply(ctx: &egui::Context) {
     ctx.global_style_mut(|s| {
         s.spacing.item_spacing = egui::vec2(t.space_6, t.space_4);
         s.spacing.button_padding = egui::vec2(t.space_6, t.space_3);
+        // Tooltips show after a short wait and while the pointer is still moving (#7679): the
+        // egui defaults (still pointer only, half a second) made the first tooltip feel broken
+        // and kept it from appearing while the mouse travelled across a toolbar. The grace
+        // time between tooltips stays, so the following ones still appear without a wait.
+        s.interaction.show_tooltips_only_when_still = false;
+        s.interaction.tooltip_delay = 0.3;
     });
     // The new visuals are painted on the next pass: without a repaint request the widgets
     // keep the previous theme's colours until some other event schedules a pass (#5802).
@@ -2189,6 +2221,22 @@ mod tests {
         }
     }
 
+    /// The Preferences accent reads `#rrggbb` and nothing else, as the colour field's hex box does (#22089).
+    /// A `+` before five hex digits was read as a colour (`#+fffff` as `#0fffff`). The other inputs were
+    /// refused already and stay refused: a short one, a `-`, a space, and non-ASCII digits that are six
+    /// bytes long.
+    #[test]
+    fn an_accent_with_a_sign_or_a_non_hex_digit_after_the_hash_is_refused() {
+        let taken: Vec<_> =
+            ["#+fffff", "#+FFFFF", "#+0000f", "#+ffff", "#-fffff", "# fffff", "#ffff\u{e9}", "#\u{660}\u{660}\u{660}", "#\u{ff10}\u{ff10}"]
+                .into_iter()
+                .filter_map(|s| super::parse_accent(s).map(|c| (s, c)))
+                .collect();
+        assert!(taken.is_empty(), "taken as an accent: {taken:?}");
+        assert_eq!(super::parse_accent("#3B82F6"), Some(egui::Color32::from_rgb(0x3b, 0x82, 0xf6)));
+        assert_eq!(super::parse_accent(""), None);
+    }
+
     #[test]
     fn concurrent_ui_renderers_keep_their_own_theme_and_vision() {
         let barrier = std::sync::Barrier::new(2);
@@ -2291,5 +2339,28 @@ mod tests {
         }
         assert_eq!(Tokens::get(), Tokens::dark());
         assert_eq!(TabAccent::current(&egui::Context::default()), TabAccent::for_ramp(&Tokens::dark(), super::AccentRamp::Main));
+    }
+
+    /// Tooltips show while the pointer is still moving and after a short wait (#7679): the egui
+    /// defaults (still pointer only, half a second) kept the first tooltip from appearing while
+    /// the mouse travelled across a toolbar. The grace time between tooltips stays, so the next
+    /// one after a shown tooltip is instant.
+    #[test]
+    fn tooltips_show_while_moving_and_after_a_short_wait() {
+        for dark in [false, true] {
+            set_dark(dark);
+            let ctx = egui::Context::default();
+            let interaction = |ctx: &egui::Context| {
+                let i = &ctx.global_style().interaction;
+                (i.show_tooltips_only_when_still, i.tooltip_delay, i.tooltip_grace_time)
+            };
+            let (_before_still, before_delay, before_grace) = interaction(&ctx);
+            apply(&ctx);
+            let (still, delay, grace) = interaction(&ctx);
+            assert!(!still, "{dark}: a moving pointer still gets its tooltip");
+            assert!(delay < before_delay, "{dark}: quicker than the egui default");
+            assert_eq!(grace, before_grace, "{dark}: the next tooltip stays instant");
+        }
+        set_dark(true);
     }
 }

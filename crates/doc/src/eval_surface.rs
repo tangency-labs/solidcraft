@@ -152,15 +152,21 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             Ok(())
         }
-        FeatureKind::SurfaceExtend { body, edges, distance, mode, up_to, neighbours, stays_surface } => {
+        FeatureKind::SurfaceExtend { body, edges, distance, mode, angle, up_to, neighbours, stays_surface } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let mode = match mode {
                 crate::ExtendMode::Natural => kernel::ExtendMode::Natural,
                 crate::ExtendMode::Tangent => kernel::ExtendMode::Tangent,
                 crate::ExtendMode::Curvature => kernel::ExtendMode::Curvature,
+                crate::ExtendMode::Law => kernel::ExtendMode::Law,
             };
-            let at = |limit| kernel::ExtendOptions { mode, limit, neighbours: *neighbours };
+            // Law only (0: tangent to the surface); the other modes keep no angle.
+            let angle = match angle {
+                Some(a) => val(vals, a, Kind::Angle)?,
+                None => 0.0,
+            };
+            let at = |limit| kernel::ExtendOptions { mode, limit, neighbours: *neighbours, angle };
             let out = match up_to {
                 None => {
                     kernel::extend_surface(&mb.body, &crate::plain(edges), &at(kernel::ExtendLimit::Distance(val(vals, distance, Kind::Length)?)))?
@@ -330,27 +336,150 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             Ok(())
         }
+        FeatureKind::SurfaceMorph {
+            body,
+            faces,
+            base,
+            base_face,
+            control,
+            control_face,
+            projection,
+            map_mode,
+            scale,
+            tolerance,
+            flip_u,
+            flip_v,
+            swap_uv,
+            keep_original,
+        } => {
+            let scale_val = val(vals, scale, Kind::Unitless)?;
+            let tol = val(vals, tolerance, Kind::Length)?;
+            let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+            let Some(mb) = st.bodies.get(i).cloned() else {
+                return Err(DocError::Invalid("body".into()));
+            };
+            let base_mb = st.body(base).cloned().ok_or_else(|| DocError::Unknown(format!("body `{base}`")))?;
+            let control_mb = st.body(control).cloned().ok_or_else(|| DocError::Unknown(format!("body `{control}`")))?;
+
+            // Resolve face picks in each operand's own frame before moving into a common frame.
+            let mut picked_faces: Vec<usize> = Vec::new();
+            for p in faces {
+                let fi =
+                    crate::appearance::face_index_at(&mb, p.0).ok_or_else(|| DocError::Invalid(format!("Morph: no face of {body} at {}", p.0)))?;
+                if !picked_faces.contains(&fi) {
+                    picked_faces.push(fi);
+                }
+            }
+
+            let base_fi = match base_face {
+                Some(p) => crate::appearance::face_index_at(&base_mb, p.0)
+                    .ok_or_else(|| DocError::Invalid(format!("Morph: no face of {base} at {}", p.0)))?,
+                None => 0,
+            };
+            let control_fi = match control_face {
+                Some(p) => crate::appearance::face_index_at(&control_mb, p.0)
+                    .ok_or_else(|| DocError::Invalid(format!("Morph: no face of {control} at {}", p.0)))?,
+                None => 0,
+            };
+
+            // Bring target, base, and control into the destination body's frame so offsets and
+            // component placements on any operand are respected and Keep Original keeps placement.
+            let body_world = |b: &ModelBody| -> crate::Mat {
+                let m = doc.component_transform(doc.model_body_component(b));
+                doc.model_body_offset(b).map(|o| crate::mat_mul(&m, o)).unwrap_or(m)
+            };
+            let dest_world = if *keep_original { doc.component_transform(f.component) } else { body_world(&mb) };
+            let inv_dest =
+                crate::mat_inverse(&dest_world).ok_or_else(|| DocError::Invalid("Morph: destination placement cannot be inverted".into()))?;
+            let in_dest = |b: &ModelBody| -> Result<kernel::Body> {
+                let bw = body_world(b);
+                if bw == dest_world {
+                    return Ok(b.body.clone());
+                }
+                let rel = crate::mat_mul(&inv_dest, &bw);
+                if crate::is_identity(&rel) {
+                    Ok(b.body.clone())
+                } else {
+                    st.body_in_frame(b, &rel)
+                        .map(|moved| moved.body)
+                        .map_err(|e| DocError::Invalid(format!("Morph: body `{}` cannot be moved into frame: {e}", b.name)))
+                }
+            };
+            let target_body = in_dest(&mb)?;
+            let base_body = in_dest(&base_mb)?;
+            let control_body = in_dest(&control_mb)?;
+
+            let opts = kernel::services::morph::MorphOptions {
+                projection: match *projection {
+                    crate::MorphProjection::Normal => kernel::services::morph::MorphProjection::Normal,
+                    crate::MorphProjection::Direction { dir } => kernel::services::morph::MorphProjection::Direction(dir),
+                },
+                map_mode: match *map_mode {
+                    crate::MorphMapMode::NormalToNormal => kernel::services::morph::MorphMapMode::NormalToNormal,
+                    crate::MorphMapMode::Translate => kernel::services::morph::MorphMapMode::Translate,
+                },
+                scale: scale_val,
+                flip_u: *flip_u,
+                flip_v: *flip_v,
+                swap_uv: *swap_uv,
+                tolerance: tol,
+                faces: if picked_faces.is_empty() { None } else { Some(picked_faces) },
+            };
+            let morphed = kernel::morph_surface(&target_body, &base_body, base_fi, &control_body, control_fi, &opts)?;
+
+            if *keep_original {
+                let name = new_name(st, f, 0);
+                st.bodies.push(ModelBody { sheet: mb.sheet, ..ModelBody::new(name, morphed, f.id) });
+            } else if let Some(slot) = st.bodies.get_mut(i) {
+                *slot = ModelBody { sheet: mb.sheet, component: mb.component, ..ModelBody::new(mb.name, morphed, mb.feature) };
+            }
+            Ok(())
+        }
         FeatureKind::SurfaceExtrude { sketch, profiles, curves, extent, to_next } => {
             let ss = constructor_profile_in_frame(
                 doc,
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
                 f,
             )?;
-            if extent.through_all
-                || extent.through_all2
-                || extent.taper.is_some()
-                || extent.to2.is_some()
-                || extent.from.is_some()
-                || extent.symmetric_offset
-            {
-                return Err(DocError::Invalid(
-                    "not supported yet: a surface extrude through all, from an object, with a taper, or with symmetric offset".into(),
-                ));
+            if extent.through_all || extent.through_all2 || extent.to2.is_some() || extent.from.is_some() || extent.symmetric_offset {
+                return Err(DocError::Invalid("not supported yet: a surface extrude through all, from an object, or with symmetric offset".into()));
+            }
+            if extent.taper2.is_some() {
+                return Err(DocError::Invalid("not supported yet: a second taper (`taper2`) on a surface extrude".into()));
             }
             if *to_next && extent.to.is_some() {
                 return Err(DocError::Invalid("a surface extrude goes To Next or To Object, not both".into()));
             }
             let off = extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
+            // A taper of 0 is the straight sheet, as it is a straight solid extrude.
+            let taper = extent.taper.as_deref().map(|e| val(vals, e, Kind::Angle)).transpose()?.filter(|t| *t != 0.0);
+            if let Some(taper) = taper {
+                if extent.to.is_some() || *to_next || extent.distance2.is_some() || extent.direction == crate::Direction::Symmetric {
+                    return Err(DocError::Invalid(
+                        "not supported yet: a surface extrude with a taper to an object, to next, two-sided or symmetric".into(),
+                    ));
+                }
+                // The profile is the section at the start (the sketch plane moved by the start
+                // offset); the walls lean from there to the far end.
+                let d = val(vals, &extent.distance, Kind::Length)?;
+                let reach = if extent.direction == crate::Direction::Negative { -d } else { d };
+                let regions = tapered_sheet_regions(&ss, profiles.as_ref(), curves)?;
+                let mut notes = Vec::new();
+                let corners = regions
+                    .iter()
+                    .map(|r| match extent.corner {
+                        Some(c) => Ok(c),
+                        None => draft_corner_for(&ss, r, reach.abs(), taper, &mut notes),
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                for note in notes {
+                    append_warning(warning, note);
+                }
+                let body = kernel::extrude_sheet_tapered(&ss.plane, &regions, &corners, off, off + reach, taper)?;
+                let chains: Vec<Vec<Seg2>> = regions.into_iter().flat_map(|r| std::iter::once(r.outer).chain(r.holes)).map(|lp| lp.segs).collect();
+                push_sheet(st, f, crate::lineage::ChainRoles { sketch: &ss, chains: &chains }.tool(body));
+                return Ok(());
+            }
             let chains = sheet_chains(&ss, profiles.as_ref(), curves)?;
             let body = match extent.to {
                 Some(to) => sheet_to_object(doc, vals, f, st, &ss, &chains, extent, to.0, off)?,
@@ -510,18 +639,23 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             Ok(())
         }
         FeatureKind::SurfaceLoft { sections, continuity, crown, rails, rail_fit, faced, stays_surface } => {
-            // A loft with edge chains or 3D sketch curves for sections, or one that has to leave its
-            // ends a particular way, is built through `loft_blend` from the frames of every
-            // section; the plain one (planar sketch chains only, both ends G0) is the loft of old.
+            use kernel::Continuity::{G0, G1};
             let in_space = sections.iter().any(|s| section_in_space(st, s));
-            if *continuity != [kernel::Continuity::G0, kernel::Continuity::G0] || sections.iter().any(|s| s.body.is_some()) || in_space {
-                if !rails.is_empty() {
-                    return Err(DocError::Invalid(if in_space {
-                        "not supported yet: guide rails on a loft through 3D sketch curves".into()
-                    } else {
-                        "not supported yet: guide rails on a loft with edge sections or end continuity".into()
-                    }));
-                }
+            let planar = !in_space && sections.iter().all(|s| s.body.is_none());
+            let plain = planar && *continuity == [G0, G0];
+            let tangent_end = match *continuity {
+                [G1, G0] if planar && sections.len() == 2 => Some((0, crown[0])),
+                [G0, G1] if planar && sections.len() == 2 => Some((1, crown[1])),
+                _ => None,
+            };
+            if !plain && !rails.is_empty() {
+                return Err(DocError::Invalid(if in_space {
+                    "not supported yet: guide rails on a loft through 3D sketch curves".into()
+                } else {
+                    "not supported yet: guide rails on a loft with edge sections or end continuity".into()
+                }));
+            }
+            if !plain && tangent_end.is_none() {
                 loft_blend(st, f, sections, *continuity, *crown, doc)?;
                 stays_a_surface(st, *stays_surface);
                 return Ok(());
@@ -529,37 +663,35 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let mut secs = Vec::with_capacity(sections.len());
             let mut sketches = Vec::with_capacity(sections.len());
             for sec in sections {
-                let ss = sketch_in_feature_frame(
-                    doc,
-                    st.sketch(sec.sketch.0)
-                        .ok_or_else(|| DocError::Unknown(format!("sketch {} (it must come earlier in the timeline)", sec.sketch)))?,
-                    f.component,
-                )?;
-                let profiles = match (&sec.profiles, sec.curves.is_empty()) {
-                    (None, true) => Some(&ProfileSel::All),
-                    (p, _) => p.as_ref(),
-                };
-                let mut chains = sheet_chains(&ss, profiles, &sec.curves)?.into_iter();
-                let (Some(chain), None) = (chains.next(), chains.next()) else {
-                    return Err(DocError::Invalid(
-                        "each loft section must be one chain: one profile without holes, or curves meeting end to end".into(),
-                    ));
-                };
+                let (ss, chain) = planar_loft_section(doc, loft_section_sketch(st, sec)?, f, sec)?;
                 secs.push((ss.plane, chain));
                 sketches.push(ss);
             }
-            let rails = if rails.is_empty() {
-                Vec::new()
+            let body = if let Some((at, end_crown)) = tangent_end {
+                let pair: &[(Plane, Vec<Seg2>); 2] =
+                    secs.as_slice().try_into().map_err(|_| DocError::Invalid("a G1 loft needs two sections".into()))?;
+                if !pair.iter().all(|(_, chain)| kernel::loft_section_closed(chain)) {
+                    // Open sections still use the frame construction. A closed pair,
+                    // on the other hand, must never be rebuilt from sampled points.
+                    loft_blend(st, f, sections, *continuity, *crown, doc)?;
+                    stays_a_surface(st, *stays_surface);
+                    return Ok(());
+                }
+                kernel::loft_sheet_planar_g1(pair, at, end_crown, *faced)?
             } else {
-                // The rails run from the end at the first section.
-                let start = secs.first().and_then(|(p, c)| c.first().map(|seg| p.to_world(seg.start()))).unwrap_or_default();
-                crate::eval::rail_polylines(doc, st, rails, f.component, start)?
-            };
-            let fit = crate::eval::kernel_rail_fit(*rail_fit);
-            let body = if *faced {
-                kernel::loft_sheet_with_rails(&secs, &rails, fit)?
-            } else {
-                kernel::loft_sheet_with_rails_legacy_sides(&secs, &rails, fit)?
+                let rails = if rails.is_empty() {
+                    Vec::new()
+                } else {
+                    // The rails run from the end at the first section.
+                    let start = secs.first().and_then(|(p, c)| c.first().map(|seg| p.to_world(seg.start()))).unwrap_or_default();
+                    crate::eval::rail_polylines(doc, st, rails, f.component, start)?
+                };
+                let fit = crate::eval::kernel_rail_fit(*rail_fit);
+                if *faced {
+                    kernel::loft_sheet_with_rails(&secs, &rails, fit)?
+                } else {
+                    kernel::loft_sheet_with_rails_legacy_sides(&secs, &rails, fit)?
+                }
             };
             // Each wall named by the section curves it runs between, as a loft's sides are.
             let loops: Vec<solidcore_record::Loop2> = secs.iter().map(|(_, c)| solidcore_record::Loop2 { segs: c.clone() }).collect();
@@ -1100,6 +1232,33 @@ fn sheet_chains(ss: &SolvedSketch, profiles: Option<&ProfileSel>, curves: &[Stri
     Ok(chains)
 }
 
+/// What a tapered surface extrude sweeps: the picked profiles, then each chain of the picked
+/// curves as a profile of its own. A chain that does not close is refused: its wall would have no
+/// inside to lean from.
+fn tapered_sheet_regions(ss: &SolvedSketch, profiles: Option<&ProfileSel>, curves: &[String]) -> Result<Vec<Region2>> {
+    let mut regions: Vec<Region2> = Vec::new();
+    if let Some(sel) = profiles {
+        regions.extend(solidcraft_sketch::merge_regions(&select_profiles(ss, sel)?));
+    }
+    for chain in curve_chains(ss, curves)? {
+        if !chain.first().zip(chain.last()).is_some_and(|(first, last)| chain_ends_meet(first.start(), last.end())) {
+            return Err(DocError::Invalid(
+                "a taper needs a closed profile: the picked curves do not close into a loop (extrude them without a taper, or close them)".into(),
+            ));
+        }
+        regions.push(Region2 { outer: solidcore_record::Loop2 { segs: chain }, holes: Vec::new() });
+    }
+    if regions.is_empty() {
+        return Err(DocError::Invalid("pick the profiles or curves".into()));
+    }
+    Ok(regions)
+}
+
+/// Whether two ends of sketch curves are one point, as [`curve_chains`] joins them.
+fn chain_ends_meet(p: Vec2, q: Vec2) -> bool {
+    p.dist(q) <= 1e-6
+}
+
 /// Most sketch curves one feature chains.
 const MAX_CHAIN_CURVES: usize = 1000;
 /// Stations a blend samples each of its two boundaries at: enough that the boundary it fits is
@@ -1124,7 +1283,7 @@ pub(super) fn curve_chains(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<Vec<
         .filter(|p| !p.is_empty())
         .collect();
     let reversed = |p: Vec<Seg2>| -> Vec<Seg2> { p.iter().rev().map(Seg2::reversed).collect() };
-    let near = |p: Vec2, q: Vec2| p.dist(q) <= 1e-6;
+    let near = chain_ends_meet;
     let mut chains = Vec::new();
     while let Some(mut chain) = pieces.pop_front() {
         while let (Some(head), Some(tail)) = (chain.first().map(Seg2::start), chain.last().map(Seg2::end)) {
@@ -1158,6 +1317,26 @@ fn section_in_space(st: &ModelState, sec: &SheetSection) -> bool {
     sec.body.is_none() && st.sketch(sec.sketch.0).is_some_and(|ss| sec.curves.iter().any(|id| ss.sketch.wire_index(id).is_some()))
 }
 
+fn loft_section_sketch<'a>(st: &'a ModelState, sec: &SheetSection) -> Result<&'a SolvedSketch> {
+    st.sketch(sec.sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {} (it must come earlier in the timeline)", sec.sketch)))
+}
+
+fn loft_section_chain_error() -> DocError {
+    DocError::Invalid("each loft section must be one chain: one profile without holes, or curves meeting end to end".into())
+}
+
+/// A planar section before any sampling, in the consuming loft's component frame.
+fn planar_loft_section(doc: &Document, raw: &SolvedSketch, f: &Feature, sec: &SheetSection) -> Result<(SolvedSketch, Vec<Seg2>)> {
+    let ss = sketch_in_feature_frame(doc, raw, f.component)?;
+    let profiles = match (&sec.profiles, sec.curves.is_empty()) {
+        (None, true) => Some(&ProfileSel::All),
+        (p, _) => p.as_ref(),
+    };
+    let mut chains = sheet_chains(&ss, profiles, &sec.curves)?.into_iter();
+    let (Some(chain), None) = (chains.next(), chains.next()) else { return Err(loft_section_chain_error()) };
+    Ok((ss, chain))
+}
+
 /// A multi-section blend: every section as frames, the body ones read off the face their edge
 /// chain bounds, and the first and last leaving with `continuity` where the caller asks for it.
 fn loft_blend(
@@ -1186,27 +1365,19 @@ fn loft_blend(
             pieces.push(Piece::Body(name.to_string(), crate::plain(&sec.edges)));
             continue;
         }
-        let raw =
-            st.sketch(sec.sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {} (it must come earlier in the timeline)", sec.sketch)))?;
-        let one_chain = || DocError::Invalid("each loft section must be one chain: one profile without holes, or curves meeting end to end".into());
+        let raw = loft_section_sketch(st, sec)?;
         let pts: Vec<Vec3> = if section_in_space(st, sec) {
             // 3D sketch curves are followed through their points, as a boundary surface's u and v
             // curves are.
             if sec.profiles.is_some() {
-                return Err(one_chain());
+                return Err(loft_section_chain_error());
             }
             let mapped = path_in_frame(doc, raw, f.component)?;
-            path_points(&curves_in(mapped.as_ref(), &sec.curves), Vec3::new(f64::NAN, f64::NAN, f64::NAN))?.ok_or_else(one_chain)?.points()
+            path_points(&curves_in(mapped.as_ref(), &sec.curves), Vec3::new(f64::NAN, f64::NAN, f64::NAN))?
+                .ok_or_else(loft_section_chain_error)?
+                .points()
         } else {
-            let ss = sketch_in_feature_frame(doc, raw, f.component)?;
-            let profiles = match (&sec.profiles, sec.curves.is_empty()) {
-                (None, true) => Some(&ProfileSel::All),
-                (p, _) => p.as_ref(),
-            };
-            let mut chains = sheet_chains(&ss, profiles, &sec.curves)?.into_iter();
-            let (Some(chain), None) = (chains.next(), chains.next()) else {
-                return Err(one_chain());
-            };
+            let (ss, chain) = planar_loft_section(doc, raw, f, sec)?;
             chain.iter().flat_map(|s| s.polyline(1e-2)).map(|p| ss.plane.to_world(p)).collect()
         };
         centres.push(pts.iter().fold(solidcore_record::Vec3::ZERO, |a, p| a + *p) * (1.0 / pts.len().max(1) as f64));
@@ -1230,24 +1401,24 @@ fn loft_blend(
             Piece::Points(pts) => frames.push(point_frames(pts, leave, stations)?),
         }
     }
-    // A 3D sketch chain runs the way its curves are listed and joined, not the way a sketch
-    // section of the plain loft is drawn, so in a loft through one each open section (a body's
-    // edge chain too) is turned to run the way the section before it does, as the plain loft
-    // turns its open sections; a closed one would need its winding and seam matched, as the
-    // plain loft does.
-    if sections.iter().any(|s| section_in_space(st, s)) {
-        let end = |f: Option<&kernel::Frame>| f.map_or([f64::NAN; 3], |f| f.p.into());
-        let ends: Vec<[[f64; 3]; 2]> = frames.iter().map(|s| [end(s.first()), end(s.last())]).collect();
-        let turns = solidcraft_kernel::services::sweep::railed::open_section_turns(&ends).map_err(|e| match e {
-            solidcraft_kernel::services::Error::Unsupported(_) => {
-                DocError::Invalid("not supported yet: a closed section in a loft through 3D sketch curves".into())
-            }
-            e => DocError::Invalid(e.to_string()),
-        })?;
-        for (these, turn) in frames.iter_mut().zip(turns) {
-            if turn {
-                these.reverse();
-            }
+    // A body's edge chain and a 3D sketch chain run the way their edges or curves are listed
+    // and joined, not the way a planar section is drawn, so each open section is turned to run
+    // the way the section before it does, as the plain loft turns its open sections. A closed
+    // one would need its winding and seam matched, as the plain loft does: refused in a loft
+    // through 3D sketch curves, and left as it is otherwise.
+    let end = |f: Option<&kernel::Frame>| f.map_or([f64::NAN; 3], |f| f.p.into());
+    let ends: Vec<[[f64; 3]; 2]> = frames.iter().map(|s| [end(s.first()), end(s.last())]).collect();
+    let turns = match solidcraft_kernel::sections::open_section_turns(&ends) {
+        Ok(turns) => turns,
+        Err(solidcraft_kernel::sections::TurnRefusal::Closed(_)) if !sections.iter().any(|s| section_in_space(st, s)) => Vec::new(),
+        Err(solidcraft_kernel::sections::TurnRefusal::Closed(_)) => {
+            return Err(DocError::Invalid("not supported yet: a closed section in a loft through 3D sketch curves".into()));
+        }
+        Err(e) => return Err(DocError::Invalid(e.to_string())),
+    };
+    for (these, turn) in frames.iter_mut().zip(turns) {
+        if turn {
+            these.reverse();
         }
     }
     let body = kernel::loft_blend(&frames, continuity, crown, stations)?;
@@ -1261,8 +1432,7 @@ fn loft_blend(
 /// along the run with no curvature to repeat there.
 fn point_frames(pts: &[Vec3], leave: Vec3, stations: usize) -> Result<Vec<kernel::Frame>> {
     let pts: Vec<[f64; 3]> = pts.iter().map(|&p| p.into()).collect();
-    let frames =
-        solidcraft_kernel::services::sweep::railed::point_frames(&pts, leave.into(), stations).map_err(|e| DocError::Invalid(e.to_string()))?;
+    let frames = solidcraft_kernel::sections::point_frames(&pts, leave.into(), stations).map_err(|e| DocError::Invalid(e.to_string()))?;
     Ok(frames
         .into_iter()
         .map(|f| kernel::Frame { p: f.p.into(), leave: f.leave.into(), bend: f.bend.into(), bend_change: f.bend_change.into() })

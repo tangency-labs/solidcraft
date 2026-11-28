@@ -188,7 +188,6 @@ impl ExecutiveAccess<Handle> for Access {
     fn solver_rails_fit_judged(&mut self, _: &mut Kernel, _: Handle) -> Result<RailsFit> {
         Ok(RailsFit {
             fit: true,
-            touches_rim: false,
             rolls_over: false,
             into_material: false,
             boundaries_into_material: false,

@@ -155,7 +155,7 @@ pub(super) fn checked_package(session: &mut Session, slot: &FormatSlot) -> Resul
         .into());
     }
     let runtime = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
-    host_limits_for(session, &package.manifest.id, &package.approval).check(&runtime.limits)?;
+    host_limits_for(session, &package.manifest.id, &package.approval).check_importer(&runtime.limits)?;
     Ok(package)
 }
 
@@ -304,6 +304,8 @@ fn run_importer<R>(
                 .join()
                 .map_err(|_| HostError::Trap { reason: "the import stopped unexpectedly".into() })
         });
+        // The importer worker has ended, including on compilation errors or cancellation.
+        solidcraft_doc::progress::importer_stage(None);
         // Keep settings staged while the caller validates the output. Any early return drops the
         // private host and its pending settings without publishing them.
         let (mut host, imported) = result?;
@@ -465,7 +467,7 @@ pub fn import_dialog(
         return Err(HostError::PermissionDenied { permission: "stored plugin grants need re-approval for this package".into() }.into());
     }
     let runtime = package.manifest.runtime.as_ref().filter(|r| r.is_importer()).ok_or_else(|| error("not an importer"))?;
-    host_limits_for(session, &package.manifest.id, approval).check(&runtime.limits)?;
+    host_limits_for(session, &package.manifest.id, approval).check_importer(&runtime.limits)?;
     let entry = runtime.entries.iter().find(|e| e.name == entry).ok_or_else(|| error("unknown importer entry"))?;
     let file = file_facts(path, &format!("{}.{}", package.manifest.id, entry.name), generation)?;
     let schema = conditions::bind_file_conditions(&entry.input_schema, Some(&file))?;

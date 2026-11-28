@@ -128,7 +128,7 @@ pub const TEXT_BUTTONS: Page = Page {
     usage: r#"
 ui_kit::text_button(ui, "Show all", true);
 ui_kit::command_menu_button(ui, "save", "Save", "save", "Ctrl+S", true); // id, label, icon, shortcut, enabled
-ui_kit::action_menu(ui, "Actions", |ui| { ui_kit::button(ui, "Duplicate", ui_kit::Button::Normal); });
+ui_kit::action_menu(ui, "Actions", &[ui_kit::Item::action("duplicate", "Duplicate", "copy")]);
 "#,
     dos: &["Show the shortcut in command menus so people learn it."],
     donts: &["Don't use a text button for the dialog's main action."],
@@ -144,10 +144,10 @@ ui_kit::action_menu(ui, "Actions", |ui| { ui_kit::button(ui, "Duplicate", ui_kit
             ui_kit::command_menu_button(ui, "export", "Export…", "export", "", true);
         });
         state(ui, "Action menu (open it)", |ui| {
-            ui_kit::action_menu(ui, "Actions", |ui| {
-                ui_kit::button(ui, "Duplicate", ui_kit::Button::Normal);
-                ui_kit::button(ui, "Rename", ui_kit::Button::Normal);
-            });
+            let items = [ui_kit::Item::action("duplicate", "Duplicate", "copy"), ui_kit::Item::action("rename", "Rename", "rename")];
+            if let Some(item) = ui_kit::action_menu(ui, "Actions", &items) {
+                d.said(item.label);
+            }
         });
         disabled(ui, |ui| {
             ui_kit::text_button(ui, "Show all", false);

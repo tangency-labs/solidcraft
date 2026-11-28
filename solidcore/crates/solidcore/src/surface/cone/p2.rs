@@ -119,7 +119,8 @@ use crate::geom::tol::{approx_tol3d, is_zero};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
-use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_SQRT, PI};
+use crate::math::det;
+use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_DEG, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{
     BSplineSurface, IsoCurveOptions, LocationType, SurfParamType,
@@ -250,9 +251,9 @@ fn iso_arc_exact(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<O
             return Ok(None);
         };
         // the half sweep, from the leg and the chord
-        let half = tangent.cross(chord).length().atan2(tangent.dot(chord));
+        let half = det::atan2(tangent.cross(chord).length(), tangent.dot(chord));
         let weight = b.w / (a.w * c.w).sqrt();
-        if (weight - half.cos()).abs() > EFF_ZERO_SQRT {
+        if (weight - det::cos(half)).abs() > EFF_ZERO_SQRT {
             return Ok(None);
         }
         segments.push(Segment {
@@ -290,7 +291,7 @@ fn iso_arc_exact(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<O
     for s in &segments {
         let on = |p: Point3| ((p - centre).length() - radius).abs() <= scaled_zero;
         // the middle point is where the end tangents meet, r / cos α from the centre
-        let corner = ((s.q1 - centre).length() * s.half.cos() - radius).abs() <= scaled_zero;
+        let corner = ((s.q1 - centre).length() * det::cos(s.half) - radius).abs() <= scaled_zero;
         let flat = s
             .normal
             .is_none_or(|n| n.dot(normal) >= 1.0 - EFF_ZERO_SQRT);
@@ -314,9 +315,19 @@ fn iso_arc_exact(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<O
     }) {
         return Ok(None);
     }
-    let end_ang = sweep.to_degrees();
+    let mut end_ang = sweep.to_degrees();
     if !(end_ang > 0.0 && end_ang <= 360.0 + EFF_ZERO_SQRT) {
         return Ok(None);
+    }
+    // Snap a closed full circle whose summed Bézier half-sweeps rounded slightly below
+    // 360 degrees (for example, far from the origin) up to 360 degrees, matching
+    // `is_arc_base`.
+    if segments
+        .last()
+        .is_some_and(|last| first.q0.distance(last.q2) <= scaled_zero)
+        && end_ang >= 360.0 - EFF_ZERO_SQRT
+    {
+        end_ang = 360.0;
     }
     Ok(Some(IsoArc {
         frame: Axis2Placement::new(centre, x_axis, normal.cross(x_axis)),
@@ -384,9 +395,9 @@ fn iso_arc_from_chord(
             return Ok(None);
         };
         // the half sweep, from the leg and the chord
-        let half = tangent.cross(chord).length().atan2(tangent.dot(chord));
+        let half = det::atan2(tangent.cross(chord).length(), tangent.dot(chord));
         let weight = b.w / (a.w * c.w).sqrt();
-        if (weight - half.cos()).abs() > EFF_ZERO_SQRT {
+        if (weight - det::cos(half)).abs() > EFF_ZERO_SQRT {
             return Ok(None);
         }
         segments.push(Segment {
@@ -466,9 +477,19 @@ fn iso_arc_from_chord(
     }) {
         return Ok(None);
     }
-    let end_ang = sweep.to_degrees();
+    let mut end_ang = sweep.to_degrees();
     if !(end_ang > 0.0 && end_ang <= 360.0 + EFF_ZERO_SQRT) {
         return Ok(None);
+    }
+    // Snap a closed full circle whose summed Bézier half-sweeps rounded slightly below
+    // 360 degrees (for example, far from the origin) up to 360 degrees, matching
+    // `is_arc_base`.
+    if segments
+        .last()
+        .is_some_and(|last| first.q0.distance(last.q2) <= scaled_zero)
+        && end_ang >= 360.0 - EFF_ZERO_SQRT
+    {
+        end_ang = 360.0;
     }
     Ok(Some(IsoArc {
         frame: Axis2Placement::new(centre, x_axis, normal.cross(x_axis)),
@@ -916,7 +937,7 @@ impl Cone {
         let tol = approx_tol3d(k, tol);
         let sign =
             if self.rev.swap_uv { -1.0 } else { 1.0 } * if self.inside_out { -1.0 } else { 1.0 };
-        let d = (self.semi_angle_deg * PI / 180.0).cos() * sign * signed_offset_distance;
+        let d = det::cos(self.semi_angle_deg * PI / 180.0) * sign * signed_offset_distance;
         self.bot_radius() + d < tol && self.top_radius() + d < tol
     }
 
@@ -965,8 +986,8 @@ impl Cone {
         let height = self.height(k)?;
 
         // offset vector and displacements
-        let mut sin = (self.semi_angle_deg * PI / 180.0).sin();
-        let mut cos = (self.semi_angle_deg * PI / 180.0).cos();
+        let mut sin = det::sin(self.semi_angle_deg * PI / 180.0);
+        let mut cos = det::cos(self.semi_angle_deg * PI / 180.0);
         let norm = (cos * x_axis - sin * z_axis).unitize_or_z();
         let off_vec = offset_sign * signed_offset_distance * norm;
         let off_z_dist = -sin * offset_sign * signed_offset_distance;
@@ -1600,6 +1621,7 @@ impl Cone {
 
         // (status ignored upstream)
         ignore_status(cylinder.rebuild_cone_polar_converter(k))?;
+        cylinder.sync_sweep_domain_with_polar_curve();
 
         // (status ignored upstream)
         let gen_ivl = Extent1d::from_min_max(bot_knot, top_knot);
@@ -1608,6 +1630,27 @@ impl Cone {
         }
 
         Ok(Some(cylinder))
+    }
+
+    /// Aligns the cone's STEP U domain with the sweep interval finalized by the polar
+    /// converter against the retained NURB, so `SmSurfOfRevolution::Test #7` agrees with
+    /// the polar curve (as `Sphere::keep_tested_nurb_on` does).
+    fn sync_sweep_domain_with_polar_curve(&mut self) {
+        if !self.rev.have_polar_conversion() {
+            return;
+        }
+        let Some(ivl) = self.rev.polar_curve().map(Ellipse::step_interval) else {
+            return;
+        };
+        if ivl.length() > EFF_ZERO
+            && ivl.length() <= 360.0 + EFF_ZERO_DEG
+            && ivl.min() >= -360.0 - EFF_ZERO_DEG
+            && ivl.max() <= 360.0 + EFF_ZERO_DEG
+        {
+            let d = self.rev.anal_uv_domain;
+            self.rev.anal_uv_domain =
+                Extent2d::from_bounds(ivl.min(), d.min().y, ivl.max(), d.max().y);
+        }
     }
 
     // ---- RebuildSTEPFromNURBParameters ---------------------------------------------
@@ -2054,7 +2097,7 @@ impl Cone {
             top.radius - bot.radius
         };
         if radius_diff.abs() > EFF_ZERO {
-            self.semi_angle_deg = radius_diff.atan2(height) * 180.0 / PI;
+            self.semi_angle_deg = det::atan2(radius_diff, height) * 180.0 / PI;
         }
         // Not upstream (WR-385, #713): an SmCylinder's angle is always 0, so clear any
         // angle a previous rebuild left (its radii are equal here, which skips the
@@ -2101,6 +2144,7 @@ impl Cone {
         // Build newCone PolarConverter from Nurb rotation isoParamCurve (status
         // ignored), then save the gencurve
         ignore_status(self.rebuild_cone_polar_converter(k))?;
+        self.sync_sweep_domain_with_polar_curve();
         self.rev.gen_curve = Some(Curve::from(line));
         Ok(())
     }
@@ -2514,7 +2558,7 @@ mod tests {
         let k = kernel();
         let (radius, start) = (201.0_f64, 1.234_f64);
         let (cy, cz) = (-107.916_728_995_484_4, 248.198_661_548_332_04);
-        let on = |a: f64, r: f64| (cy + r * a.cos(), cz + r * a.sin());
+        let on = |a: f64, r: f64| (cy + r * det::cos(a), cz + r * det::sin(a));
         let short = 0.046_f64.to_radians();
         for sweeps in [vec![short], vec![short, 0.7]] {
             // the arc's points (y, z) and weights: each segment's ends then its middle
@@ -2522,7 +2566,7 @@ mod tests {
             let mut knots = vec![0.0; 3];
             let mut at = start;
             for sweep in &sweeps {
-                let w = (0.5 * sweep).cos();
+                let w = det::cos(0.5 * sweep);
                 arc.push((on(at + 0.5 * sweep, radius / w), w));
                 at += sweep;
                 arc.push((on(at, radius), 1.0));
@@ -2670,7 +2714,7 @@ mod tests {
         use crate::surface::implicit::AnalyticSupport;
         let k = kernel();
         let sweep = 1.0_f64;
-        let w = (0.5 * sweep).cos();
+        let w = det::cos(0.5 * sweep);
         let row = |turn: f64, x: f64| -> Vec<CPoint> {
             [
                 (0.0, 1.0, 1.0),
@@ -2679,7 +2723,7 @@ mod tests {
             ]
             .iter()
             .map(|&(a, r, weight): &(f64, f64, f64)| {
-                let (y, z) = (r * (a + turn).cos(), r * (a + turn).sin());
+                let (y, z) = (r * det::cos(a + turn), r * det::sin(a + turn));
                 CPoint::new(x * weight, y * weight, z * weight, weight)
             })
             .collect()
@@ -3034,7 +3078,7 @@ mod tests {
     /// mean-radius branch) and turned by `turn` rad about the axis.
     fn twisted_cylinder(k: &Kernel, turn: f64, swap: bool, inside: bool) -> Cone {
         let (radius, top) = (9.0, 9.0 + 0.5 * EFF_ZERO_SQRT * 10.0);
-        let (sin, cos) = turn.sin_cos();
+        let (sin, cos) = det::sin_cos(turn);
         let mut c = edited_cylinder(k, radius, top, swap, inside);
         // turn the top row about the axis (z), in homogeneous coordinates
         let s = c.base_mut().get_or_create_gw_nurb().unwrap();
@@ -3161,7 +3205,7 @@ mod tests {
                         false,
                     );
                     c.make_nurb(&k).unwrap();
-                    let (sin, cos) = turn.sin_cos();
+                    let (sin, cos) = det::sin_cos(turn);
                     let s = c.base_mut().get_or_create_gw_nurb().unwrap();
                     let (n, m) = (s.n(), s.m());
                     for i in 0..=n {
@@ -3336,7 +3380,7 @@ mod tests {
     fn rebuild_refuses_a_tilted_top_circle() {
         let k = kernel();
         for (tilt_deg, refused) in [(0.01, true), (1e-4, false)] {
-            let (sin, cos) = f64::to_radians(tilt_deg).sin_cos();
+            let (sin, cos) = det::sin_cos(f64::to_radians(tilt_deg));
             for swap in [false, true] {
                 for inside in [false, true] {
                     let mut c = edited_cylinder(&k, 9.0, 9.0, swap, inside);
@@ -3406,7 +3450,7 @@ mod tests {
             c.make_nurb(&k).unwrap();
             assert!(!c.is_cylinder_class());
             c.rebuild_step_from_nurb_parameters(&k).unwrap();
-            let expected = (top - radius).atan2(3.0) * 180.0 / PI;
+            let expected = det::atan2(top - radius, 3.0) * 180.0 / PI;
             assert!((c.semi_angle_deg() - expected).abs() < 1e-12);
             assert_ne!(c.semi_angle_deg(), 0.0);
         }
@@ -3502,7 +3546,7 @@ mod tests {
         let cone = canonical(&k, 2.0, 1.0, 3.0, false, false);
         let off = cone.create_offset_surface(&k, 0.5, 1e-6).unwrap().unwrap();
         let semi = cone.semi_angle_deg() * PI / 180.0;
-        assert!((off.base_radius() - (2.0 + semi.cos() * 0.5)).abs() < 1e-12);
+        assert!((off.base_radius() - (2.0 + det::cos(semi) * 0.5)).abs() < 1e-12);
         // both radii below the tolerance: no surface
         assert!(cone
             .create_offset_surface(&k, -10.0, 1e-6)
@@ -3537,7 +3581,7 @@ mod tests {
                 // inside out); the kept cone runs from where that radius reaches zero
                 // to the surviving end, at the slope (top - bot) / 3
                 let semi = cone.semi_angle_deg() * PI / 180.0;
-                let moved = (if inside { -1.0 } else { 1.0 }) * d * semi.cos();
+                let moved = (if inside { -1.0 } else { 1.0 }) * d * det::cos(semi);
                 let (new_bot, new_top) = (bot + moved, top + moved);
                 let collapsed_bot = new_bot < new_top;
                 let (want_bot, want_top, want_height) = if collapsed_bot {
@@ -3698,8 +3742,8 @@ mod tests {
                 );
                 let s = cone.evaluate_point(&k, uv).unwrap();
                 let o = off.evaluate_point(&k, uv).unwrap();
-                let t = s.y.atan2(s.x);
-                let n = Vec3::new(cos_semi * t.cos(), cos_semi * t.sin(), -tilt);
+                let t = det::atan2(s.y, s.x);
+                let n = Vec3::new(cos_semi * det::cos(t), cos_semi * det::sin(t), -tilt);
                 let want = s + d * n;
                 assert!(
                     o.distance(want) < 1e-12,
@@ -3810,7 +3854,7 @@ mod tests {
     /// The part of the ellipse of [`ellipse_on_a_trimmed_cylinder`] inside the trimmed
     /// domain: `z = 50 - 30 cos t >= 30`, so `cos t <= 2/3`.
     fn ellipse_part_above_v30() -> f64 {
-        360.0 - 2.0 * (2.0_f64 / 3.0).acos().to_degrees()
+        360.0 - 2.0 * det::acos(2.0_f64 / 3.0).to_degrees()
     }
 
     #[test]
@@ -3827,7 +3871,7 @@ mod tests {
             "{trimmed:?}"
         );
         // z = 50 - 30 cos t = 30 at t = acos(2/3): the one interval between those angles
-        let edge = (2.0_f64 / 3.0).acos().to_degrees();
+        let edge = det::acos(2.0_f64 / 3.0).to_degrees();
         let [only] = trimmed.as_slice() else {
             panic!("one interval expected: {trimmed:?}");
         };
@@ -3937,7 +3981,7 @@ mod tests {
             cylinder.rev().base().natural_uv_domain()
         );
         assert!((cone.canonical().radius - (5.0 - 0.4)).abs() < 1e-9);
-        assert!((cone.canonical().semi_angle_deg - slope.atan().to_degrees()).abs() < 1e-9);
+        assert!((cone.canonical().semi_angle_deg - det::atan(slope).to_degrees()).abs() < 1e-9);
         let nurb = cylinder.rev().base().natural_uv_domain();
         for i in 0..=6 {
             for j in 0..=3 {
@@ -4006,7 +4050,7 @@ mod tests {
 
         let k = kernel();
         let (radius, half, start) = (300.0, 0.0009_f64, -0.4);
-        let weight = half.cos();
+        let weight = det::cos(half);
         let mut net = Vec::new();
         for y in [0.0, -80.0] {
             let mut row = Vec::new();
@@ -4018,8 +4062,8 @@ mod tests {
             .into_iter()
             .enumerate()
             {
-                let mut x = 10.0 + radius * angle.cos() / w;
-                let z = 30.0 + radius * angle.sin() / w;
+                let mut x = 10.0 + radius * det::cos(angle) / w;
+                let z = 30.0 + radius * det::sin(angle) / w;
                 if y < 0.0 && i == 1 {
                     x = x.next_up().next_up();
                 }
@@ -4046,5 +4090,59 @@ mod tests {
         let support =
             AnalyticSupport::of(&crate::surface::surface::Surface::from(cylinder)).unwrap();
         assert!(lies_on(&form, &support.implicit()).unwrap(), "{support:?}");
+    }
+
+    /// A full or partial cylinder far from the origin whose summed Bézier half-sweeps
+    /// round slightly below 360 degrees still recognises cleanly and passes
+    /// `Surface::assert_valid` (including `SmSurfOfRevolution::Test #7`).
+    #[test]
+    fn far_from_origin_cylinder_keeps_matching_polar_curve_domain() {
+        use crate::geom::assert_array::{AssertArray, ObjectKey};
+        use crate::surface::surface::Surface;
+
+        let k = kernel();
+        let seam = 0.6131_f64;
+        let x = Vec3::new(det::cos(seam), det::sin(seam), 0.0);
+        let y = Vec3::new(-det::sin(seam), det::cos(seam), 0.0);
+        for (origin, radius, height, end_ang) in [
+            (Point3::new(0.0, -1.0e6, 2.0e5), 6.0, 25.0, 360.0),
+            (Point3::new(0.0, -1.0e6, 2.0e5), 6.0, 25.0, 200.0),
+            (Point3::new(40.0, 25.0, 10.0), 0.1, 20.0, 360.0),
+            (Point3::new(40.0, 25.0, 10.0), 2500.0, 20.0, 360.0),
+        ] {
+            let mut cyl = Cone::new_cylinder_bounded(
+                origin, x, y, radius, 0.0, end_ang, height, false, false, false,
+            );
+            cyl.make_nurb(&k).unwrap();
+            let nurbs = cyl.rev().base().clone();
+            let found = Cone::is_nurb_surface_cylinder(&k, &nurbs, 1.0)
+                .unwrap()
+                .expect("a cylinder");
+            let u_ivl = found.rev().step_uv_domain().u_interval();
+            let polar_ivl = found
+                .rev()
+                .polar_curve()
+                .expect("polar curve")
+                .step_interval();
+            assert_eq!(u_ivl, polar_ivl, "{origin:?} r={radius} end={end_ang}");
+            if end_ang == 360.0 {
+                assert_eq!(
+                    u_ivl,
+                    Extent1d::from_min_max(0.0, 360.0),
+                    "{origin:?} r={radius}"
+                );
+            }
+
+            let surface = Surface::from(found);
+            let mut reports = AssertArray::new();
+            let valid = surface
+                .assert_valid(&k, Some(&mut reports), 2, ObjectKey(1))
+                .unwrap();
+            let failed: Vec<_> = reports.reports().iter().filter(|r| !r.ok).collect();
+            assert!(
+                valid && failed.is_empty(),
+                "{origin:?} r={radius} end={end_ang}: {failed:?}"
+            );
+        }
     }
 }

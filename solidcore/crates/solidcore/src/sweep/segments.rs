@@ -15,7 +15,9 @@
 use std::f64::consts::PI;
 
 use crate::curve::curve::Curve;
-use crate::curve::path::{rotation, segments_join, PathShape, PathTolerances, Segment};
+use crate::curve::path::{
+    rotation, segments_close, segments_join, PathShape, PathTolerances, Segment,
+};
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::certified::unit;
@@ -135,6 +137,75 @@ pub fn sweep_along_segments(
             "segments not proved to make one path",
         ));
     }
+    walls_along(
+        k,
+        profile,
+        segments,
+        if cap { Ends::Capped } else { Ends::Open },
+    )
+}
+
+/// The profile swept round the closed path of `segments`, turning with it, exactly piece
+/// by piece ([`sweep_along_segments`]): the walls close on each other where the path
+/// closes, where the profile comes back onto itself, so there are no caps. With `solid`
+/// the walls must close into a solid (a closed profile); without it they are sewn as a
+/// sheet whose open profile's ends stay free. The segments must be proved to make one
+/// closed path to `tol` ([`segments_close`]). A profile reaching an arc's axis turns
+/// about it there: the walls of its edges on the axis close to that edge, and the wall
+/// of an edge ending on it closes to a point, as in a rotational sweep. With the motions
+/// that place the profile at the path's start, half way round and at its end (round the
+/// whole loop, back at the start).
+///
+/// # Errors
+///
+/// `InvalidInput` for segments not proved to make one closed path; those of the sweeps,
+/// the face copies and the stitch.
+pub fn sweep_round_closed_segments(
+    k: &mut Kernel,
+    profile: &[Curve],
+    segments: &[Segment],
+    solid: bool,
+    tol: &PathTolerances,
+) -> Result<(Brep, [Transform; 3])> {
+    if segments_close(segments, tol) != PathShape::Is(()) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "segments not proved to make one closed path",
+        ));
+    }
+    walls_along(
+        k,
+        profile,
+        segments,
+        if solid {
+            Ends::Closed
+        } else {
+            Ends::ClosedSheet
+        },
+    )
+}
+
+/// What the walls' ends are.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Ends {
+    /// Capped at the path's two ends.
+    Capped,
+    /// Left open at the path's two ends: a sheet.
+    Open,
+    /// Round a closed path, closing on each other: a solid.
+    Closed,
+    /// Round a closed path, closing on each other, sewn as a sheet.
+    ClosedSheet,
+}
+
+/// The walls of `profile` along `segments`, already proved to make one path (closed for
+/// the closed ends), with `ends`.
+fn walls_along(
+    k: &mut Kernel,
+    profile: &[Curve],
+    segments: &[Segment],
+    ends: Ends,
+) -> Result<(Brep, [Transform; 3])> {
     let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
     // The path starts where the profile lies: the identity.
     let start = Axis2Placement::IDENTITY;
@@ -178,7 +249,7 @@ pub fn sweep_along_segments(
         }
         m = carry(g, &m, 1.0);
     }
-    if cap {
+    if ends == Ends::Capped {
         // The caps: the profile where the path starts and where it ends.
         for at in [start, m] {
             let section = carried(k, profile, &at)?;
@@ -188,11 +259,16 @@ pub fn sweep_along_segments(
             })?;
         }
     }
-    if cap {
-        stitch_and_orient(k, &mut b, &StitchAndOrientOptions::default())?;
-    } else {
+    match ends {
+        // round a closed path the last segment's walls end on the section the first's
+        // start from: the stitch sews them there
+        Ends::Capped | Ends::Closed => {
+            stitch_and_orient(k, &mut b, &StitchAndOrientOptions::default())?;
+        }
         // the profile at both ends stays open: the walls are a sheet (WR-18515)
-        stitch_and_orient_open(k, &mut b, &StitchAndOrientOptions::default(), None)?;
+        Ends::Open | Ends::ClosedSheet => {
+            stitch_and_orient_open(k, &mut b, &StitchAndOrientOptions::default(), None)?;
+        }
     }
     b.refresh_cached_topology();
     let mut half = 0.5 * total;

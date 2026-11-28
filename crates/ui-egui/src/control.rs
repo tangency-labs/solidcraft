@@ -188,6 +188,7 @@ fn open_windows(app: &SolveApp) -> Vec<&'static str> {
         (app.params.is_some(), "parameters.change"),
         (app.design_properties.is_some(), "document.metadata"),
         (app.sketch_report.is_some(), "sketch.inspect"),
+        (app.design_report.is_some(), "document.inspect"),
         (app.bom.is_some(), "assembly.bom"),
         (app.material_card_review.is_some(), "material.properties.validate"),
         (app.help.about, "about"),
@@ -231,7 +232,7 @@ fn ui_state(app: &SolveApp) -> Value {
 
 /// Run one command as `engine.execute` does: through `app.run`, then the first-body fit and the
 /// camera the command asked for.
-fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String> {
+pub(crate) fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String> {
     if solidcraft_engine::panels::commands::is_command(id) {
         // No first-body meshing, camera-follow or fit tail for application layout.
         return app.run(id, params);
@@ -305,6 +306,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
     // Placement failure does not establish an empty model. Keep its camera and
     // let the existing placement diagnostic explain the unavailable world.
     let was_empty = fit_command && history_may_fit && app.session.world_state().is_ok_and(|world| world.bodies.is_empty());
+    app.docs.camera_recalled = false;
     let r = app.run(id, params);
     // Update Links in a part edited in place reads the assembly around it too, as its button does.
     if r.is_ok() && is_command(Some(id), "component.update_links") && app.edit_in_place.active.is_some() {
@@ -312,6 +314,8 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
     }
     if r.is_ok()
         && was_empty
+        // A design opened with its remembered camera shows it as it was left (#23271).
+        && !app.docs.camera_recalled
         && app.session.active_sketch.is_none()
         // Cheap test first: placing the world (`world_state`) after every step of a batch in a
         // design with components placed every component's bodies again once per step.
@@ -584,9 +588,10 @@ pub fn request_scope(app: &SolveApp, params: &Value) -> Result<Option<vfs::PathS
 /// Slice), with the grid and the origin's axes as `guides` says.
 pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides) -> Result<solidcraft_viewport::Scene, String> {
     let mut palette = crate::viewport::scene_palette(app.viewport_dark(), app.preferences.color_vision);
-    // The view's own background colour (#7688).
-    if let Some([r, g, b]) = app.preferences.viewport_background {
-        palette.background = (solidcraft_viewport::Rgb(r, g, b), solidcraft_viewport::Rgb(r, g, b));
+    // The view's own background, one colour (#7688) or a gradient (#9230).
+    if let Some(solidcraft_theme::ViewBackground { top: [r, g, b], middle, bottom: [r2, g2, b2] }) = app.preferences.viewport_background_colours() {
+        palette.background = (solidcraft_viewport::Rgb(r, g, b), solidcraft_viewport::Rgb(r2, g2, b2));
+        palette.background_middle = middle.map(|[r, g, b]| solidcraft_viewport::Rgb(r, g, b));
     }
     let mut scene = solidcraft_engine::view::scene_with_thread_markings(
         &app.session,
@@ -1112,19 +1117,21 @@ fn ui_browser(app: &SolveApp) -> Outcome {
     }))
 }
 
-/// `ui.workspace {workspace?}`: enter the design, render or drawing workspace; returns the one shown.
+/// `ui.workspace {workspace?}`: enter a built-in or plugin workspace; returns the one shown.
 fn ui_workspace(app: &mut SolveApp, q: params::WorkspaceParams) -> Outcome {
     if let Some(w) = q.workspace
-        && let Err(e) = crate::workspace::enter(app, w.as_str())
+        && let Err(e) = crate::workspace::enter(app, &w)
     {
         return err(e);
     }
     ok(json!({"workspace":current_workspace(app)}))
 }
 
-/// The workspace shown: drawing, render or design.
-fn current_workspace(app: &SolveApp) -> &'static str {
-    if crate::drawing_workspace::active(app) {
+/// The workspace shown, including namespaced plugin workspaces.
+fn current_workspace(app: &SolveApp) -> &str {
+    if let Some(id) = crate::plugin_workspaces::active_id(app) {
+        id
+    } else if crate::drawing_workspace::active(app) {
         "drawing"
     } else if crate::render_workspace::active(app) {
         "render"
@@ -1720,7 +1727,8 @@ fn app_quit(app: &mut SolveApp, ctx: &egui::Context, q: params::Quit) -> Outcome
 /// `false` frames nothing.
 /// Nothing changes when a field is refused.
 fn camera(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
-    const FIELDS: [&str; 8] = ["target", "yaw", "pitch", "roll", "distance", "fov", "up", "fit"];
+    // `frame` is what a reply carries for a design with its own orientation (#6455).
+    const FIELDS: [&str; 9] = ["target", "yaw", "pitch", "roll", "distance", "fov", "up", "frame", "fit"];
     let o = match p {
         Value::Null => serde_json::Map::new(),
         Value::Object(o) => o.clone(),
@@ -1737,6 +1745,14 @@ fn camera(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
             v[k] = x.clone();
         }
         cam = serde_json::from_value(v).map_err(|e| format!("bad camera: {e}"))?;
+        // A reply from another frame turns into this design's frame, keeping the view it shows; a
+        // camera without one is read in this design's frame.
+        let given = if o.get("frame").is_some_and(|f| !f.is_null()) { cam.frame.or(app.cam.frame) } else { app.cam.frame };
+        if given == app.cam.frame {
+            cam.frame = app.cam.frame;
+        } else {
+            cam = solidcraft_viewport::Camera { frame: given, ..cam }.in_frame(app.cam.frame);
+        }
         // The distance cap is far past any Fit (so every reply replays) and still finite in f32.
         if !cam.is_valid() || cam.distance > 1e15 || cam.pitch.abs() > std::f64::consts::FRAC_PI_2 {
             return Err("the camera must be finite, with a distance up to 1e15 mm and a pitch within ±π/2".into());
@@ -4700,5 +4716,116 @@ pub(crate) mod tests {
         let r = h.call("ui.home", json!({"sample": 0}));
         assert_eq!(r["ok"], true, "{r}");
         assert_eq!(r["result"]["open"], true, "the sample was asked for: {r}");
+    }
+
+    /// A reply from a design with its own orientation carries `frame`; replaying it is not refused
+    /// as an unknown field, and the design keeps its frame.
+    #[test]
+    fn a_reply_from_a_framed_design_replays_and_keeps_its_frame() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 20, "width": 10, "height": 5}}));
+        let mut cam = solidcraft_viewport::Camera::default();
+        cam.set_view(solidcraft_viewport::StandardView::Right);
+        cam.pitch = 0.2;
+        h.call("engine.execute", json!({"command": "view.frame", "params": {"set": "front", "camera": cam}}));
+        h.frames(3);
+        let read = h.call("ui.camera", Value::Null)["result"].clone();
+        assert!(read["frame"].is_object(), "{read}");
+        let again = h.call("ui.camera", read.clone());
+        assert_eq!(again["ok"], true, "{again}");
+        assert_eq!(again["result"]["frame"], read["frame"]);
+        assert!(h.app.session.doc.view_frame.is_some());
+    }
+
+    /// A design saved with its own orientation opens at it: its frame is the camera's, and Home is
+    /// the one it was saved with.
+    #[test]
+    fn a_framed_design_reopens_at_its_own_home() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 20, "width": 10, "height": 5}}));
+        h.call("ui.view", json!({"view": "home"}));
+        h.frames(3);
+        // A frameless design's Home, so the framed one below is shown to differ from it.
+        let plain_home = h.app.cam.back();
+        let mut cam = solidcraft_viewport::Camera::default();
+        cam.set_view(solidcraft_viewport::StandardView::Right);
+        cam.pitch = 0.2;
+        h.call("engine.execute", json!({"command": "view.frame", "params": {"set": "front", "camera": cam}}));
+        h.call("ui.view", json!({"view": "home"}));
+        h.frames(3);
+        let frame = h.app.session.doc.view_frame.expect("the design has its own frame");
+        let saved_home = h.app.cam.back();
+        let apart = (saved_home.x - plain_home.x).abs() + (saved_home.y - plain_home.y).abs() + (saved_home.z - plain_home.z).abs();
+        assert!(apart > 1e-3, "the framed Home must differ from the frameless one: {saved_home:?} vs {plain_home:?}");
+        let path = h.dir.join("framed.solidcraft");
+        h.app.run("file.save", json!({"path": path})).unwrap();
+        h.app.run("file.new", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.view_frame, None);
+        h.app.run("doc.open", json!({"path": path})).unwrap();
+        assert_eq!(h.app.session.doc.view_frame, Some(frame));
+        assert_eq!(h.app.cam.frame, Some(frame));
+        h.call("ui.view", json!({"view": "home"}));
+        h.frames(3);
+        let home = h.app.cam.back();
+        let gap = (saved_home.x - home.x).abs() + (saved_home.y - home.y).abs() + (saved_home.z - home.z).abs();
+        assert!(gap < 1e-9, "Home after reopening looks {home:?}; it was {saved_home:?}");
+    }
+
+    /// A reply from a design in one frame, replayed after the frame changed, turns into the design's
+    /// current frame and looks where it did.
+    #[test]
+    fn a_reply_from_another_frame_replays_to_the_same_view() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 20, "width": 10, "height": 5}}));
+        let mut right = solidcraft_viewport::Camera::default();
+        right.set_view(solidcraft_viewport::StandardView::Right);
+        right.pitch = 0.2;
+        h.call("engine.execute", json!({"command": "view.frame", "params": {"set": "front", "camera": right}}));
+        h.frames(3);
+        let read = h.call("ui.camera", Value::Null)["result"].clone();
+        let before = h.app.cam.back();
+        h.call("engine.execute", json!({"command": "view.frame", "params": {"reset": true}}));
+        let mut front = solidcraft_viewport::Camera::default();
+        front.set_view(solidcraft_viewport::StandardView::Front);
+        h.call("engine.execute", json!({"command": "view.frame", "params": {"set": "top", "camera": front}}));
+        h.frames(3);
+        let again = h.call("ui.camera", read.clone());
+        assert_eq!(again["ok"], true, "{again}");
+        h.frames(3);
+        let after = h.app.cam.back();
+        let gap = (before.x - after.x).abs() + (before.y - after.y).abs() + (before.z - after.z).abs();
+        assert!(gap < 1e-9, "the replay looks {after:?}; the reply looked {before:?}");
+    }
+
+    /// Home is the design's own Home in the design's orientation everywhere: after Set Home and a Set
+    /// as Front, Home animates to it without the frame change cutting the animation short, and
+    /// ui.view home replies with the design's frame.
+    #[test]
+    fn home_turns_into_the_designs_orientation_everywhere() {
+        use solidcraft_viewport::{Camera, StandardView};
+        let mut h = crate::scenario::Harness::new();
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 20, "width": 10, "height": 5}}));
+        // Home looks along -Y (the Front view); the new Front below looks along +X, so the two differ.
+        let mut look = Camera::default();
+        look.set_view(StandardView::Front);
+        h.call("engine.execute", json!({"command": "view.set_home", "params": {"camera": look}}));
+        let mut from_right = Camera::default();
+        from_right.set_view(StandardView::Right);
+        from_right.pitch = 0.2;
+        h.call("engine.execute", json!({"command": "view.frame", "params": {"set": "front", "camera": from_right}}));
+        h.frames(3);
+        // Not through h.call: it settles, and the animation would finish inside the call.
+        let (req, _rx) = ControlRequest::new("ui.view", json!({"view": "home", "animate": true}));
+        let _ = handle(&mut h.app, &h.ctx, &req);
+        // Still in flight a couple of frames on: a frame change must not cancel it.
+        h.frames(2);
+        assert!(h.app.cam_anim.is_some(), "the Home animation is still running after two frames");
+        h.frames(120);
+        assert!(h.app.cam_anim.is_none(), "the Home animation finishes");
+        let back = h.app.cam.back();
+        assert!((back.y + 1.0).abs() + back.x.abs() + back.z.abs() < 1e-6, "Home looks along its saved direction: {back:?}");
+        h.call("ui.view", json!({"view": "front"}));
+        let reply = h.call("ui.view", json!({"view": "home"}));
+        assert_eq!(reply["result"]["frame"], serde_json::to_value(h.app.session.doc.view_frame).unwrap(), "{reply}");
     }
 }

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Weld type: projection</title>
+  <path d="M6 20L42 20L42 32L36 32L32 38L28 32L6 32Z" fill="#b8c3cf"/>
+  <path d="M6 20L42 20L42 32L36 32L32 38L28 32L6 32Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M22 32L58 32L58 44L22 44Z" fill="#b8c3cf"/>
+  <path d="M22 32L58 32L58 44L22 44Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M25 36A7 9 0 1 0 39 36A7 9 0 1 0 25 36Z" fill="#328bd3"/>
+  <path d="M25 36A7 9 0 1 0 39 36A7 9 0 1 0 25 36Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

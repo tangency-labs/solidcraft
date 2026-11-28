@@ -1025,6 +1025,19 @@ fn joint_origin_arg(origin: &solidcraft_doc::joints::JointOrigin, doc: &Document
                 arg.insert("x".into(), xref(x));
             }
         }
+        Snap::BetweenFaces { a, b, snap } => {
+            arg.insert("faces".into(), json!([world(a.pick), world(b.pick)]));
+            if let Some(inner) = snap {
+                let inner_origin = solidcraft_doc::joints::JointOrigin::new(origin.occurrence, inner.as_ref().clone());
+                let Some(mut inner_arg) = joint_origin_arg(&inner_origin, doc)? else {
+                    return Ok(None);
+                };
+                if let Some(m) = inner_arg.as_object_mut() {
+                    m.remove("occurrence");
+                }
+                arg.insert("snap".into(), inner_arg);
+            }
+        }
         _ => return Ok(None),
     }
     Ok(Some(Value::Object(arg)))
@@ -1107,7 +1120,7 @@ fn rebuilt_part(doc: &Document, comp: u64, part: &solidcraft_doc::StandardPart, 
     Ok(fresh)
 }
 
-/// A component's part properties and free-text properties as one
+/// A component's part properties, free-text properties and name split rule as one
 /// `component.metadata.set` step (the constructors seed defaults the design
 /// may have edited), with the keys the command would refuse listed out. The
 /// well-known keys the constructors seed and the design dropped are cleared.
@@ -1128,7 +1141,7 @@ fn component_metadata_step(c: &solidcraft_doc::Component) -> Result<(Option<Valu
             values.insert((*key).to_string(), Value::Null);
         }
     }
-    if values.is_empty() && c.properties.is_empty() {
+    if values.is_empty() && c.properties.is_empty() && c.name_split.is_none() {
         return Ok((None, odd));
     }
     let mut params = Map::new();
@@ -1136,6 +1149,9 @@ fn component_metadata_step(c: &solidcraft_doc::Component) -> Result<(Option<Valu
     params.insert("values".into(), Value::Object(values));
     if !c.properties.is_empty() {
         params.insert("properties".into(), json!(c.properties));
+    }
+    if let Some(rule) = &c.name_split {
+        params.insert("name_split".into(), json!(rule));
     }
     Ok((Some(step("component.metadata.set", Value::Object(params))), odd))
 }

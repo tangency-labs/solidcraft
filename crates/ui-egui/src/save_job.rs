@@ -185,11 +185,11 @@ fn finish_host(app: &mut SolveApp, save: HostSaving, result: Result<(), String>)
     } else if let Some(path) = copy.path.as_deref() {
         app.home.add_recent(path);
         crate::home::remember_session(&mut app.home, &copy);
-        let status = app.tr("ui.design_saved").replace("{path}", path);
+        let status = app.tr("ui.design_saved").replace("{path}", crate::display_user_path(path));
         app.set_status(status, false);
     }
     if dirty && let Some(path) = copy.path.as_deref() {
-        let status = app.tr("ui.browser_saved_earlier").replace("{path}", path);
+        let status = app.tr("ui.browser_saved_earlier").replace("{path}", crate::display_user_path(path));
         app.set_status(status, false);
     }
     show_warning(app, &result);
@@ -637,5 +637,98 @@ mod tests {
         // Any other message takes the offer away.
         h.app.set_status("Saved", false);
         assert!(!h.app.status_save_sc);
+    }
+
+    #[test]
+    fn display_user_path_preserves_native_paths_and_strips_browser_virtual_mounts() {
+        for native in [
+            r"D:\Downloads\Flute key.sc",
+            r"C:\Users\name\My Folder\part.sc",
+            r"\\server\share\My Part.sc",
+            "/home/user/My Designs/part.sc",
+            "/Users/alice/Downloads/Flute key.sc",
+            "/tmp/solidcraft/Bracket.sc",
+            "part.step",
+        ] {
+            assert_eq!(crate::display_user_path(native), native, "{native}");
+        }
+        assert_eq!(crate::display_user_path("/disk/1a2191f9b73-1f28c3be09888/Flute key.sc"), "Flute key.sc");
+        assert_eq!(crate::display_user_path("/disk/abc123/Sub Folder/Flute key.sc"), "Sub Folder/Flute key.sc");
+        assert_eq!(crate::display_user_path("/opfs/Flute key.sc"), "Flute key.sc");
+        assert_eq!(crate::display_user_path("/opfs/Sub Folder/Flute key.sc"), "Sub Folder/Flute key.sc");
+        assert_eq!(crate::display_user_path("/downloads/Bracket.step"), "Bracket.step");
+        assert_eq!(crate::display_user_path("/upload/Bracket.step"), "Bracket.step");
+        for malformed in [
+            "/disk/",
+            "/disk/id",
+            "/disk/id/",
+            "/disk//Flute key.sc",
+            "/disk/id//Flute key.sc",
+            "/disk/design.solidcraft",
+            "/opfs/",
+            "/downloads/",
+            "/upload/",
+        ] {
+            assert_eq!(crate::display_user_path(malformed), malformed, "{malformed}");
+        }
+    }
+
+    /// #22699: saving through a browser virtual mount (`/disk/<id>/...` or `/opfs/...`) shows
+    /// the human-readable file name in the save toast without leaking the synthetic mount prefix,
+    /// while native desktop paths stay intact.
+    #[test]
+    fn browser_disk_save_toast_strips_virtual_mount_and_native_keeps_full_path() {
+        let mut h = crate::scenario::Harness::new();
+        let writes = browser_writes(&mut h.app);
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let disk_path = "/disk/1a2191f9b73-1f28c3be09888/Flute key.sc";
+        assert!(super::start(&mut h.app, "file.save_as", json!({"path": disk_path})));
+        let (sent_path, _, done) = writes.borrow_mut().pop().unwrap();
+        assert_eq!(sent_path, disk_path);
+        done.send(Ok(())).unwrap();
+        super::tick(&mut h.app, false);
+        assert_eq!(h.app.session.path.as_deref(), Some(disk_path));
+        assert_eq!(h.app.status.as_ref().map(|(text, _, error)| (text.as_str(), *error)), Some(("Saved Flute key.sc", false)));
+
+        // Browser OPFS save also strips its internal prefix.
+        assert!(super::start(&mut h.app, "file.save_as", json!({"path": "/opfs/Flute key.sc"})));
+        let (_, _, done) = writes.borrow_mut().pop().unwrap();
+        done.send(Ok(())).unwrap();
+        super::tick(&mut h.app, false);
+        assert_eq!(h.app.status.as_ref().map(|(text, _, error)| (text.as_str(), *error)), Some(("Saved Flute key.sc", false)));
+
+        // Background-tab completion and dirty-during-save notices strip `/disk/<id>/` too.
+        assert!(super::start(&mut h.app, "file.save_as", json!({"path": disk_path})));
+        crate::documents::new_tab(&mut h.app);
+        let (_, _, done) = writes.borrow_mut().pop().unwrap();
+        done.send(Ok(())).unwrap();
+        super::tick(&mut h.app, false);
+        assert_eq!(h.app.status.as_ref().map(|(text, _, error)| (text.as_str(), *error)), Some(("Saved Flute key.sc", false)));
+
+        h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        assert!(super::start(&mut h.app, "file.save_as", json!({"path": disk_path})));
+        h.app.run("solid.sphere", json!({"diameter": 4})).unwrap();
+        let (_, _, done) = writes.borrow_mut().pop().unwrap();
+        done.send(Ok(())).unwrap();
+        super::tick(&mut h.app, false);
+        assert_eq!(
+            h.app.status.as_ref().map(|(text, _, error)| (text.as_str(), *error)),
+            Some(("Saved Flute key.sc. Newer changes are still unsaved.", false))
+        );
+
+        // Native desktop paths (Windows drive letters & spaces, Unix paths) remain unchanged.
+        let mut native = crate::scenario::Harness::new();
+        for path in [r"D:\Downloads\Flute key.sc", "/home/user/My Designs/Flute key.sc"] {
+            native.app.session.path = Some(path.into());
+            native.app.finish_command("file.save", &Ok(json!({"path": path})));
+            let expected = format!("Saved {path}");
+            assert_eq!(native.app.status.as_ref().map(|(text, _, error)| (text.as_str(), *error)), Some((expected.as_str(), false)));
+        }
+
+        // Export toasts strip `/downloads/` while keeping native paths intact.
+        crate::toolbar::exported(&mut h.app, "/downloads/Flute key.step", &json!({}));
+        assert_eq!(h.app.status.as_ref().map(|(text, _, error)| (text.as_str(), *error)), Some(("Exported Flute key.step", false)));
+        crate::toolbar::exported(&mut h.app, r"D:\Downloads\Flute key.step", &json!({}));
+        assert_eq!(h.app.status.as_ref().map(|(text, _, error)| (text.as_str(), *error)), Some((r"Exported D:\Downloads\Flute key.step", false)));
     }
 }

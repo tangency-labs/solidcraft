@@ -6,7 +6,7 @@ example adds a docked panel to a command plugin. It covers the
 manifest, the WIT interface, building the component, permissions, limits, checking, testing and
 installing.
 
-The reference for everything here is [Plugins](../../../plugins.md) (placement, dialogs, package
+The reference for everything here is [Plugins](https://github.com/tangency-labs/solidcraft/blob/main/docs/plugins.md) (placement, dialogs, package
 limits, importers, exporters) and [the runtime reference](../../../plugin-runtime.md) (execution and file
 scope). The design behind them is [RFC 0002](../../../rfcs/0002-plugins.md).
 
@@ -22,7 +22,7 @@ component. SolidCraft runs the component in a sandbox:
   The design opens as a new, unsaved design, with a report of what could not be carried over.
 - An **exporter** writes the open design as a file of a format SolidCraft doesn't write. It reads
   the design through read-only commands and returns the file's bytes; SolidCraft writes them where
-  the user chose. See [Exporters](../../../plugins.md#exporters).
+  the user chose. See [Exporters](https://github.com/tangency-labs/solidcraft/blob/main/docs/plugins.md#exporters).
 
 A plugin has no network access, ever. It reads and writes files only in folders the user approved,
 and it runs within fuel, memory and time limits. It ships no UI code: SolidCraft draws its dialog
@@ -34,6 +34,15 @@ Rust.
 Both examples are in SolidCraft's source, in `docs/book/plugin-examples`, and are built against
 the current WIT with every change to it (`cargo xtask plugin-examples`), so the code here
 compiles.
+
+## Start from a template
+
+The community-maintained [SolidCraft plugin template](https://github.com/AlpDmr/solidcraft-plugin-template)
+provides a working Rust command plugin, test cases, build scripts for Linux, macOS and Windows,
+and a GitHub Actions release workflow. Choose **Use this template**, set your plugin's id, name,
+description and `updates.github` repository in `plugin.json`, then follow its build instructions.
+Check the SolidCraft and WIT versions against the version you target. The steps below explain
+the same package structure if you prefer to start from an empty folder.
 
 ## What you need
 
@@ -94,13 +103,13 @@ Create `plate-maker/plugin.json`:
 | `runtime.module` | The component's file name, beside `plugin.json`. |
 | `runtime.commands` | Every SolidCraft command the plugin calls, by exact id. Anything else is refused. |
 | `runtime.entries` | What the plugin offers. Each entry has a `name`, an `effect` (`edit`, or `read` for one that only reads), an `input_schema` (a JSON schema of an object) and optional `slots`. |
-| `runtime.limits` | The fuel, memory and time one run may use (see [Limits](#limits)). |
+| `runtime.limits` | The fuel, memory, command host calls and guest compute time one run may use (see [Limits](#limits)). |
 | `runtime.permissions` | What else it needs (see [Permissions](#permissions)). Leave it out to ask for nothing. |
 
 The input schema is the entry's dialog: SolidCraft draws a field per property, with the `title`,
 `default`, limits and `unit`, and passes the values to the plugin as JSON. A field can also take
 geometry picked in the viewport, a dropdown, or a picture per option: see
-[Plugins](../../../plugins.md#integration-apis). `slots` place the entry in a ribbon tab or the
+[Plugins](https://github.com/tangency-labs/solidcraft/blob/main/docs/plugins.md#integration-apis). `slots` place the entry in a ribbon tab or the
 File or Help menu; every entry is in the Plugins menu anyway.
 
 ## Step 2: the crate
@@ -301,7 +310,35 @@ In SolidCraft, open **Preferences › Plugins**, choose **Install plugin…** an
 The confirmation screen shows what the plugin asks for; **Install** approves it. The entry appears
 in the Plugins menu and the Model tab at once. A program installs it with `plugin.install`, which
 never opens a dialog: send `"dry_run": true` first to review what it asks for (see
-[Installing](../../../plugins.md#installing)).
+[Installing](https://github.com/tangency-labs/solidcraft/blob/main/docs/plugins.md#installing)).
+
+## Check every push and publish releases
+
+In your repository's CI, build the component against the WIT from the SolidCraft version you
+support. Run these checks on the built package folder before making its installation archive:
+
+```sh
+solidcraft-cli plugin check plate-maker
+solidcraft-cli plugin test plate-maker --require-cases
+```
+
+Use a CLI release matching the WIT you build against. For an entry without an explicit
+test case, the second command runs a smoke test with its defaults when possible.
+`--require-cases` fails entries that have neither a case nor usable defaults, and any
+failing test fails the command. Add explicit cases for the behavior you depend on.
+Package the manifest, component and required assets, leaving tests in the source
+repository. For release automation:
+
+1. Set `updates.github` in the manifest to your repository's `owner/name`.
+2. Bump `version` to a new `major.minor.patch` version and tag the commit with that version
+   (for example, `v0.2.0`).
+3. Run the build and checks above, then publish a stable GitHub release with the checked
+   archive attached as `<id>.zip` or `<id>-<version>.zip`. Check the archive with
+   `solidcraft-cli plugin check` before publication.
+4. Verify the release asset has a SHA-256 digest listed by GitHub. SolidCraft uses this digest
+   to verify downloads.
+
+See [Updates](https://github.com/tangency-labs/solidcraft/blob/main/docs/plugins.md#updates) for version and archive requirements.
 
 ## Permissions
 
@@ -341,16 +378,31 @@ folder fails with `permission_denied`.
 |---|---|---|
 | `fuel` (WebAssembly instructions, roughly) | up to the user's ceiling, 100,000,000,000 by default | the same |
 | `memory_mib` | 1 to 4096; above the user's ceiling (128 by default) the user approves it at install | the same |
-| `deadline_ms` | at most 30,000 | at most 600,000 |
+| `deadline_ms` | default 5,000; up to `max_deadline_ms` (30,000 by default) | up to the greater of `max_deadline_ms` and 600,000 |
+| `host_calls` | default 256; up to `max_host_calls` (256 by default) | not used; importer host calls keep their separate fixed limit |
 | `stack_kib` | 64 to 1024 | 64 to 65,536 |
 | Component size | 16 MiB | 64 MiB |
 | `plugin.json` | 16 KiB | 16 KiB |
 | Parameters and replies | 1 MiB of JSON each | 1 MiB per read or write, 1 GiB read, a 256 MiB design |
 
-A run that goes past its fuel, memory, stack or deadline stops with `exhausted`, which names the
+A run that goes past its fuel, memory, host calls, stack or deadline stops with `exhausted`, which names the
 budget and its size ("it used all 100000 fuel it asks for and was stopped"), and nothing it did is
 kept. `plugin check` says when a request is over the app's ceilings, and `plugin test` runs
 under them.
+
+The deadline counts guest compute, including instantiation, and pauses during native host work.
+A command taking a minute therefore does not use a minute of guest deadline. Native commands
+keep their own limits and cancellation behavior. The whole command plugin run remains one undo
+step; any refusal discards it, even when guest code catches the error.
+
+A plugin that runs 300 commands must request at least `"host_calls": 300` in `runtime.limits`.
+The user must raise **Max plugin host calls** in **Preferences › Plugins**, or set
+`"max_host_calls": 300` in the file passed to `solidcraft-cli --plugin-limits`.
+The deadline uses **Max plugin guest time (ms)** and `max_deadline_ms` in the same way.
+Changing either manifest budget requires a fresh inspected content hash and approval.
+Raising a host ceiling does not increase the package's request or run it automatically.
+See [host ceiling configuration](../../../plugin-runtime.md#change-the-host-ceilings-without-rebuilding)
+for the startup file format.
 
 ## An importer
 
@@ -457,8 +509,9 @@ valid file the importer does not convert answers `unsupported`, which SolidCraft
 "Box Importer does not support part.box: ...".
 
 Once installed, **File › Open** offers `.box` files, and `doc.open` and `file.import` open them.
-An importer that converts a large file can ask for more time (`deadline_ms` up to 600,000), stack
-(`stack_kib`) and memory; see [Importers](../../../plugins.md#importers), which also covers reading
+An importer that converts a large file can ask for more guest compute time (`deadline_ms` up to
+600,000 under the default host policy, or more with a raised `max_deadline_ms`), stack
+(`stack_kib`) and memory; see [Importers](https://github.com/tangency-labs/solidcraft/blob/main/docs/plugins.md#importers), which also covers reading
 an assembly's other files and checking the result with `evaluate`.
 
 ## A plugin with a panel
@@ -532,7 +585,7 @@ What is new beside a command plugin:
   names is one of `runtime.entries`.
 - `"storage@0.1"` and `data_format`: the jobs live in the design, written with the `storage.set`
   command and read with `storage.get`, so each change is one undo step and a saved design keeps
-  them. See [Plugin data in a design](../../../plugins.md#plugin-data-in-a-design).
+  them. See [Plugin data in a design](https://github.com/tangency-labs/solidcraft/blob/main/docs/plugins.md#plugin-data-in-a-design).
 
 The crate is made as in Steps 2 and 3. The component implements the `panel-plugin` world: it
 exports `entry`, as a command does, and `ui-provider`, whose `describe` returns the same panels as
@@ -660,7 +713,7 @@ job:
 
 The panel docks on the right the first time a job is added, with its title, the plugin's name and
 a plugin badge. The other widgets, the events each one sends and the limits (eight panels per
-plugin, 512 widgets per layout) are in [Docked panels](../../../plugins.md#docked-panels).
+plugin, 512 widgets per layout) are in [Docked panels](https://github.com/tangency-labs/solidcraft/blob/main/docs/plugins.md#docked-panels).
 
 ## When something goes wrong
 

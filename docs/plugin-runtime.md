@@ -77,7 +77,7 @@ another version of the `craft:plugin` interfaces is refused the same way before 
 | `module` | One lowercase `.wasm` file name within the package; no directories |
 | `entries` | 1..32 distinct entries with `name`, `effect: read \| edit`, `input_schema` and optional `slots`; legacy string ids default to edit |
 | `commands` | At most 128 exact command ids from the app's MCP catalog; a sensitive command also needs its group in `permissions.command_groups` |
-| `limits` | Optional object with all of `fuel`, `memory_mib`, `deadline_ms`; omitted object uses defaults |
+| `limits` | Optional object requiring `fuel`, `memory_mib` and `deadline_ms`, with optional `host_calls` (default 256) and `stack_kib`; omitted object uses defaults |
 | `permissions` | Optional object: `files` requests named read/write folder grants, `clock` requests wall clock, `command_groups` requests sensitive command groups; `net: true` is refused |
 
 Entry inputs are object schemas; selection and target fields are arrays. Named slots use
@@ -123,7 +123,7 @@ the user grants it, as folders are:
 
 | Group | Commands |
 |---|---|
-| `file` | `file.*`, `library.*`, `sketch.insert_*`, and other commands that read or write files: `canvas.insert`, `component.insert_design`, `parts.insert`, `pointcloud.insert`, `pointcloud.reload`, `parameters.import`, `parameters.export`, `timeline.export_script`, `sketch.export_dxf`, `sketch.export_svg`, `sheet.export_dxf`, `sheet.export_bend_table`, `render.export`, `motion.export`, `motion.export_animation` |
+| `file` | `file.*`, `library.*`, `sketch.insert_*`, and other commands that read or write files: `canvas.insert`, `component.insert_design`, `component.update_links`, `component.relink`, `component.links`, `component.replace_with_link`, `parts.insert`, `pointcloud.insert`, `pointcloud.reload`, `parameters.import`, `parameters.export`, `timeline.export_script`, `sketch.export_dxf`, `sketch.export_svg`, `sheet.export_dxf`, `sheet.export_bend_table`, `render.export`, `motion.export`, `motion.export_animation` |
 | `doc` | `doc.*`: opening, recovering or switching designs, and `doc.info`: the open design's file |
 | `app` | `settings.*`, `ui.*`, `diagnostics.*`: app state outside any design |
 | `plugin` | `plugin.*`: inspecting or running plugins |
@@ -131,7 +131,7 @@ the user grants it, as folders are:
 A manifest that lists a grouped command without its group is refused when it is read. A refused
 call is a typed `permission_denied` error naming the group, and it poisons the transaction like
 any other refusal. Ungrouped commands run under an empty file scope, so even a feature that names
-an external font or linked design gets no file access. A granted `file` or `doc` command runs within the approved folders requested by its manifest. Known input-only commands (`file.insert_step`, `file.insert_mesh`, `file.insert_gerber`, `file.gerber_files`, `sketch.insert_dxf`, `sketch.insert_svg`) may read files from read-only grants. Commands that can write files, and commands that have not been reviewed as input-only, keep the stricter scope requiring both read and write approval. A read-only grant never authorizes a save, export, copy, move or delete. In such a command's parameters, any string `grant:<name>/<path>` names a file in the folder granted as `<name>`. The host replaces it with that file's absolute path before the command runs (`SolidCraftHost::run_command`, `solidcraft_io::vfs::grant_path`), so the scope checks above, including links, judge it like any other path. Only the folders this command may use resolve: read grants for an input-only command, read-and-write grants otherwise. The rest must be plain names. Anything else is a `permission_denied` refusal. Outside a plugin's `file` and `doc` commands, `grant:` has no meaning: it is an ordinary path, as before.
+an external font or linked design gets no file access. A granted `file` or `doc` command runs within the approved folders requested by its manifest. Known input-only commands (`component.insert_design` and the link commands above, `file.insert_step`, `file.insert_mesh`, `file.insert_gerber`, `file.gerber_files`, `sketch.insert_dxf`, `sketch.insert_svg`) may read files from read-only grants. Commands that can write files, and commands that have not been reviewed as input-only, keep the stricter scope requiring both read and write approval. A read-only grant never authorizes a save, export, copy, move or delete. In such a command's parameters, any string `grant:<name>/<path>` names a file in the folder granted as `<name>`. The host replaces it with that file's absolute path before the command runs (`SolidCraftHost::run_command`, `solidcraft_io::vfs::grant_path`), so the scope checks above, including links, judge it like any other path. Only the folders this command may use resolve: read grants for an input-only command, read-and-write grants otherwise. The rest must be plain names. Anything else is a `permission_denied` refusal. Outside a plugin's `file` and `doc` commands, `grant:` has no meaning: it is an ordinary path, as before.
 `plugin.install` validates its optional `approve` object against the manifest and stores grants
 by plugin id after successful publication. Each folder approval has `name`, absolute local `path`,
 `read` and `write`. Omitting `approve` leaves no grants, including after replacement. Explicit approvals
@@ -215,12 +215,16 @@ policy, not the GUI's preferences.
 | Component input | 16 MiB |
 | Guest fuel per invocation | 10,000,000; user host ceiling defaults to 100,000,000,000 |
 | Guest memory | 64 MiB; user host ceiling defaults to 128 MiB; one memory total |
-| Entry deadline | 5 s / 30 s |
+| Guest compute deadline | 5 s; user host ceiling defaults to 30 s for commands (600 s for importers) |
 | Core instances / tables | 8 / 2 (guest plus canonical ABI shim) |
 | Table elements / guest stack | 10,000 / 512 KiB |
-| Host engine calls | 256 |
+| Host engine calls | 256 per invocation; user host ceiling defaults to 256 |
 | Params, one host result, final result | 1 MiB each, bounded JSON parser depth |
 | Log messages | 1 KiB each, 64 KiB per call; control characters stripped |
+
+`host_calls` and `max_host_calls` apply to command plugins. Importers retain their separate
+fixed host-import count of 1,048,576. Their effective deadline ceiling is the greater of
+`max_deadline_ms` and 600000 ms, preserving existing importer requests.
 
 Fuel counts metered Wasm operations rather than milliseconds. A substantial separately compiled
 CAD routine can use billions of fuel units. The default invocation budgets and default host
@@ -229,19 +233,21 @@ not a measured minimum or a guarantee that every plugin fits.
 
 ### Change the host ceilings without rebuilding
 
-The native GUI persists `plugin_max_fuel` and `plugin_max_memory_mib` in user preferences.
-**Preferences > Plugins** presents exact decimal text fields (**Max plugin fuel** and
-**Max plugin memory (MiB)**). Enter, Apply or OK validates and accepts both integers together;
+The native GUI persists `plugin_max_fuel`, `plugin_max_memory_mib`, `plugin_max_host_calls`
+and `plugin_max_deadline_ms` in user preferences.
+**Preferences > Plugins** presents exact decimal text fields (**Max plugin fuel**,
+**Max plugin memory (MiB)**, **Max plugin host calls** and **Max plugin guest time (ms)**).
+Enter, Apply or OK validates and accepts the integers together;
 an incomplete or invalid field cannot silently save a numeric prefix. Cancel restores the last
 Apply/open snapshot. Restore defaults resets this page to the original host ceilings. The
 `ui.prefs` control method uses the same strict validation. Agent chat cannot change preferences;
 guests have no preference or host-policy command.
 
-A standalone CLI or `mcp --headless` process can read the same two ceiling concepts from an
+A standalone CLI or `mcp --headless` process can read the same ceilings from an
 explicit startup file:
 
 ```json
-{"max_fuel": 200000000000, "max_memory_mib": 512}
+{"max_fuel": 200000000000, "max_memory_mib": 512, "max_host_calls": 2000, "max_deadline_ms": 120000}
 ```
 
 ```text
@@ -250,7 +256,7 @@ solidcraft-cli --plugin-limits plugin-limits.json mcp --headless --allow-path /p
 ```
 
 This UTF-8 JSON file is at most 16 KiB; a UTF-8 BOM is accepted for Windows editors. Its keys are
-`max_fuel` and `max_memory_mib`; missing keys use the original host defaults, while unknown keys,
+`max_fuel`, `max_memory_mib`, `max_host_calls` and `max_deadline_ms`; missing keys use the original host defaults, while unknown keys,
 zero, fractional and out-of-range values are refused. The CLI reads it once before creating
 local sessions. Omit the flag to use the original ceilings. `--connect` and non-headless `mcp`
 refuse this flag because the connected desktop owns its preferences. GUI preferences and CLI
@@ -259,17 +265,22 @@ Approvals given at install last for the run; with `--keep-plugin-approvals` thes
 and write the same grant store as the desktop app, or the one in `--plugins-dir DIR`
 ([Headless use](plugins.md#headless-use)).
 
-Both host and manifest accept positive integer fuel through 18446744073709551615 (`u64::MAX`),
+Both host and manifest accept positive integer fuel, host calls and deadline milliseconds
+through 18446744073709551615 (`u64::MAX`),
 without conversion through floating-point controls. Memory accepts 1..4096 MiB: the remaining
 4096 MiB maximum is the technical Wasm32 address-space boundary (65536 pages of 64 KiB), not
 the old policy ceiling. Memory64 remains disabled and only one linear memory is allowed. A
 higher ceiling does not reserve memory or guarantee allocation; select a value your machine
-can sustain. The 30-second maximum deadline and the other fixed limits in the table remain.
+can sustain. Raising call and deadline ceilings does not change the other fixed limits in the table.
 
 ### Approve the package's actual request
 
-`runtime.limits` still determines the invocation's fuel, memory and deadline. Omitting that
-object still requests 10 million fuel, 64 MiB and 5000 ms, even under much larger host ceilings.
+`runtime.limits` determines the invocation's fuel, memory, host calls and guest compute deadline.
+Omitting that object requests 10 million fuel, 64 MiB, 256 host calls and 5000 ms, even under
+much larger host ceilings. Existing limits objects without `host_calls` request 256 calls.
+For example, a command plugin that needs 1588 native commands can declare
+`"limits": {"fuel": 10000000, "memory_mib": 64, "host_calls": 2000, "deadline_ms": 5000}`.
+The user must raise `max_host_calls` to at least 2000 before that package can run.
 `plugin.inspect` accepts a structurally valid larger request without instantiating it. Its reply
 contains the exact requested manifest limits, current `host_limits`, `within_host_limits`, and
 an optional `limits_error`. Inspect and review the code, grants and budgets first. If needed,
@@ -288,8 +299,11 @@ straight away. Fuel and epoch interruption are the same under both compilers.
 
 Fuel and epoch checks contain guest execution, not arbitrary native work. Component compilation
 happens before the guest deadline; its input size is bounded, but compiler memory/time are not
-covered by guest fuel. Each approved native command runs under its existing engine/kernel limits;
-the guest deadline prevents more commands rather than forcibly interrupting a native call.
+covered by guest fuel. Time spent inside native host work does not consume the guest compute
+deadline. Guest instantiation and execution share that deadline. Each approved native command
+runs under its existing engine/kernel limits and cancellation behavior; the guest deadline does
+not interrupt a native call. A long native operation therefore does not require a larger guest
+deadline merely because the operation takes longer than five seconds.
 The desktop worker keeps this work off the window thread. Stop drops adoption; an already running
 worker finishes unseen. It does not synchronously kill a native compiler or kernel call.
 
@@ -297,6 +311,11 @@ Host failures are typed data: missing permission, failed command and reason, exh
 invalid manifest or input field and reason, trap, or cancellation. The WIT and Rust `HostError`
 describe the same cases. A failure never retries the component, raises its limits or commits
 a partial transaction.
+An `over_ceiling` error names the requested limit and its host ceiling, with the Preferences
+field and `--plugin-limits` key to raise. An `exhausted` error names the invocation budget:
+the author must increase the manifest request, obtain fresh content approval, and have the user
+raise its host ceiling when necessary. A call-count refusal discards the whole transaction,
+even if the guest catches the error.
 
 After an entry returns valid JSON, the runtime writes consumed fuel, remaining fuel and the
 configured fuel limit to the `craft_plugin_wasm` debug log target. These counters describe guest

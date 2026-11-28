@@ -222,11 +222,11 @@ fn show_views(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Set aside under everything the cards draw: the ground's picture fills the whole area.
     let layer = ui.layer_id();
     if render_ground {
-        let [top, bottom] = crate::render_workspace::tile_background(app);
-        solidcraft_viewport_egui::paint_background(ui.painter(), area, top, bottom);
+        let (top, middle, bottom) = crate::render_workspace::tile_background(app);
+        solidcraft_viewport_egui::paint_background(ui.painter(), area, top, middle, bottom);
     } else if crate::view_window_drag::unanchored(app, ui.ctx(), focus) {
         let t = Tokens::get();
-        solidcraft_viewport_egui::paint_background(ui.painter(), area, t.viewport_top, t.viewport_bottom);
+        solidcraft_viewport_egui::paint_background(ui.painter(), area, t.viewport_top, t.viewport_middle, t.viewport_bottom);
     }
     let slots: Vec<_> = (0..BACKDROP_SLOTS).map(|_| ui.painter().add(egui::Shape::Noop)).collect();
     for (id, cell) in places {
@@ -646,37 +646,28 @@ fn empty_picker(app: &SolveApp, ui: &mut egui::Ui, ordinal: usize, cell: Rect) -
         let button = Rect::from_center_size(button.center(), button.size().min(vec2(160.0, 30.0)));
         let mut child = ui.new_child(UiBuilder::new().id_salt(("empty_cell_menu", ordinal)).max_rect(button));
         let mut chosen = None;
-        crate::ui_kit::Menu::button_with(
-            &mut child,
-            |ui, _| {
-                let rect = Rect::from_min_size(ui.next_widget_position(), button.size());
-                crate::ui_kit::button_at(ui, "empty_cell_open", rect, title, crate::ui_kit::Button::Normal)
-            },
-            |ui| {
-                for (angle, label) in angles {
-                    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label(label), "").clicked() {
-                        chosen = Some(EmptyAction::Angle(angle));
-                        ui.close();
-                    }
-                }
-                if !open.is_empty() {
-                    ui.separator();
-                    egui::ScrollArea::vertical().max_height(210.0).show(ui, |ui| {
-                        for (id, name) in &open {
-                            if crate::ui_kit::menu::button(ui, name, "").clicked() {
-                                chosen = Some(EmptyAction::Open(*id));
-                                ui.close();
-                            }
-                        }
-                    });
-                }
-                ui.separator();
-                if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Close this cell"), "").clicked() {
-                    chosen = Some(EmptyAction::Close);
-                    ui.close();
-                }
-            },
-        );
+        let rect = Rect::from_min_size(child.next_widget_position(), button.size());
+        let response = crate::ui_kit::button_at(&mut child, "empty_cell_open", rect, title, crate::ui_kit::Button::Normal);
+        let mut items = angles
+            .iter()
+            .enumerate()
+            .map(|(index, (_, label))| crate::ui_kit::Item::action(&format!("angle:{index}"), solidcraft_ui_text::tr_label(label), ""))
+            .collect::<Vec<_>>();
+        if !open.is_empty() {
+            items.push(crate::ui_kit::Item::sep());
+            items.extend(open.iter().map(|(id, name)| crate::ui_kit::Item::action(&format!("open:{id}"), name, "")));
+        }
+        items.push(crate::ui_kit::Item::sep());
+        items.push(crate::ui_kit::Item::action("close", solidcraft_ui_text::tr_label("Close this cell"), "close"));
+        if let Some(item) = crate::ui_kit::Menu::button_items(&response, &items) {
+            chosen = if let Some(index) = item.id.strip_prefix("angle:").and_then(|value| value.parse::<usize>().ok()) {
+                angles.get(index).map(|(angle, _)| EmptyAction::Angle(*angle))
+            } else if let Some(id) = item.id.strip_prefix("open:").and_then(|value| value.parse().ok()) {
+                Some(EmptyAction::Open(id))
+            } else {
+                (item.id == "close").then_some(EmptyAction::Close)
+            };
+        }
         return chosen;
     };
     let left = room.center().x - width / 2.0;

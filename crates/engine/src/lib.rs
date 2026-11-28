@@ -59,6 +59,7 @@ pub mod slicers;
 pub mod snap;
 pub mod status_details;
 pub mod status_items;
+pub mod thumbnail;
 pub mod timing;
 pub mod title_block_text;
 pub mod upright_image;
@@ -87,14 +88,17 @@ pub use cmd::addition;
 pub use cmd::auto_operation;
 pub use cmd::command_specs;
 pub use cmd::dimension_roles;
-pub use cmd::drawing_export::print_pdf;
+pub use cmd::drawing_export::{PrintedPdf, print_pdf};
 pub use cmd::extrude_reach;
 pub use cmd::find_command;
+pub use cmd::motion::AutomaticExplode;
 pub use cmd::normalize_command_id;
 pub use cmd::resolve_design_links;
+pub use cmd::scan_align::preview_align as preview_scan_align;
 pub use cmd::settings::MAX_PROFILE_NAME;
 pub use cmd::settings::profile_name;
 pub use cmd::shown_scope;
+pub use cmd::shown_scope_for;
 pub use cmd::sketch_selection;
 pub use cmd::standard_view;
 pub use cmd::use_import_cache_dir;
@@ -204,6 +208,16 @@ impl EngineError {
             EngineError::Feature(f) => Some(&f.code),
             _ => None,
         }
+    }
+    /// The largest fitting size reported by the kernel when a blend is refused as too large, if
+    /// the backend reported one (#10849).
+    pub fn largest_fit(&self) -> Option<solidcraft_kernel::BlendFit> {
+        let text = match self {
+            EngineError::Feature(f) => f.error.as_str(),
+            EngineError::Other(s) => s.as_str(),
+            _ => return None,
+        };
+        solidcraft_kernel::named_blend_fit(text)
     }
 }
 
@@ -534,6 +548,8 @@ pub struct Snapshot {
     pub sketching_view: Option<u64>,
     /// Temporary editor position to finalize if its former view has since closed.
     pub sketch_restore_marker: Option<Option<usize>>,
+    /// Where Cancel returns when history reopens the model sketch.
+    pub(crate) sketch_entry: Option<SketchEntry>,
     /// Explicitly owned sheet edit, independent of the model sketch being edited.
     pub active_sheet_sketch: Option<Arc<SheetSketchEdit>>,
     pub pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
@@ -561,6 +577,7 @@ impl Snapshot {
             active_sketch: s.active_sketch,
             sketching_view: s.sketching_view,
             sketch_restore_marker: s.sketch_restore_marker(),
+            sketch_entry: s.sketch_entry.clone(),
             active_sheet_sketch: s.active_sheet_sketch.clone(),
             pending_moves: s.pending_moves.clone(),
             pending_move_records: s.pending_move_records.clone(),
@@ -580,6 +597,7 @@ impl Snapshot {
             active_sketch: None,
             sketching_view: None,
             sketch_restore_marker: None,
+            sketch_entry: None,
             active_sheet_sketch: None,
             pending_moves: Default::default(),
             pending_move_records: Vec::new(),
@@ -618,7 +636,7 @@ pub struct DragPreview {
 
 /// Where the open sketch was entered (`sketch.create`, `sketch.edit`): the design before it and
 /// the undo history then, so `sketch.cancel` can tell the entry still describes the history.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct SketchEntry {
     pub(crate) sketch: u64,
     pub(crate) doc: Arc<Document>,
@@ -1048,6 +1066,8 @@ pub struct Session {
     /// the features nor the model's results (a joint drag frame) has no new body to pin.
     names_pinned: Option<(Arc<Document>, std::sync::Weak<solidcraft_doc::ModelState>)>,
     occurrence_visibility_cache: std::sync::Mutex<Option<occurrences::VisibilityCache>>,
+    /// [`Session::design_hidden`]'s last answer (#22107).
+    design_hidden_cache: std::sync::Mutex<Option<occurrences::DesignHiddenCache>>,
     /// The hidden joints, folders and bodies of the view, as sets: the browser asks about every
     /// joint of the design on every frame (#3892), the viewport about every body, and an answer
     /// that walked the hidden lists made a frame cost grow with the size of the design.
@@ -1129,6 +1149,9 @@ pub struct Session {
     pub(crate) drawing_scenes: drawing_scene::Cache,
     /// The visibility the design file holds (what `is_dirty` compares with).
     saved_visibility: Visibility,
+    /// The visibility when this session was made as a [`Session::scratch`] copy: what
+    /// [`Session::accept_computed`] compares with to keep the copy's own visibility changes.
+    scratch_visibility: Option<Box<Visibility>>,
     /// The design as `doc.open` made it from a STEP, IGES or mesh file, never saved yet: while it
     /// is still that, closing it loses nothing the file doesn't hold ([`Session::unchanged_import`]).
     opened_import: Option<Arc<Document>>,
@@ -1159,6 +1182,10 @@ pub struct Session {
     /// Body-name pinning passes that walked the features (`pin_body_names`), for tests.
     #[cfg(test)]
     pub(crate) body_name_passes: usize,
+    /// Document and model state just refreshed during the current `execute` call, so the
+    /// post-command `refresh_from` skips a redundant second full evaluation when the command
+    /// itself (e.g. `add_feature`) already refreshed the exact same document.
+    refreshed_doc: Option<(usize, std::sync::Weak<solidcraft_doc::ModelState>, solidcraft_doc::kernel::Validation, bool)>,
     /// Resolved associative trace inputs, independent of the document revision and view state.
     pub(crate) motion_traces: cmd::motion::associative::Cache,
 }
@@ -1543,6 +1570,7 @@ impl Session {
             joints_settled: None,
             names_pinned: None,
             occurrence_visibility_cache: Default::default(),
+            design_hidden_cache: Default::default(),
             visibility_index_cache: Default::default(),
             consumed_sketches_cache: Default::default(),
             made_bodies: MadeBodies::new(),
@@ -1574,6 +1602,7 @@ impl Session {
             next_checkpoint: 1,
             replacements: 0,
             saved_visibility: visibility.clone(),
+            scratch_visibility: None,
             opened_import: None,
             visibility,
             camera: None,
@@ -1584,6 +1613,7 @@ impl Session {
             evaluations: 0,
             #[cfg(test)]
             body_name_passes: 0,
+            refreshed_doc: None,
             motion_traces: Default::default(),
             command_check: None,
             crash_journal: false,
@@ -1614,6 +1644,9 @@ impl Session {
         let disabled_plugins = self.disabled_plugins.clone();
         let plugin_limits = self.plugin_limits;
         let mut plugin_state = self.plugin_state.clone();
+        // A file the design that comes in was opened from named for Update Links stays the user's
+        // choice (a KiCad board opened with `doc.open`).
+        plugin_state.linked_files.extend(fresh.plugin_state.linked_files.iter().cloned());
         for package in plugin_state.panels.values_mut() {
             for data in package.data.values_mut() {
                 *data = Default::default();
@@ -1978,6 +2011,7 @@ impl Session {
         self.forget_consumed_sketches();
         self.forget_dirty_answer();
         self.model.forget_fingerprints();
+        self.refreshed_doc = None;
     }
 
     /// Whose steps undo and redo go through: the open drawing's (by id), or the model's (`None`),
@@ -2470,9 +2504,12 @@ impl Session {
     /// and when they healed parts the design does not show yet, evaluate it again: except during
     /// a live edit, which a refresh would end (a later call does it). Returns whether it refreshed.
     pub fn settle_import_checks(&mut self) -> bool {
-        if self.model.settle_import_checks() && self.live_links.is_none() {
-            self.refresh();
-            return true;
+        if self.model.settle_import_checks() {
+            self.refreshed_doc = None;
+            if self.live_links.is_none() {
+                self.refresh();
+                return true;
+            }
         }
         false
     }
@@ -2667,7 +2704,47 @@ impl Session {
             self.sketching_view = None;
         }
         self.release_left();
+        self.refreshed_doc = (!self.model.is_stale()
+            && !self.model.no_cache
+            && self.model.primed_count() == 0
+            && !self.model.checking_features()
+            && !self.model.has_pending_import_checks()
+            && self.pending_moves.is_empty()
+            && self.pending_move_records.is_empty()
+            && self.active_sketch.is_none()
+            && self.model.fingerprinted_for(&self.doc))
+        .then(|| {
+            (
+                Arc::as_ptr(&self.doc) as usize,
+                Arc::downgrade(&self.model.state()),
+                self.model.validation(),
+                solidcraft_doc::kernel::heals_tolerance_defects(),
+            )
+        });
         solved
+    }
+
+    /// Whether [`Session::refresh_with_joint_report`] just finished refreshing this exact
+    /// document and model state during the current command, so `execute`'s post-command
+    /// [`Session::refresh_from`] need not evaluate the timeline a second time.
+    pub(crate) fn already_refreshed(&self) -> bool {
+        self.refreshed_doc.as_ref().is_some_and(|(doc_ptr, state_weak, validation, heal)| {
+            *doc_ptr == Arc::as_ptr(&self.doc) as usize
+                && state_weak.strong_count() > 0
+                && std::sync::Weak::as_ptr(state_weak) == Arc::as_ptr(&self.model.state())
+                && !self.sketch_finish_pending
+                && !self.model.is_stale()
+                && !self.model.no_cache
+                && self.model.primed_count() == 0
+                && !self.model.checking_features()
+                && !self.model.has_pending_import_checks()
+                && self.pending_moves.is_empty()
+                && self.pending_move_records.is_empty()
+                && self.active_sketch.is_none()
+                && self.model.validation() == *validation
+                && solidcraft_doc::kernel::heals_tolerance_defects() == *heal
+                && self.model.fingerprinted_for(&self.doc)
+        })
     }
 
     /// Solve the joints, unless nothing they read changed since this session last solved them:
@@ -2740,7 +2817,9 @@ impl Session {
             self.revision += 1;
             return;
         }
-        self.refresh();
+        if !self.already_refreshed() {
+            self.refresh();
+        }
     }
 
     /// Pin the name of every body the features made, as if the body had been renamed to it, and
@@ -3052,6 +3131,12 @@ impl Session {
         self.visibility_revision += 1;
     }
 
+    /// Revision of the document and its evaluated model within this session. Selecting or
+    /// hiding an item redraws the view without changing either input.
+    pub fn model_revision(&self) -> u64 {
+        self.revision.wrapping_sub(self.visibility_revision)
+    }
+
     /// Show the sketch a live frame changed, leaving the features after it as they were last
     /// evaluated (marked stale); a full `refresh` when the model cannot show it that way.
     fn refresh_live(&mut self, edit: LiveEdit) {
@@ -3349,6 +3434,10 @@ impl Session {
             }),
             ..Snapshot::of(self, spec.label)
         };
+        // The closed save writers rename history in place, without changing its steps.
+        // Retain only their lengths: pinning every old document would force copies on Save As.
+        let sketch_save_history_len =
+            (before.sketch_entry.is_some() && matches!(spec.id, "file.save" | "file.save_as")).then_some((self.undo.len(), self.redo.len()));
         let link_read_before = (spec.id == "component.relink").then(|| before.doc.clone());
         let link_observations_before = self.plugin_state.link_changes.clone();
         let link_reads_before = self.plugin_state.link_reads.clone();
@@ -3386,6 +3475,7 @@ impl Session {
             crash::command_begin(self, spec.id, given);
         }
         let scope = crash::Scope::enter();
+        self.refreshed_doc = None;
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match live {
             Some(run) => run(self, params),
             None => (spec.run)(self, params).map(|v| (v, None)),
@@ -3568,6 +3658,37 @@ impl Session {
                 Ok(v)
             }
             Err(e) => {
+                // A returned save error has already renamed the history back. Keep its coherent
+                // entry bindings while restoring every other entry field below. Unproven failure
+                // paths (including a panic before rename-back) use the ordinary rollback.
+                let saved_sketch_binding = sketch_save_history_len.and_then(|(undo_len, redo_len)| {
+                    let entry = self.sketch_entry.as_ref()?;
+                    let original = before.sketch_entry.as_ref()?;
+                    let top = entry.undo_len.checked_sub(1).and_then(|i| self.undo.get(i));
+                    let anchored = match (top, &entry.undo_top) {
+                        (Some(step), Some(doc)) => Arc::ptr_eq(&step.doc, doc),
+                        (None, None) => entry.undo_len == 0,
+                        _ => false,
+                    };
+                    (self.undo.len() == undo_len
+                        && self.redo.len() == redo_len
+                        && self.active_sketch == before.active_sketch
+                        && self.sketching_view == before.sketching_view
+                        && self.doc.name == before.doc.name
+                        && self.doc.as_ref() == before.doc.as_ref()
+                        && entry.sketch == original.sketch
+                        && entry.undo_len == original.undo_len
+                        && entry.restore_marker == original.restore_marker
+                        && entry.pending_moves == original.pending_moves
+                        && entry.pending_move_records == original.pending_move_records
+                        && entry.pending_joint_bases == original.pending_joint_bases
+                        && entry.last_capture_state == original.last_capture_state
+                        && entry.visibility == original.visibility
+                        && entry.doc.as_ref() == original.doc.as_ref()
+                        && entry.undo_top.as_deref() == original.undo_top.as_deref()
+                        && anchored)
+                        .then(|| (entry.doc.clone(), entry.undo_top.clone()))
+                });
                 // A failed command draws no ids, so a replay of what succeeded draws the same.
                 self.ids = ids;
                 self.plugin_state.link_changes = link_observations_before;
@@ -3580,6 +3701,11 @@ impl Session {
                 self.active_sheet_sketch = before.active_sheet_sketch.clone();
                 self.active_sketch = before.active_sketch;
                 self.sketching_view = before.sketching_view;
+                self.sketch_entry.clone_from(&before.sketch_entry);
+                if let (Some(entry), Some((doc, undo_top))) = (self.sketch_entry.as_mut(), saved_sketch_binding) {
+                    entry.doc = doc;
+                    entry.undo_top = undo_top;
+                }
                 if let Some(section) = before.section.take() {
                     self.set_section_state(section);
                 }
@@ -3613,6 +3739,7 @@ impl Session {
         };
         // Refresh/pinning preserve the authored state just committed. A failure
         // restored its immutable snapshot and pre-call token; saves keep their token.
+        self.refreshed_doc = None;
         self.follow_design_token();
         // A sketch open for editing that failed (a projected edge lost by name) is still shown, its
         // lost link marked, so it can be repaired from inside it (#12085).
@@ -3886,6 +4013,7 @@ impl Session {
             made_bodies: MadeBodies::new(),
             names_pinned: None,
             occurrence_visibility_cache: Default::default(),
+            design_hidden_cache: Default::default(),
             visibility_index_cache: Default::default(),
             consumed_sketches_cache: Default::default(),
             removed_later_cache: Default::default(),
@@ -3923,11 +4051,13 @@ impl Session {
             // (`scratch_as_shown`), the many others never read them.
             drawing_scenes: Default::default(),
             saved_visibility: self.saved_visibility.clone(),
+            scratch_visibility: Some(Box::new(self.visibility.clone())),
             dimension_values: self.dimension_values.clone(),
             opened_import: self.opened_import.clone(),
             evaluations: 0,
             #[cfg(test)]
             body_name_passes: 0,
+            refreshed_doc: None,
             motion_traces: self.motion_traces.clone(),
             command_check: self.command_check.clone(),
             crash_journal: false,
@@ -3947,15 +4077,25 @@ impl Session {
     /// `marker` restores an editor's original marker before recording its undo snapshot.
     /// The source remains untouched, including its history and recovery journal.
     pub fn compute_commands(self, commands: &[(String, Value)], marker: Option<Option<usize>>) -> Result<ComputedCommands> {
-        self.compute_commands_inner(commands, marker, None)
+        self.compute_commands_inner(commands, marker, None, None)
     }
 
     /// Start an edit from its pinned original model, so restoring the original marker cannot
     /// recompute the obsolete suffix even when previews have evicted its evaluation cache.
+    ///
+    /// The design may have gained a parameter while the editor was open (#9223): the edit the
+    /// user is making may use the parameter just added, and no feature that was already built
+    /// reads it, so the editor's model still describes the design. The edit is then computed on
+    /// the design as it is now, and the parameter it uses is there. Every other change leaves
+    /// the editor stale, and the edit is refused.
     pub fn compute_editor_commands(self, commands: &[(String, Value)], source: &Session, original: Session) -> Result<ComputedCommands> {
-        if !self.same_document_context(source) {
+        let base = if self.same_document_context(source) {
+            None
+        } else if self.same_editor_context_with_gained_parameters(source) {
+            Some(self.editor_base(&original))
+        } else {
             return Err(EngineError::Other("the design changed while the feature editor was open".into()));
-        }
+        };
         let mut expected = (*original.doc).clone();
         // The temporary rollback is another revision of the same model inputs.
         expected.marker = source.doc.marker;
@@ -3995,7 +4135,7 @@ impl Session {
         if expected != *source.doc {
             return Err(EngineError::Other("the original editor model does not match its source design".into()));
         }
-        self.compute_commands_inner(commands, Some(original.doc.marker), Some(original))
+        self.compute_commands_inner(commands, Some(original.doc.marker), Some(original), base)
     }
 
     fn compute_commands_inner(
@@ -4003,9 +4143,10 @@ impl Session {
         commands: &[(String, Value)],
         marker: Option<Option<usize>>,
         original: Option<Session>,
+        base: Option<Session>,
     ) -> Result<ComputedCommands> {
         let stop = self.stop.clone();
-        stop.within(|| self.compute_commands_under(commands, marker, original))
+        stop.within(|| self.compute_commands_under(commands, marker, original, base))
     }
 
     fn compute_commands_under(
@@ -4013,6 +4154,7 @@ impl Session {
         commands: &[(String, Value)],
         marker: Option<Option<usize>>,
         original: Option<Session>,
+        base: Option<Session>,
     ) -> Result<ComputedCommands> {
         let editor_original = original.as_ref().map(|session| session.doc.clone());
         let mut computed = self.scratch();
@@ -4025,11 +4167,14 @@ impl Session {
             let before = computed.doc.clone();
             let params = marker.map(|position| serde_json::json!({"position":position})).unwrap_or_else(|| serde_json::json!({}));
             let reply = if let Some(original) = original {
-                computed.doc = original.doc;
-                computed.model = original.model;
-                computed.world_cache = original.world_cache;
-                computed.pending_joint_bases = original.pending_joint_bases;
-                computed.last_capture_state = original.last_capture_state;
+                // The editor's own model, or the design as it is now when it gained a parameter
+                // while the editor was open (#9223).
+                let base = base.unwrap_or(original);
+                computed.doc = base.doc;
+                computed.model = base.model;
+                computed.world_cache = base.world_cache;
+                computed.pending_joint_bases = base.pending_joint_bases;
+                computed.last_capture_state = base.last_capture_state;
                 serde_json::json!({"marker":marker.unwrap_or(computed.doc.features.len()),"features":computed.doc.features.len()})
             } else {
                 let undo = std::mem::take(&mut computed.undo);
@@ -4172,6 +4317,52 @@ impl Session {
             && self.pending_joint_bases == source.pending_joint_bases
     }
 
+    /// The editor's context is the one it was opened in, and the design only gained parameters
+    /// since (#9223): the parameters the user added are part of the edit the editor is making,
+    /// and no feature that was already built reads them, so the editor's model still describes
+    /// the design. Every other change leaves the editor stale.
+    fn same_editor_context_with_gained_parameters(&self, source: &Session) -> bool {
+        self.document_id == source.document_id
+            && self.ids.seed() == source.ids.seed()
+            && self.active_sketch == source.active_sketch
+            && self.sketching_view == source.sketching_view
+            && self.active_sheet_sketch == source.active_sheet_sketch
+            && self.open_drawing == source.open_drawing
+            && self.active_component == source.active_component
+            && self.active_occurrence_path == source.active_occurrence_path
+            && self.pending_moves == source.pending_moves
+            && self.pending_move_records == source.pending_move_records
+            && self.pending_joint_bases == source.pending_joint_bases
+            && self
+                .revision
+                .checked_sub(source.revision)
+                .is_some_and(|delta| self.visibility_revision.checked_sub(source.visibility_revision).is_some_and(|shown| delta >= shown))
+            && self.design_gained_only_parameters(source)
+    }
+
+    /// The design is the one the editor was opened on, plus the parameters it gained: the
+    /// parameters it gained are the last ones, and nothing else about it moved.
+    fn design_gained_only_parameters(&self, source: &Session) -> bool {
+        let gained = &self.doc.params;
+        let pinned = &source.doc.params;
+        if gained.len() <= pinned.len() || !gained.starts_with(pinned) {
+            return false;
+        }
+        let mut design = (*self.doc).clone();
+        design.params = pinned.clone();
+        design == *source.doc
+    }
+
+    /// The design as it is now, with the editor's own marker: what the editor's edit is
+    /// computed on when the design gained a parameter while the editor was open (#9223).
+    fn editor_base(&self, original: &Session) -> Session {
+        let mut base = original.scratch();
+        let mut design = (*self.doc).clone();
+        design.marker = original.doc.marker;
+        base.doc = Arc::new(design);
+        base
+    }
+
     /// Cancel an unchanged feature editor by restoring its original evaluated model, even
     /// after preview work has evicted the old suffix from the shared evaluation cache.
     pub fn restore_editor(&mut self, source: &Session, mut original: Session) -> Result<()> {
@@ -4268,6 +4459,9 @@ impl Session {
         self.checked_sheet_sketch_owner(&self.view_context, computed.active_sheet_sketch.as_deref(), &computed.doc)?;
         computed.sketching_view = owner;
         self.plugin_state.user.pending_user_settings = std::mem::take(&mut computed.plugin_state.user.pending_user_settings);
+        // The files a caller named while the worker ran (Insert Design, opening a KiCad board) stay
+        // its own choice for Update Links in the window's session.
+        self.plugin_state.linked_files.extend(std::mem::take(&mut computed.plugin_state.linked_files));
         // Audited direct-mutation jobs may not have passed through execute. Their
         // accepted document is still a new committed state with a fresh token.
         let newer = match (design_revision_generation(&computed.design_revision), design_revision_generation(&self.design_revision)) {
@@ -4293,17 +4487,35 @@ impl Session {
         let tracked = computed.redo_watch.as_ref().is_some_and(|watch| watch.values().any(|touched| *touched));
         let implicit_part = (computed.undo.is_empty() && computed.redo.is_empty() && !tracked && !Arc::ptr_eq(&self.doc, &computed.doc))
             .then_some(computed.open_drawing);
-        // The first computed step starts from this document. Its undo must restore the view
-        // at acceptance, including a body hidden while the computation was running.
-        if let Some(before) = computed.undo.first_mut()
-            && Arc::ptr_eq(&before.doc, &self.doc)
-        {
-            before.visibility.hidden_bodies.clone_from(&self.visibility.hidden_bodies);
-        }
+        // What the computation itself hid or showed is kept, on top of what this session hid or
+        // showed meanwhile (#22153). A session not made by `scratch` changed nothing to keep.
+        let start = computed.scratch_visibility.take().map(|v| *v).unwrap_or_else(|| computed.visibility.clone());
         let rename = computed.body_rename(&self.doc);
-        computed.visibility.hidden_bodies.clone_from(&self.visibility.hidden_bodies);
-        computed.remap_hidden_bodies(&self.doc, &self.model.state(), rename.as_ref().map(|(old, new, _)| (old.as_str(), new.as_str())));
+        let rename = rename.as_ref().map(|(old, new, _)| (old.as_str(), new.as_str()));
+        // Body names in the computation's undo steps are this document's where it renamed no
+        // body or placement.
+        let same_names = rename.is_none() && computed.doc.occurrences == self.doc.occurrences;
+        // Each computed step's undo restores the view at acceptance: what this session hid or
+        // showed meanwhile, and what the computation's earlier steps hid or showed.
+        let live = &self.visibility;
+        for (i, before) in computed.undo.iter_mut().enumerate() {
+            if same_names || (i == 0 && Arc::ptr_eq(&before.doc, &self.doc)) {
+                rebase_hidden(&mut before.visibility.hidden_bodies, &live.hidden_bodies, &start.hidden_bodies);
+            }
+            rebase_hidden(&mut before.visibility.hidden_occurrences, &live.hidden_occurrences, &start.hidden_occurrences);
+            rebase_hidden(&mut before.visibility.hidden_folders, &live.hidden_folders, &start.hidden_folders);
+        }
+        // This session's hidden bodies, and the computation's start, follow its renames; then
+        // what the computation hid or showed is compared in its own names.
+        let ran = std::mem::replace(&mut computed.visibility.hidden_bodies, self.visibility.hidden_bodies.clone());
+        let state = self.model.state();
+        computed.remap_hidden_bodies(&self.doc, &state, rename);
+        let started =
+            if same_names { start.hidden_bodies.clone() } else { computed.remapped_hidden(start.hidden_bodies.clone(), &self.doc, &state, rename) };
+        merge_hidden(&mut computed.visibility.hidden_bodies, &started, &ran);
         self.visibility.hidden_bodies = std::mem::take(&mut computed.visibility.hidden_bodies);
+        merge_hidden(&mut self.visibility.hidden_occurrences, &start.hidden_occurrences, &computed.visibility.hidden_occurrences);
+        merge_hidden(&mut self.visibility.hidden_folders, &start.hidden_folders, &computed.visibility.hidden_folders);
         self.body_renames = computed.body_renames;
         // Only committed source reads cross back from the worker. A no-op read must not
         // replace a disk observation made since this evaluation began; changed source bytes
@@ -4402,6 +4614,18 @@ impl Session {
         Ok(())
     }
 
+    /// `names` (hidden bodies of `previous`) mapped as [`Session::remap_hidden_bodies`] maps this
+    /// session's hidden bodies, leaving its own hidden bodies, selection and isolation as they are.
+    fn remapped_hidden(&mut self, names: Vec<String>, previous: &Document, state: &ModelState, rename: Option<(&str, &str)>) -> Vec<String> {
+        let hidden = std::mem::replace(&mut self.visibility.hidden_bodies, names);
+        let selection = std::mem::take(&mut self.selection);
+        let isolate = self.visibility.before_isolate.take();
+        self.remap_hidden_bodies(previous, state, rename);
+        self.selection = selection;
+        self.visibility.before_isolate = isolate;
+        std::mem::replace(&mut self.visibility.hidden_bodies, hidden)
+    }
+
     /// Read a primary origin for the Joint dialog without modifying the session.
     pub fn joint_origin_for_alignment(&self, params: &serde_json::Value) -> Result<doc::joints::JointOrigin> {
         cmd::joints::origin_param(self, Some(params), "joint.create")
@@ -4477,7 +4701,8 @@ impl Session {
         Ok((self, replies))
     }
 
-    /// Measure one or two selections (see `inspect.measure` with `items`); errors come back as
+    /// Measure one or two selections, or three or more round ones for their spacing (see
+    /// `inspect.measure` with `items`); errors come back as
     /// `{"error": …}`.
     pub fn measure_items(&self, items: &[Sel]) -> Value {
         let v = serde_json::to_value(items).unwrap_or(Value::Null);
@@ -4680,6 +4905,28 @@ pub(crate) type SketchValues = std::collections::BTreeMap<u64, std::collections:
 pub(crate) type DimensionValues = std::collections::BTreeMap<(u64, u64), f64>;
 
 /// A design as its file holds it: `doc` with what is hidden in it and what its dimensions last read.
+/// `live` with what a computation that began at `start` and ended at `ran` hid (in `ran`, not
+/// in `start`) or showed (in `start`, not in `ran`). Sets keep this linear in the lists' length.
+fn merge_hidden<T: Eq + std::hash::Hash + Clone>(live: &mut Vec<T>, start: &[T], ran: &[T]) {
+    if start == ran {
+        return;
+    }
+    use std::collections::HashSet;
+    let (started, kept): (HashSet<&T>, HashSet<&T>) = (start.iter().collect(), ran.iter().collect());
+    live.retain(|item| !started.contains(item) || kept.contains(item));
+    let have: HashSet<&T> = live.iter().collect();
+    let hid: Vec<T> = ran.iter().filter(|item| !started.contains(item) && !have.contains(item)).cloned().collect();
+    live.extend(hid);
+}
+
+/// A computation's undo snapshot `step` (which began at `start`) with `live`'s changes since:
+/// `live`, with what the computation had hid or showed by that step.
+fn rebase_hidden<T: Eq + std::hash::Hash + Clone>(step: &mut Vec<T>, live: &[T], start: &[T]) {
+    let mut rebased = live.to_vec();
+    merge_hidden(&mut rebased, start, step);
+    *step = rebased;
+}
+
 pub(crate) fn as_saved<'a>(doc: &'a Document, visibility: &Visibility, dimension_values: &DimensionValues) -> std::borrow::Cow<'a, Document> {
     if visibility.is_empty() && dimension_values.is_empty() {
         return std::borrow::Cow::Borrowed(doc);
@@ -4805,6 +5052,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         materials,
         print_faces,
         collision_shapes,
+        edgeless_bodies,
         user_materials,
         appearances,
         body_components,
@@ -4816,10 +5064,12 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         home_view,
         saved_sections,
         notes,
+        welds,
         visibility,
         drawings,
         next_component_color_index,
         plane_extents,
+        view_frame,
         plugin_data,
         linked_bodies_left_out,
     } = a;
@@ -4851,6 +5101,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *materials == b.materials
         && *print_faces == b.print_faces
         && *collision_shapes == b.collision_shapes
+        && *edgeless_bodies == b.edgeless_bodies
         && *user_materials == b.user_materials
         && *appearances == b.appearances
         && *body_components == b.body_components
@@ -4862,10 +5113,12 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *home_view == b.home_view
         && *saved_sections == b.saved_sections
         && *notes == b.notes
+        && *welds == b.welds
         && *visibility == b.visibility
         && *drawings == b.drawings
         && *next_component_color_index == b.next_component_color_index
         && *plane_extents == b.plane_extents
+        && *view_frame == b.view_frame
 }
 
 /// Store `pins` (sketch, link, vertex name, edge name) on the links they name: a name the link

@@ -272,6 +272,26 @@ impl Body {
         (std::mem::replace(&mut held.brep, Brep::new()), proof)
     }
 
+    /// `other`'s B-rep, proof and template put in this body's place (its own dropped), under
+    /// one lock: for an operation whose result was built as another body.
+    pub(crate) fn take_from(&self, other: &Body) {
+        let (brep, proof) = other.take_held();
+        let mut held = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        held.brep = brep;
+        held.outward = proof.outward;
+        held.primitive = proof.primitive;
+    }
+
+    /// Whether the body holds the proof that it is valid and faces out (tests only).
+    #[cfg(test)]
+    pub(crate) fn holds_proof(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .outward
+            .is_some()
+    }
+
     /// Whether a panic interrupted an edit of this body.
     #[must_use]
     pub(crate) fn is_poisoned(&self) -> bool {
@@ -558,7 +578,7 @@ pub const REGULAR_RATIO: f64 = 1e-9;
 
 /// A conversion's refusal as the operation's: the kernel's error by its type ([`status`]), the
 /// record's by what it is.
-fn refused(e: Unsupported) -> Error {
+pub(crate) fn refused(e: Unsupported) -> Error {
     match e {
         Unsupported::Kernel(e) => status(e),
         Unsupported::Invalid(w) => Error::Record(w.to_owned()),
@@ -776,6 +796,21 @@ impl Expect {
 /// The kernel's error from the solid test.
 pub(crate) fn finish(k: &mut Kernel, b: Brep, expect: Expect) -> solidcore::Result<Result<Brep>> {
     Ok(finish_proved(k, b, expect)?.map(|(b, _)| b))
+}
+
+/// The result contract of an operation's plain call: [`finish_under`] under
+/// [`Contract::Closed`]. A result has faces ([`Error::Empty`] if not), and a solid input gives
+/// a closed manifold solid ([`Error::NotSolid`] if not), by the topology test alone. No proof is
+/// made, so the result holds none; a caller that wants one asks for it ([`Body::check_solid`]).
+///
+/// # Errors
+/// The kernel's error from the topology test.
+pub(crate) fn finish_closed(
+    k: &mut Kernel,
+    b: Brep,
+    expect: Expect,
+) -> solidcore::Result<Result<Brep>> {
+    Ok(finish_under(k, b, expect, Contract::Closed)?.map(|(b, _)| b))
 }
 
 /// As [`finish`], with the proof its solid test made on the result, if it made one (a solid

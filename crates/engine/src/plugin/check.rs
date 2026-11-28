@@ -176,7 +176,12 @@ fn fix_for(field: &str) -> String {
         "runtime.limits.memory_mib" => {
             "Set \"memory_mib\" to 1..4096. Above the user's ceiling (128 unless raised), Install asks the user to approve it."
         }
-        "runtime.limits.deadline_ms" => "Set \"deadline_ms\" to at most 30000 for a command, 600000 for an importer.",
+        "runtime.limits.deadline_ms" => {
+            "Set \"deadline_ms\" to a positive number within Max plugin guest time (ms) in Preferences › Plugins (in solidcraft-cli, max_deadline_ms in the --plugin-limits file). Importers keep their existing 600000 ms ceiling unless the user raises it further."
+        }
+        "runtime.limits.host_calls" => {
+            "Set \"host_calls\" to a positive number within Max plugin host calls in Preferences › Plugins (in solidcraft-cli, max_host_calls in the --plugin-limits file)."
+        }
         "runtime.limits.stack_kib" => "Set \"stack_kib\" to 64..65536; a command may ask for at most 1024.",
         "capabilities" => "",
         "component" => "Build the component for this app's WIT (crates/craft-plugin/wit/plugin.wit) and wrap it with `wasm-tools component new`.",
@@ -263,6 +268,9 @@ fn component_fix(reason: &str) -> String {
     }
     if reason.contains("wasi:") {
         return "The app links no WASI: build for wasm32-unknown-unknown (not wasm32-wasip1 or wasip2), and keep crates that read the clock, environment or files through std out of the plugin.".into();
+    }
+    if reason.contains("multi-memory") {
+        return "Build the component so its parts share one linear memory: lowering a function between inner modules with their own memories needs a second one. A component wrapped from a single core module has one.".into();
     }
     if reason.contains("import") {
         return format!(
@@ -431,6 +439,22 @@ pub fn check(session: &Session, path: &str) -> CheckResult {
             "Install asks the user to allow the extra memory; a plugin copied in by hand runs only once the user raises Max plugin memory (MiB) in Preferences › Plugins (in solidcraft-cli, max_memory_mib in the --plugin-limits file).",
         ));
     }
+    if !runtime.is_importer() && runtime.limits.host_calls > ceilings.max_host_calls {
+        result.problems.push(error_problem(
+            "runtime.limits.host_calls",
+            format!("asks for {} host calls, over the app's ceiling of {}", runtime.limits.host_calls, ceilings.max_host_calls),
+            fix_for("runtime.limits.host_calls"),
+        ));
+    }
+    let deadline_ceiling =
+        if runtime.is_importer() { ceilings.max_deadline_ms.max(craft_plugin::MAX_IMPORTER_DEADLINE_MS) } else { ceilings.max_deadline_ms };
+    if runtime.limits.deadline_ms > deadline_ceiling {
+        result.problems.push(error_problem(
+            "runtime.limits.deadline_ms",
+            format!("asks for {} ms of guest time, over the app's ceiling of {} ms", runtime.limits.deadline_ms, deadline_ceiling),
+            fix_for("runtime.limits.deadline_ms"),
+        ));
+    }
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
     if let Some(module) = package.files.iter().find(|f| f.path == runtime.module)
         && let Err(e) = craft_plugin_wasm::check_component(manifest, &module.bytes)
@@ -447,4 +471,14 @@ pub fn check(session: &Session, path: &str) -> CheckResult {
     result.problems.sort_by_key(|p| p.severity != Severity::Error);
     result.ok = !result.problems.iter().any(|p| p.severity == Severity::Error);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    /// #23498: the multi-memory refusal says what to build instead, not to export the world.
+    #[test]
+    fn a_multi_memory_refusal_has_its_own_fix() {
+        let fix = super::component_fix("this component needs WebAssembly multi-memory, which SolidCraft does not enable");
+        assert!(fix.contains("one linear memory"), "{fix}");
+    }
 }

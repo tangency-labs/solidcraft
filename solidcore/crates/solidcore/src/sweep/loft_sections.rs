@@ -60,6 +60,7 @@
 // The range tests refuse NaN by negation (`!(x > y)`), kept as written.
 #![allow(clippy::neg_cmp_op_on_partial_ord, clippy::nonminimal_bool)]
 
+use crate::math::det;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{sweep::SweepFailure, Result, SolidError};
@@ -145,6 +146,14 @@ pub struct LoftSection {
     pub segs: Vec<Seg2>,
 }
 
+/// Whether the last segment closes an already ordered chain at its first segment,
+/// in sketch coordinates. This does not check the interior joins.
+#[must_use]
+pub fn section_ends_meet(first: &Seg2, last: &Seg2, tol: f64) -> bool {
+    let gap = last.end() - first.start();
+    det::hypot(gap.x, gap.y) <= tol
+}
+
 /// A section as the walls are built through it: its segments, and for each the segments of the
 /// section as given ([`LoftSection::segs`] indices) it runs over.
 #[derive(Clone, Debug, PartialEq)]
@@ -207,11 +216,11 @@ fn unit(a: Vec2) -> Option<Vec2> {
 }
 
 fn from_angle(t: f64) -> Vec2 {
-    Vec2::new(t.cos(), t.sin())
+    Vec2::new(det::cos(t), det::sin(t))
 }
 
 fn angle(a: Vec2) -> f64 {
-    a.y.atan2(a.x)
+    det::atan2(a.y, a.x)
 }
 
 fn perp(a: Vec2) -> Vec2 {
@@ -496,14 +505,14 @@ fn split_at(s: &Seg2, t: f64) -> Option<(Seg2, Seg2)> {
 }
 
 /// A loop's signed area (counter-clockwise positive).
-fn signed_area(segs: &[Seg2]) -> f64 {
+pub(super) fn signed_area(segs: &[Seg2]) -> f64 {
     segs.iter()
         .map(|s| s.area_term().map_or(f64::NAN, |(a, _)| a))
         .sum()
 }
 
 /// A loop's centroid by area; with no area, the mean of its vertices.
-fn centroid(segs: &[Seg2]) -> Point2 {
+pub(super) fn centroid(segs: &[Seg2]) -> Point2 {
     let area = signed_area(segs);
     let (mut sx, mut sy) = (0.0, 0.0);
     for s in segs {
@@ -2324,6 +2333,15 @@ mod tests {
         }
     }
 
+    #[test]
+    fn ordered_section_ends_respect_the_sketch_join_tolerance() {
+        let first = line((0.0, 0.0), (1.0, 0.0));
+        let last = |dy| line((1.0, 0.0), (6e-7, dy));
+        assert!(section_ends_meet(&first, &last(7e-7), 1e-6));
+        assert!(!section_ends_meet(&first, &last(9e-7), 1e-6));
+        assert!(!section_ends_meet(&first, &last(f64::NAN), 1e-6));
+    }
+
     /// The closed polygon through `pts`.
     fn poly(pts: &[(f64, f64)]) -> Vec<Seg2> {
         (0..pts.len())
@@ -2333,8 +2351,8 @@ mod tests {
 
     /// A counter-clockwise arc about `c` from `a` to `b`.
     fn arc(c: (f64, f64), a: (f64, f64), b: (f64, f64)) -> Seg2 {
-        let start = (a.1 - c.1).atan2(a.0 - c.0);
-        let sweep = ((b.1 - c.1).atan2(b.0 - c.0) - start).rem_euclid(2.0 * PI);
+        let start = det::atan2(a.1 - c.1, a.0 - c.0);
+        let sweep = (det::atan2(b.1 - c.1, b.0 - c.0) - start).rem_euclid(2.0 * PI);
         Seg2::Arc {
             center: p(c.0, c.1),
             radius: len(p(a.0 - c.0, a.1 - c.1)),
@@ -2688,7 +2706,7 @@ mod tests {
             (40.0, 20.0),
             (0.0, 20.0),
         ];
-        let (c, s) = ((PI / 6.0).cos(), (PI / 6.0).sin());
+        let (c, s) = (det::cos(PI / 6.0), det::sin(PI / 6.0));
         let tilted = LoftSection {
             origin: Vec3::new(0.0, 0.0, 30.0),
             x: Vec3::new(1.0, 0.0, 0.0),
@@ -2756,7 +2774,8 @@ mod tests {
                 let d = starts(ro)[k] - c;
                 assert!(
                     (len(d) - r).abs() < 1e-9
-                        && dot(d, diagonal) / (len(d) * len(diagonal)) > 10f64.to_radians().cos(),
+                        && dot(d, diagonal) / (len(d) * len(diagonal))
+                            > det::cos(10f64.to_radians()),
                     "corner ({x}, {y}) runs to {:?}",
                     starts(ro)[k]
                 );
@@ -3026,12 +3045,12 @@ mod tests {
                 (-half + d, -r)
             } else if d < side + arc {
                 let a = -PI / 2.0 + (d - side) / r;
-                (half + r * a.cos(), r * a.sin())
+                (half + r * det::cos(a), r * det::sin(a))
             } else if d < 2.0 * side + arc {
                 (half - (d - side - arc), r)
             } else {
                 let a = PI / 2.0 + (d - 2.0 * side - arc) / r;
-                (-half + r * a.cos(), r * a.sin())
+                (-half + r * det::cos(a), r * det::sin(a))
             }
         };
         let pts: Vec<(f64, f64)> = (0..n)
@@ -3197,7 +3216,7 @@ mod tests {
     #[test]
     fn plane_axes_that_are_not_perpendicular_are_refused() {
         let mut skew = at(10.0, gon(4, 10.0));
-        skew.y = Vec3::new(0.01f64.sin(), 0.01f64.cos(), 0.0);
+        skew.y = Vec3::new(det::sin(0.01f64), det::cos(0.01f64), 0.0);
         assert!(refused(&match_loft_sections(
             &[at(0.0, gon(4, 10.0)), skew],
             100
@@ -3635,7 +3654,7 @@ mod tests {
         };
         let turned = |z: f64, r: f64, s: f64| {
             let mut a = at(z, gon(4, r));
-            a.y = Vec3::new(s.asin().sin(), s.asin().cos(), 0.0);
+            a.y = Vec3::new(det::sin(det::asin(s)), det::cos(det::asin(s)), 0.0);
             a
         };
         for (r, line) in [(1000.0, 1e-8), (0.01, 1e-3)] {

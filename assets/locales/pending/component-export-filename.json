@@ -1,0 +1,26 @@
+{
+  "en": {
+    "prefs.export_name.component": "Exported component's name (else the usual export name)"
+  },
+  "ar": {
+    "prefs.export_name.component": "اسم المكوّن المُصدَّر (وإلا اسم التصدير المعتاد)"
+  },
+  "de": {
+    "prefs.export_name.component": "Name der exportierten Komponente (sonst der übliche Exportname)"
+  },
+  "he": {
+    "prefs.export_name.component": "שם הרכיב המיוצא (אחרת שם הייצוא הרגיל)"
+  },
+  "ja": {
+    "prefs.export_name.component": "エクスポートするコンポーネント名（なければ通常のエクスポート名）"
+  },
+  "vi": {
+    "prefs.export_name.component": "Tên linh kiện được xuất (nếu không có thì dùng tên xuất thông thường)"
+  },
+  "zh": {
+    "prefs.export_name.component": "导出组件的名称（否则使用常规导出名称）"
+  },
+  "ko": {
+    "prefs.export_name.component": "내보내는 구성 요소의 이름(없으면 일반 내보내기 이름)"
+  }
+}

@@ -100,6 +100,8 @@ thread_local! {
     /// The side of the glyphs drawn this frame (screen pixels), for [`glyph_at`] (#10794).
     static GLYPH_PX: Cell<f32> = const { Cell::new(GLYPH) };
     static PICKED: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// Simulated break-off Coincident glyph shown when hovering a shared endpoint of a selected curve.
+    static DETACH_PREVIEW: RefCell<Option<DetachPreview>> = const { RefCell::new(None) };
     /// Active automatic constraint/snap badges and target entities at the cursor.
     static SNAP: RefCell<Option<SnapState>> = const { RefCell::new(None) };
     /// The comb tool's options: comb length (a multiplier on the automatic length) and teeth.
@@ -1308,6 +1310,93 @@ pub fn glyph_positions() -> Vec<(String, Pos2)> {
     GLYPHS.with(|g| g.borrow().clone())
 }
 
+#[derive(Clone, Debug)]
+struct DetachPreview {
+    curve_id: String,
+    point_id: String,
+    point_rect: egui::Rect,
+    glyph_rect: egui::Rect,
+    distance_mm: f64,
+}
+
+/// If `pos` is over the simulated coincident break-off glyph, detach that curve from the point.
+pub fn detach_simulated_at(app: &mut SolveApp, pos: Pos2) -> bool {
+    if active_sketch(app).is_none() || app.ui.pick_off.iter().any(|x| x == "constraints") {
+        return false;
+    }
+    let hit = DETACH_PREVIEW.with(|cell| {
+        let mut st = cell.borrow_mut();
+        let preview = st.as_ref()?;
+        if preview.glyph_rect.expand(3.0).contains(pos) {
+            let out = (preview.curve_id.clone(), preview.point_id.clone(), preview.distance_mm);
+            *st = None;
+            Some(out)
+        } else {
+            None
+        }
+    });
+    let Some((curve, point, distance)) = hit else { return false };
+    let _ = app.run("sketch.detach_point", json!({ "curve": curve, "point": point, "distance": distance }));
+    true
+}
+
+fn selected_detach_curve(app: &SolveApp, sid: u64, sk: &solidcraft_engine::sketch::Sketch) -> Option<(String, usize)> {
+    if app.tool.is_some() || app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {
+        return None;
+    }
+    app.session.selection.iter().rev().find_map(|sel| match sel {
+        solidcraft_engine::Sel::SketchCurve { id, sketch } if sketch.is_none_or(|s| s == sid) => {
+            sk.curve_index(id).filter(|&ci| !sk.is_linked_curve(ci)).map(|ci| (id.clone(), ci))
+        }
+        solidcraft_engine::Sel::SketchMidpoint { id } => sk.curve_index(id).filter(|&ci| !sk.is_linked_curve(ci)).map(|ci| (id.clone(), ci)),
+        _ => None,
+    })
+}
+
+fn point_is_detachable_for_curve(sk: &solidcraft_engine::sketch::Sketch, ci: usize, pi: usize) -> bool {
+    if !sk.curves.get(ci).is_some_and(|c| c.kind.uses(pi)) {
+        return false;
+    }
+    let users = sk.curves.iter().filter(|c| c.kind.uses(pi)).count();
+    let has_coincident =
+        sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Coincident { p, q } if p == pi || q == pi));
+    users > 1 || has_coincident || pi == 0
+}
+
+fn resolve_detach_target(
+    app: &SolveApp,
+    sid: u64,
+    sk: &solidcraft_engine::sketch::Sketch,
+    hover: Option<Pos2>,
+    scale: f32,
+) -> Option<(String, usize, String)> {
+    let (curve_id, ci) = selected_detach_curve(app, sid, sk)?;
+    let curve = sk.curves.get(ci)?;
+    if let Some(Hit::SketchPoint { sketch, id, .. }) = app.viewport.hover.as_ref()
+        && *sketch == sid
+        && let Some(hovered_pi) = sk.resolve_point(id)
+        && curve.kind.uses(hovered_pi)
+        && point_is_detachable_for_curve(sk, ci, hovered_pi)
+        && let Some(pt) = sk.points.get(hovered_pi)
+    {
+        return Some((curve_id, hovered_pi, pt.id.clone()));
+    }
+    let h = hover?;
+    DETACH_PREVIEW.with(|cell| {
+        let st = cell.borrow();
+        let prev = st.as_ref()?;
+        if prev.curve_id != curve_id {
+            return None;
+        }
+        let keep = prev.glyph_rect.expand(10.0 * scale).contains(h) || prev.point_rect.expand(8.0 * scale).contains(h);
+        if !keep {
+            return None;
+        }
+        let target_pi = sk.resolve_point(&prev.point_id)?;
+        if point_is_detachable_for_curve(sk, ci, target_pi) { Some((curve_id, target_pi, prev.point_id.clone())) } else { None }
+    })
+}
+
 /// Delete the selected constraint glyph (true when one was selected).
 pub fn delete_glyph(app: &mut SolveApp) -> bool {
     let Some(id) = PICKED.with(|p| p.borrow_mut().take()) else { return false };
@@ -1399,6 +1488,7 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         pts: Vec::new(),
         hover: None,
         picks: Vec::new(),
+        picks_dropped: false,
         point_picks: Vec::new(),
         dims: Vec::new(),
         dim_history: Vec::new(),
@@ -1410,6 +1500,7 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         line_type: crate::sketch_construction::last_line_type(),
         classic: false,
         arc_modes: false,
+        rotatable: crate::sketch_dims::last_rectangle_rotatable(),
         preselected: false,
         finished: false,
     })
@@ -1920,7 +2011,9 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
             if periodic_start_snap(app, tool, proj, pos).is_some() {
                 // Only this deliberate click selects periodic interpolation. A
                 // right-click finish and all previously saved splines stay natural.
-                let params = json!({"points":tool.pts.iter().map(arg).collect::<Vec<_>>(),"periodic":true});
+                // A stored click whose snap the Undo button took away goes as the place clicked.
+                let points: Vec<_> = tool.pts.iter().map(|p| arg(&crate::tools::standing(app, p))).collect();
+                let params = json!({"points": points, "periodic": true});
                 if app.run(cmd, params).is_ok() {
                     tool.pts.clear();
                     crate::sketch_dims::reset(tool);
@@ -1956,8 +2049,12 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 return;
             }
             if !tool.picks.contains(&id) {
+                // Every clicked pick gets its place, also when the click misses the sketch
+                // plane (a view along it): the places then stay matched to the last picks.
+                let place = at.map(|(p, _)| p).or_else(|| hit_place(app, &hits, &id));
                 tool.picks.push(id);
-                if let Some((p, _)) = at {
+                tool.picks_dropped = false;
+                if let Some(p) = place {
                     tool.pts.push((p, None));
                 }
             }
@@ -2049,6 +2146,15 @@ pub(crate) fn place_point(app: &mut SolveApp, tool: &mut Tool, p: (Vec2, Option<
         return;
     }
     let Some(Mode::Points(n)) = mode(tool.cmd) else { return };
+    // Tangent Arc and Blend Curve take the sketch point itself, since the tangent comes from its
+    // curve. When the Undo button took that point away after the click, the place clicked is no
+    // answer, so the stored click goes and the tool says where to click to start over (#22766).
+    if matches!(tool.cmd, "sketch.arc.tangent" | "sketch.blend_curve") && tool.pts.iter().any(|q| crate::tools::standing(app, q).1 != q.1) {
+        tool.pts.clear();
+        crate::sketch_dims::reset(tool);
+        app.set_status(hint(tool.cmd).unwrap_or_default(), true);
+        return;
+    }
     if let Err(error) = crate::sketch_dims::validate(app, tool) {
         app.set_status(tr_engine_error(&error), true);
         return;
@@ -2080,7 +2186,10 @@ fn tangent_start(app: &SolveApp, p: &(Vec2, Option<String>)) -> bool {
 }
 
 fn run_points(app: &mut SolveApp, t: &Tool) -> bool {
-    let p = &t.pts;
+    // A stored click whose snap the Undo button took away goes as the place clicked, as
+    // `run_shape` sends it, so the command does not refuse click after click (#22766).
+    let pts: Vec<_> = t.pts.iter().map(|p| crate::tools::standing(app, p)).collect();
+    let p = &pts;
     let width = |a: Vec2, b: Vec2, c: Vec2| -> f64 { 2.0 * (b - a).normalized().map(|d| d.cross(c - a).abs()).unwrap_or(1.0) };
     let slot_width = |fallback: f64| crate::sketch_dims::locked_value(app, t, "Width").unwrap_or_else(|| fallback.max(1e-3));
     let params = match (t.cmd, p.as_slice()) {
@@ -2114,6 +2223,59 @@ fn run_points(app: &mut SolveApp, t: &Tool) -> bool {
         _ => return false,
     };
     crate::tools::draw(app, t, params).is_ok()
+}
+
+/// Drops the picks of a curve-picking tool that no longer name a curve or point of the active
+/// sketch, with their click places, so the user picks again instead of the command refusing the
+/// stale id on every try: the Undo button can take away a picked curve and leaves the tool on
+/// (#23086). An origin axis pick (`x`, `y` or a JSON reference) is kept. Run on every frame
+/// before the value boxes are decided, so 2-Tangent Circle's Radius box goes with the pair.
+/// After a drop the boxes start over and true is returned, for the caller to show the hint.
+pub(crate) fn drop_gone_picks(app: &SolveApp, t: &mut Tool) -> bool {
+    if !matches!(mode(t.cmd), Some(Mode::Entities(_))) || t.picks.is_empty() {
+        return false;
+    }
+    let st = crate::open_meshing::session_world(&app.session);
+    let Some(ss) = active_sketch(app).and_then(|s| st.sketch(s)) else { return false };
+    let stands =
+        |id: &str| ss.sketch.curve_index(id).is_some() || ss.sketch.resolve_point(id).is_some() || matches!(id, "x" | "y") || id.starts_with('{');
+    let keep: Vec<bool> = t.picks.iter().map(|id| stands(id)).collect();
+    if keep.iter().all(|k| *k) {
+        return false;
+    }
+    // Each click adds its pick and its place together, after any preselected picks, which have
+    // no place: the places belong to the last picks.
+    let offset = t.picks.len().saturating_sub(t.pts.len());
+    let mut i = offset;
+    t.pts.retain(|_| {
+        let kept = keep.get(i).copied().unwrap_or(true);
+        i = i.saturating_add(1);
+        kept
+    });
+    let mut flags = keep.iter();
+    t.picks.retain(|_| flags.next().copied().unwrap_or(true));
+    crate::sketch_dims::reset(t);
+    t.picks_dropped = t.picks.is_empty();
+    true
+}
+
+/// A right-click on the view while a tool runs: true when the Undo button just took every pick
+/// of a curve-picking tool away, so the right-click that was meant to apply keeps the tool on for
+/// the user to pick again, as a pick still standing would (#23086). Esc still ends the tool.
+pub(crate) fn keep_on_right_click(app: &mut SolveApp) -> bool {
+    app.tool.as_mut().is_some_and(|t| std::mem::take(&mut t.picks_dropped) && t.picks.is_empty())
+}
+
+/// Where on the active sketch the hit for entity `id` is, in sketch coordinates.
+fn hit_place(app: &SolveApp, hits: &[Hit], id: &str) -> Option<Vec2> {
+    let sid = active_sketch(app)?;
+    let st = crate::open_meshing::session_world(&app.session);
+    let plane = st.sketch(sid)?.plane;
+    hits.iter().find_map(|h| match h {
+        Hit::SketchPoint { sketch, id: hit, at } if *sketch == sid && hit == id => Some(*at),
+        Hit::SketchCurve { sketch, id: hit, point, .. } if *sketch == sid && hit == id => Some(plane.to_local(*point)),
+        _ => None,
+    })
 }
 
 fn run_entities(app: &mut SolveApp, t: &Tool) -> bool {
@@ -2530,6 +2692,48 @@ fn glyph_constraints(sk: &solidcraft_engine::sketch::Sketch) -> impl Iterator<It
     })
 }
 
+/// Whether a constraint refers to the selected point or curve. Selecting a point also
+/// exposes constraints on curves that use that point, so clicking a tangent endpoint can
+/// reveal its line/circle constraint without turning on every other badge (#18817).
+fn constraint_matches_selection(
+    sk: &solidcraft_engine::sketch::Sketch,
+    kind: &solidcraft_engine::sketch::ConstraintKind,
+    selected: &[solidcraft_engine::Sel],
+) -> bool {
+    let (curves, points) = constraint_entities(kind);
+    selected.iter().any(|item| match item {
+        solidcraft_engine::Sel::SketchCurve { id, .. } => curves.iter().any(|&index| sk.curves.get(index).is_some_and(|curve| curve.id == *id)),
+        solidcraft_engine::Sel::SketchPoint { id } => {
+            points.iter().any(|&index| sk.points.get(index).is_some_and(|point| point.id == *id))
+                || curves.iter().any(|&index| {
+                    sk.curves
+                        .get(index)
+                        .is_some_and(|curve| curve.kind.point_ids().into_iter().any(|p| sk.points.get(p).is_some_and(|point| point.id == *id)))
+                })
+        }
+        _ => false,
+    })
+}
+
+/// A shared glyph is visible when any constraint represented by it qualifies. In
+/// particular, a failing or selected second Midpoint constraint must not disappear
+/// because glyph_constraints() chose the first as the displayed representative.
+fn glyph_group_visible_when_selected(
+    sk: &solidcraft_engine::sketch::Sketch,
+    id: &str,
+    selected: &[solidcraft_engine::Sel],
+    picked: Option<&str>,
+    is_failing: impl Fn(&String) -> bool,
+) -> bool {
+    let group = glyph_group(sk, id);
+    sk.constraints.iter().filter(|c| group.contains(&c.id)).any(|c| {
+        is_failing(&c.id)
+            || picked == Some(c.id.as_str())
+            || selected.iter().any(|sel| matches!(sel, solidcraft_engine::Sel::SketchConstraint { id } if id == &c.id))
+            || constraint_matches_selection(sk, &c.kind, selected)
+    })
+}
+
 /// Pixels on screen for one millimetre along the sketch plane's U axis, near the plane origin.
 fn sketch_px_per_mm(plane: &Plane, proj: &Proj) -> Option<f32> {
     let a = proj.to_screen(plane.to_world(Vec2::ZERO))?;
@@ -2538,24 +2742,33 @@ fn sketch_px_per_mm(plane: &Plane, proj: &Proj) -> Option<f32> {
 }
 
 fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Pos2>) {
-    let Some(sid) = active_sketch(app) else { return };
+    let Some(sid) = active_sketch(app) else {
+        DETACH_PREVIEW.with(|c| *c.borrow_mut() = None);
+        return;
+    };
     // While a dimension's value is typed, the glyphs sit where that value puts their geometry.
     let st = crate::dim_view::preview_world(app).unwrap_or_else(|| crate::open_meshing::session_world(&app.session));
-    let Some(ss) = st.sketch(sid) else { return };
+    let Some(ss) = st.sketch(sid) else {
+        DETACH_PREVIEW.with(|c| *c.borrow_mut() = None);
+        return;
+    };
     // The badge's side, from Preferences › Sketch (#10794); 15 px at the default.
     let glyph = glyph_px(app.preferences.constraint_glyph_scale);
     let scale = glyph / GLYPH;
     GLYPH_PX.with(|g| g.set(glyph));
     if ss.sketch.view.hide_constraints {
         GLYPHS.with(|g| g.borrow_mut().clear());
+        DETACH_PREVIEW.with(|c| *c.borrow_mut() = None);
         return;
     }
     // Zoomed out far enough: fixed-size glyphs would dominate the sketch (#8980), unless the
     // sketch still spreads them across the view (#10518).
-    if let Some(scale) = sketch_px_per_mm(&ss.plane, proj)
+    let px_per_mm = sketch_px_per_mm(&ss.plane, proj);
+    if let Some(scale) = px_per_mm
         && !constraint_glyphs_visible_at_scale(scale, app.preferences.hide_constraint_glyphs_zoomed_out, || sketch_span_px(ss, proj))
     {
         GLYPHS.with(|g| g.borrow_mut().clear());
+        DETACH_PREVIEW.with(|c| *c.borrow_mut() = None);
         return;
     }
     let tk = solidcraft_theme::Tokens::get();
@@ -2570,6 +2783,11 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
     };
     let mut placed: Vec<(String, Pos2, Pos2)> = Vec::new();
     for c in glyph_constraints(&ss.sketch) {
+        if app.ui.constraint_glyphs_selected_only
+            && !glyph_group_visible_when_selected(&ss.sketch, &c.id, &app.session.selection, picked.as_deref(), |id| ss.report.failing.contains(id))
+        {
+            continue;
+        }
         for (at, dir) in glyph_anchors(&ss.sketch, &c.kind) {
             let Some(base) = proj.to_screen(ss.plane.to_world(at)) else { continue };
             // The entity's direction on screen, and its side.
@@ -2668,7 +2886,54 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
         }
         drawn.push((id.clone(), *sp));
     }
-    if let (Some((id, at_glyph)), Some(h)) = (hovered_at, hover)
+    // Simulated coincident break-off glyph (selected curve + hovered shared endpoint).
+    let mut detach_tooltip: Option<(egui::Rect, String)> = None;
+    let next_detach = resolve_detach_target(app, sid, &ss.sketch, hover, scale).and_then(|(curve_id, pi, point_id)| {
+        let base = proj.to_screen(ss.plane.to_world(ss.sketch.point(pi)?))?;
+        let point_rect = egui::Rect::from_center_size(base, egui::vec2(6.0 * scale, 6.0 * scale));
+        let reused = DETACH_PREVIEW.with(|c| {
+            c.borrow()
+                .as_ref()
+                .filter(|p| p.curve_id == curve_id && p.point_id == point_id && p.point_rect.center().distance(base) < 2.0)
+                .map(|p| p.glyph_rect)
+        });
+        let glyph_rect = reused.unwrap_or_else(|| {
+            let dirs = [
+                egui::vec2(0.7, -0.7),
+                egui::vec2(-0.7, -0.7),
+                egui::vec2(0.7, 0.7),
+                egui::vec2(-0.7, 0.7),
+                egui::vec2(1.0, 0.0),
+                egui::vec2(-1.0, 0.0),
+                egui::vec2(0.0, -1.0),
+                egui::vec2(0.0, 1.0),
+            ];
+            let free = |sp: Pos2| !placed.iter().any(|(_, q, _)| q.distance(sp) < glyph + 2.0) && !on_dim(sp);
+            let center = dirs.iter().map(|d| base + *d * (glyph * 1.15)).find(|&sp| free(sp)).unwrap_or(base + dirs[0] * (glyph * 1.15));
+            egui::Rect::from_center_size(center, egui::vec2(glyph, glyph))
+        });
+        let lit = hover.is_some_and(|h| glyph_rect.expand(2.0).contains(h));
+        painter.line_segment([base, glyph_rect.center()], Stroke::new(1.0, tk.accent.gamma_multiply(0.8)));
+        let rounding = tk.radius_sm.saturating_sub(1);
+        painter.rect_filled(glyph_rect, rounding, if lit { tk.accent_soft } else { tk.glyph_bg });
+        painter.rect_stroke(glyph_rect, rounding, Stroke::new(1.2, tk.accent), egui::StrokeKind::Inside);
+        crate::icons::paint_icon(painter, glyph_rect.shrink(2.0 * scale), "c_coincident", 1.0);
+        if lit {
+            detach_tooltip = Some((glyph_rect, format!("Coincident on {curve_id} (right-click to detach)")));
+        }
+        let distance_mm = 10.0 / px_per_mm.unwrap_or(1.0).max(1e-3) as f64;
+        Some(DetachPreview { curve_id, point_id, point_rect, glyph_rect, distance_mm })
+    });
+    DETACH_PREVIEW.with(|c| *c.borrow_mut() = next_detach);
+
+    if let (Some((anchor_rect, label)), Some(h)) = (detach_tooltip, hover) {
+        let g =
+            painter.layout(label, egui::FontId::proportional(solidcraft_theme::Tokens::get().font_small), tk.text, glyph_label_wrap_width(proj.rect));
+        let chip = glyph_label_rect(h, anchor_rect, g.size() + egui::vec2(6.0, 6.0), proj.rect);
+        crate::scenario::publish_rect("sketch:glyph_label", chip);
+        painter.rect_filled(chip, tk.radius_sm.saturating_sub(1), tk.panel);
+        painter.with_clip_rect(chip.intersect(painter.clip_rect())).galley(chip.min + egui::vec2(3.0, 3.0), g, tk.text);
+    } else if let (Some((id, at_glyph)), Some(h)) = (hovered_at, hover)
         && let Some(c) = ss.sketch.constraints.iter().find(|c| c.id == id)
     {
         let ids = glyph_group(&ss.sketch, &id).join(", ");
@@ -2985,6 +3250,70 @@ mod glyph_zoom_tests {
         assert_eq!(crate::icons::markers::glyph_icon(k.name()), Some("c_midpoint"));
     }
 
+    /// Opt-in filtering ties visible glyphs to selected curves and points, including a
+    /// curve's endpoints. Without a selection the normal glyph list is untouched (#18817).
+    #[test]
+    fn selected_geometry_can_reveal_its_constraint_glyphs() {
+        use solidcraft_engine::Sel;
+        use solidcraft_engine::sketch::{ConstraintKind, CurveKind, Sketch};
+        let mut sk = Sketch::new();
+        let a = sk.add_point(super::Vec2::new(0.0, 0.0), None).unwrap();
+        let b = sk.add_point(super::Vec2::new(20.0, 0.0), None).unwrap();
+        let other = sk.add_point(super::Vec2::new(0.0, 20.0), None).unwrap();
+        let line = sk.add_curve(CurveKind::Line { a, b }, None).unwrap();
+        let horizontal = ConstraintKind::Horizontal { l: line };
+        let curve = Sel::SketchCurve { id: sk.curves[line].id.clone(), sketch: None };
+        assert!(super::constraint_matches_selection(&sk, &horizontal, &[curve]));
+        assert!(super::constraint_matches_selection(&sk, &horizontal, &[Sel::SketchPoint { id: sk.points[a].id.clone() }]));
+        assert!(super::constraint_matches_selection(&sk, &horizontal, &[Sel::SketchPoint { id: sk.points[b].id.clone() }]));
+        assert!(!super::constraint_matches_selection(&sk, &horizontal, &[]), "unselected geometry has no filtered glyph");
+        assert!(
+            !super::constraint_matches_selection(&sk, &horizontal, &[Sel::SketchPoint { id: sk.points[other].id.clone() }]),
+            "unrelated points do not reveal every constraint"
+        );
+        let point_constraint = ConstraintKind::Fix { p: other };
+        assert!(super::constraint_matches_selection(&sk, &point_constraint, &[Sel::SketchPoint { id: sk.points[other].id.clone() }]));
+        assert!(!super::constraint_matches_selection(&sk, &point_constraint, &[Sel::SketchPoint { id: sk.points[a].id.clone() }]));
+        assert!(!crate::UiState::default().constraint_glyphs_selected_only, "the old display remains the default");
+    }
+
+    /// A shared midpoint badge must remain visible if any represented constraint fails or
+    /// belongs to the selection, even when the first constraint is not the relevant one.
+    #[test]
+    fn grouped_midpoint_glyph_respects_all_members() {
+        use solidcraft_engine::Sel;
+        use solidcraft_engine::sketch::{Constraint, ConstraintKind, CurveKind, Sketch};
+        let mut sk = Sketch::new();
+        let a = sk.add_point(super::Vec2::new(0.0, 0.0), None).unwrap();
+        let b = sk.add_point(super::Vec2::new(10.0, 0.0), None).unwrap();
+        let c = sk.add_point(super::Vec2::new(5.0, -5.0), None).unwrap();
+        let d = sk.add_point(super::Vec2::new(5.0, 5.0), None).unwrap();
+        let mid = sk.add_point(super::Vec2::new(5.0, 0.0), None).unwrap();
+        let other = sk.add_point(super::Vec2::new(20.0, 20.0), None).unwrap();
+        let line1 = sk.add_curve(CurveKind::Line { a, b }, None).unwrap();
+        let line2 = sk.add_curve(CurveKind::Line { a: c, b: d }, None).unwrap();
+        for (id, line) in [("first", line1), ("second", line2)] {
+            sk.constraints.push(Constraint {
+                id: id.into(),
+                kind: ConstraintKind::Midpoint { p: mid, l: line },
+                param: None,
+                driven: false,
+                text: None,
+            });
+        }
+        assert_eq!(super::glyph_constraints(&sk).count(), 1, "both constraints share a glyph");
+        assert_eq!(super::glyph_group(&sk, "first").len(), 2);
+        let show = |selected: &[Sel], picked: Option<&str>, failing: &str| {
+            super::glyph_group_visible_when_selected(&sk, "first", selected, picked, |id| id.as_str() == failing)
+        };
+        assert!(!show(&[], None, ""), "no matching selection hides the grouped badge");
+        assert!(show(&[], None, "second"), "a failure in the second constraint shows the shared error glyph");
+        assert!(show(&[], Some("second"), ""), "picking the second constraint reveals the group");
+        assert!(show(&[Sel::SketchConstraint { id: "second".into() }], None, ""), "explicitly selecting the second constraint reveals the group");
+        assert!(show(&[Sel::SketchCurve { id: sk.curves[line2].id.clone(), sketch: None }], None, ""), "selecting the second line reveals the group");
+        assert!(!show(&[Sel::SketchPoint { id: sk.points[other].id.clone() }], None, ""), "unrelated geometry does not reveal the group");
+    }
+
     #[test]
     fn glyph_size_follows_the_preference_and_defaults_to_the_old_size() {
         assert_eq!(glyph_px(crate::prefs::Prefs::default().constraint_glyph_scale), GLYPH);
@@ -3159,6 +3488,8 @@ mod glyph_zoom_tests {
         for cmd in [
             "sketch.constraint.parallel",
             "sketch.constraint.coincident",
+            "sketch.constraint.horizontal",
+            "sketch.constraint.vertical",
             "sketch.constraint.horizontal_vertical",
             "sketch.constraint.curvature",
             "sketch.constrainer",

@@ -22,7 +22,7 @@ use solidcraft_doc::drawing::fields::{Component, Documented, SHEET_METAL, SheetB
 use solidcraft_geom::cell::{Content, HAlign, Part, Source, Warning, place_lines};
 use solidcraft_geom::drawing_sheet::{LabelAlign, SheetLayout};
 use solidcraft_geom::paper::text::{Font, TextRun};
-use solidcraft_geom::title_block::{CellKind, TextCell, TitleBlock, TitleBlockLayout};
+use solidcraft_geom::title_block::{CellKind, MassUnit, TextCell, TitleBlock, TitleBlockLayout};
 use solidcraft_geom::{Aabb2, EPS, Seg2Geom};
 use solidcraft_sketch::{Outcome, PaperFonts, PaperLines, SketchError, TextAlign, TextStyle};
 
@@ -88,24 +88,25 @@ pub fn shown(s: &Session, tree: &mut Tree<'_>, d: &Drawing, at: usize) -> Vec<Ce
 pub fn shown_with(s: &Session, tree: &mut Tree<'_>, d: &Drawing, at: usize, mut each: impl FnMut(CellText, &Content, &Values)) {
     let Some(sheet) = d.sheets.get(at) else { return };
     let Some(block) = &sheet.title_block else { return };
-    let texts: Vec<(&String, &Content)> = block
+    let texts: Vec<(&String, &Content, MassUnit)> = block
         .cells
         .iter()
         .filter_map(|cell| match &cell.kind {
-            CellKind::Text(text) if text.image.is_none() => Some((&cell.name, &text.content)),
+            CellKind::Text(text) if text.image.is_none() => Some((&cell.name, &text.content, text.mass_unit())),
             _ => None,
         })
         .collect();
-    with_values(s, tree, d, at, texts.iter().map(|(_, content)| *content), |values| {
-        for &(name, content) in &texts {
+    let resolved = SheetValues::new(s, tree, d, at, texts.iter().map(|(_, content, _)| *content));
+    for &(name, content, mass_unit) in &texts {
+        resolved.with(mass_unit, |values| {
             let value = values.text(content);
             let cell = match sheet.title_block_overrides.get(name) {
                 Some(typed) => CellText { name: name.clone(), text: typed.clone(), replaced: Some(value) },
                 None => CellText { name: name.clone(), text: value, replaced: None },
             };
             each(cell, content, values);
-        }
-    });
+        });
+    }
 }
 
 /// `contents` as sheet `at` of `d` shows them, in their order: text as written, each field read
@@ -128,36 +129,59 @@ pub fn with_values<'c, R>(
     contents: impl Iterator<Item = &'c Content>,
     answer: impl FnOnce(&Values) -> R,
 ) -> R {
-    let component_keys: Vec<&str> = contents
-        .flat_map(|content| &content.0)
-        .filter_map(|part| match part {
-            Part::Field { source: Source::Component, key, .. } => Some(key.as_str()),
+    SheetValues::new(s, tree, d, at, contents).with(MassUnit::default(), answer)
+}
+
+/// The documented component of sheet `at` weighed and measured at most once across all cells on the
+/// sheet, so each cell formats `component.mass` in its own [`MassUnit`] without re-evaluating the
+/// tree or sheet metal bodies.
+struct SheetValues<'a> {
+    drawing: &'a Drawing,
+    at: usize,
+    design: Option<Option<&'a Session>>,
+    id: Option<u64>,
+    grams: Option<f64>,
+    material: Option<String>,
+    sheet: Option<SheetMetal>,
+}
+
+impl<'a> SheetValues<'a> {
+    fn new<'c>(s: &'a Session, tree: &mut Tree<'_>, d: &'a Drawing, at: usize, contents: impl Iterator<Item = &'c Content>) -> Self {
+        let component_keys: Vec<&str> = contents
+            .flat_map(|content| &content.0)
+            .filter_map(|part| match part {
+                Part::Field { source: Source::Component, key, .. } => Some(key.as_str()),
+                _ => None,
+            })
+            .collect();
+        let weighs = component_keys.iter().any(|key| *key == "material" || *key == "mass");
+        let sheets = component_keys.iter().any(|key| SHEET_METAL.contains(key));
+        // What the model says of the component it documents: a component since deleted, or of a design
+        // that can't be read, has nothing.
+        let documents = d.sheets.get(at).and_then(|sheet| sheet.documents);
+        let design = documents.map(|documents| s.drawn(d, documents.source).ok());
+        let id = documents.map(|documents| documents.component);
+        let weighed = id.filter(|_| weighs && matches!(design, Some(Some(design)) if std::ptr::eq(design, s)));
+        let (mass, materials) = weighed.and_then(|id| tree.component(id).ok()).unzip();
+        let grams = mass.and_then(|mass| if let Mass::Grams(grams) = mass { Some(grams) } else { None });
+        let material = materials.filter(|m| !m.is_empty()).map(|m| m.join("; "));
+        let sheet = match (design, id) {
+            (Some(Some(design)), Some(id)) if sheets => Some(sheet_metal(design, d, id)),
             _ => None,
-        })
-        .collect();
-    let weighs = component_keys.iter().any(|key| *key == "material" || *key == "mass");
-    let sheets = component_keys.iter().any(|key| SHEET_METAL.contains(key));
-    // What the model says of the component it documents: a component since deleted, or of a design
-    // that can't be read, has nothing.
-    let documents = d.sheets.get(at).and_then(|sheet| sheet.documents);
-    let design = documents.map(|documents| s.drawn(d, documents.source).ok());
-    let id = documents.map(|documents| documents.component);
-    let weighed = id.filter(|_| weighs && matches!(design, Some(Some(design)) if std::ptr::eq(design, s)));
-    let (mass, materials) = weighed.and_then(|id| tree.component(id).ok()).unzip();
-    let mass = mass.and_then(|mass| if let Mass::Grams(grams) = mass { Some(format_mass(grams)) } else { None });
-    let material = materials.filter(|m| !m.is_empty()).map(|m| m.join("; "));
-    let sheet = match (design, id) {
-        (Some(Some(design)), Some(id)) if sheets => Some(sheet_metal(design, d, id)),
-        _ => None,
-    };
-    let component = match (design, id) {
-        (Some(Some(design)), Some(id)) => {
-            documented(&design.doc, id, material.as_deref(), mass.as_deref(), sheet.as_ref()).map_or(Documented::Gone, Documented::Present)
-        }
-        (Some(None), _) => Documented::Gone,
-        _ => Documented::Nothing,
-    };
-    answer(&Values { drawing: d, sheet: at, component })
+        };
+        Self { drawing: d, at, design, id, grams, material, sheet }
+    }
+
+    fn with<R>(&self, unit: MassUnit, answer: impl FnOnce(&Values) -> R) -> R {
+        let mass = self.grams.map(|grams| format_mass(grams, unit));
+        let component = match (self.design, self.id) {
+            (Some(Some(design)), Some(id)) => documented(&design.doc, id, self.material.as_deref(), mass.as_deref(), self.sheet.as_ref())
+                .map_or(Documented::Gone, Documented::Present),
+            (Some(None), _) => Documented::Gone,
+            _ => Documented::Nothing,
+        };
+        answer(&Values { drawing: self.drawing, sheet: self.at, component })
+    }
 }
 
 /// Component `id` of the design (0: the design itself) as a title block's fields read it, with
@@ -170,10 +194,18 @@ fn documented<'a>(
     sheet_metal: Option<&'a SheetMetal>,
 ) -> Option<Component<'a>> {
     if id == 0 {
-        return Some(Component { name: &doc.name, metadata: &doc.metadata, properties: None, material, mass, sheet_metal });
+        return Some(Component { name: &doc.name, metadata: &doc.metadata, properties: None, name_split: None, material, mass, sheet_metal });
     }
     let c = doc.components.iter().find(|c| c.id == id)?;
-    Some(Component { name: &c.name, metadata: &c.metadata, properties: Some(&c.properties), material, mass, sheet_metal })
+    Some(Component {
+        name: &c.name,
+        metadata: &c.metadata,
+        properties: Some(&c.properties),
+        name_split: c.name_split.as_ref(),
+        material,
+        mass,
+        sheet_metal,
+    })
 }
 
 /// What the sheet metal bodies component `id` (0: the design) of `design` owns agree on, as
@@ -203,9 +235,16 @@ fn sheet_body(sheet: &solidcraft_doc::SurfaceSheet) -> SheetBody<'_> {
     SheetBody { rule: &sheet.rule, thickness: sheet.thickness, k_factor: sheet.k_factor, bend_radius, flat }
 }
 
-/// A mass as a sheet shows it: kilograms to two places, until #4867 gives drawings their units.
-fn format_mass(grams: f64) -> String {
-    format!("{:.2} kg", grams / 1000.0)
+/// A mass in grams as a cell shows it in `unit` .
+fn format_mass(grams: f64, unit: MassUnit) -> String {
+    let grams = if grams.is_finite() && grams > 0.0 { grams } else { 0.0 };
+    match unit {
+        MassUnit::Kg => format!("{:.2} kg", grams / 1000.0),
+        MassUnit::G => format!("{grams:.1} g"),
+        MassUnit::Auto if grams < 999.95 => format!("{grams:.1} g"),
+        MassUnit::Auto => format!("{:.2} kg", grams / 1000.0),
+        MassUnit::Both => format!("{grams:.1} g ({:.4} kg)", grams / 1000.0),
+    }
 }
 
 /// `block`'s labels, and its text cells' values as `shown` gives them, measured in the drawing's
@@ -232,8 +271,17 @@ pub fn lay(block: &TitleBlock, layout: &TitleBlockLayout, fonts: &PaperFonts, sh
     out
 }
 
+/// The least a value is shrunk to fit its box's width, as a part of its cap height.
+const MIN_SHRINK: f64 = 0.4;
+
+/// What stands for the characters a clipped value leaves off.
+const ELLIPSIS: &str = "...";
+
 /// `value`'s lines in `value_box`, as `fonts` sets them, by the cell text rule, and where the
-/// first starts; what doesn't fit is added to `notes`.
+/// first starts. A line wider than the box is set smaller, down to [`MIN_SHRINK`] of the cell's cap
+/// height, and past that its value is clipped to the box with [`ELLIPSIS`], so no ink reaches past
+/// the box (its first baseline stays where the cell's own size puts it); either is added to `notes` as [`Warning::Width`], and a clipped one as
+/// [`Warning::Clipped`] too. What else doesn't fit is added to `notes`.
 fn value_lines(text: &TextCell, value_box: Aabb2, fonts: &PaperFonts, value: &str, notes: &mut Vec<Note>) -> Result<(PaperLines, Vec2), SketchError> {
     let width = value_box.size().x;
     let align = match text.align {
@@ -242,10 +290,41 @@ fn value_lines(text: &TextCell, value_box: Aabb2, fonts: &PaperFonts, value: &st
         HAlign::Right => TextAlign::Right,
     };
     let style = TextStyle { align, ..TextStyle::default() };
-    let lines = fonts.lines(value, text.cap_mm, text.fit.wrap.then_some(width), &style)?;
+    let wrap = text.fit.wrap.then_some(width);
+    let widest = |lines: &PaperLines| lines.lines.iter().map(|(_, w)| *w).fold(0.0, f64::max);
+    let mut cap = text.cap_mm;
+    let mut lines = fonts.lines(value, cap, wrap, &style)?;
     notes.extend(text.fit.warn_chars(value).map(Note::Fit));
-    if lines.lines.iter().any(|(_, w)| *w > width + EPS) {
+    if widest(&lines) > width + EPS {
         notes.push(Note::Fit(Warning::Width));
+        cap = (cap * width / widest(&lines) * (1.0 - 1e-9)).max(cap * MIN_SHRINK);
+        lines = fonts.lines(value, cap, wrap, &style)?;
+        if widest(&lines) > width + EPS {
+            // Still too wide at the least size: keep the most characters that fit, with an ellipsis.
+            let chars: Vec<char> = value.chars().collect();
+            let with = |kept: usize| chars.iter().take(kept).chain(ELLIPSIS.chars().collect::<Vec<_>>().iter()).collect::<String>();
+            let (mut fits, mut over) = (None, chars.len());
+            let mut low = 0;
+            while low < over {
+                let mid = low + (over - low).div_ceil(2);
+                let tried = fonts.lines(&with(mid), cap, wrap, &style)?;
+                if widest(&tried) > width + EPS {
+                    over = mid - 1;
+                } else {
+                    low = mid;
+                    fits = Some(tried);
+                }
+            }
+            lines = match fits {
+                Some(lines) => lines,
+                None => fonts.lines(&with(0), cap, wrap, &style)?,
+            };
+            if widest(&lines) > width + EPS {
+                // Not even the ellipsis fits: the value draws nothing, and the notes say so.
+                lines = fonts.lines("", cap, wrap, &style)?;
+            }
+            notes.push(Note::Fit(Warning::Clipped));
+        }
     }
     let (at, height) = place_lines(value_box, lines.lines.len(), text.cap_mm, lines.pitch, text.align, text.fit.wrap)
         .map_err(|e| SketchError::Invalid(e.to_string()))?;
