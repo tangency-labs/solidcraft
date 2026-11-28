@@ -12,8 +12,15 @@ workspace = true
 [dependencies]
 egui = { workspace = true }
 egui-wgpu = { workspace = true, features = ["winit", "capture"] }
+# The runner's input; winit's own platform features come from it.
+egui-winit = { version = "0.37", default-features = false, features = ["clipboard", "links", "wayland", "x11"] }
 log = { workspace = true }
+pollster = { workspace = true }
 thiserror = { workspace = true }
 web-time = { workspace = true }
 wgpu = { workspace = true }
 winit = { version = "0.30", default-features = false }
+
+[dev-dependencies]
+# Native backends, so the example opens a window (the app picks its own).
+wgpu = { workspace = true, features = ["metal", "vulkan", "dx12"] }
