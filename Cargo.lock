@@ -6787,6 +6787,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-window-gpu"
+version = "0.51.1"
+dependencies = [
+ "egui",
+ "egui-wgpu",
+ "log",
+ "thiserror 2.0.21",
+ "web-time",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
 name = "spade"
 version = "2.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
