@@ -48,10 +48,7 @@ fn refused(op: &str, wall: Option<f64>, e: SmError) -> KernelError {
              which the {op} does not build; move the feature clear of the edge"
         )),
         // solidcore's one construction: a face curves tighter than the wall is thick.
-        SmError::WallFolds { largest } => {
-            let largest = largest.map(|w| format!("; the largest wall that works is {} mm", crate::blend::trimmed_mm(w))).unwrap_or_default();
-            KernelError::Invalid(format!("{op}: the wall is thicker than a face curves, so the face's offset would fold{largest}"))
-        }
+        SmError::WallFolds { largest } => KernelError::WallFolds { op: op.to_string(), largest },
         // A face the drafted face runs into without meeting it, a hole's wall near the side
         // (#19686): the draft trims only the faces around the drafted one.
         SmError::DraftCutsThrough { at: [x, y, z], depth } => KernelError::Invalid(format!(
@@ -227,11 +224,13 @@ pub(crate) fn thinner_shell_hint(thickness: f64, failure: &SmError, first: Kerne
         return KernelError::Invalid(format!("shell: a wall of {t} mm does not fit: {why}; a wall of {w} mm builds"));
     }
     match first {
-        KernelError::Invalid(_) | KernelError::Failed(_) if matches!(failure, SmError::WallFolds { .. }) => KernelError::Invalid(format!(
-            "shell: a wall of {t} mm does not fit, and no thinner wall builds either, so the wall is not the obstacle: \
+        KernelError::Invalid(_) | KernelError::Failed(_) | KernelError::WallFolds { .. } if matches!(failure, SmError::WallFolds { .. }) => {
+            KernelError::Invalid(format!(
+                "shell: a wall of {t} mm does not fit, and no thinner wall builds either, so the wall is not the obstacle: \
              a face of the body curves too tightly to offset inwards, or the body has faces too small or too many to offset into a solid \
              (a curve cut as many tiny flat pieces, for example); round the tight bend or rebuild the body with smoother faces"
-        )),
+            ))
+        }
         other => other,
     }
 }

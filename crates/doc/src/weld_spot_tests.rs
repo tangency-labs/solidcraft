@@ -574,3 +574,298 @@ fn bad_site_input_is_refused_as_invalid_input() {
         assert!(bad(spot_site(both, 0, face, [0.0; 3], d)));
     }
 }
+
+// ---- on curved sheets (#21144) ----
+
+fn pline(a: [f64; 3], b: [f64; 3]) -> solidcraft_kernel::profiles::ProfileCurve {
+    solidcraft_kernel::profiles::ProfileCurve::Line { start: a, end: b }
+}
+
+/// A sphere-shell cap about +Z between radii `ri` and `ro`, out to polar angle `cap`.
+fn dome(ri: f64, ro: f64, cap: f64) -> Body {
+    let arc = |r: f64| solidcraft_kernel::profiles::ProfileCurve::Arc {
+        center: [0.0; 3],
+        axis: [0.0, 1.0, 0.0],
+        reference: [0.0, 0.0, 1.0],
+        radius: r,
+        start: 0.0,
+        end: cap,
+    };
+    let at = |r: f64| [r * cap.sin(), 0.0, r * cap.cos()];
+    let p = [pline([0.0, 0.0, ri], [0.0, 0.0, ro]), arc(ro), pline(at(ro), at(ri)), arc(ri)];
+    solidcraft_kernel::profiles::revolve_curves(&p, [0.0; 3], [0.0, 0.0, 1.0], std::f64::consts::TAU, true, None).unwrap()
+}
+
+/// A cylinder-shell sector about Z between radii `ri` and `ro`, `z` from -15 to 15, from angle 0
+/// to `angle`.
+fn shell(ri: f64, ro: f64, angle: f64) -> Body {
+    let p = [
+        pline([ri, 0.0, -15.0], [ro, 0.0, -15.0]),
+        pline([ro, 0.0, -15.0], [ro, 0.0, 15.0]),
+        pline([ro, 0.0, 15.0], [ri, 0.0, 15.0]),
+        pline([ri, 0.0, 15.0], [ri, 0.0, -15.0]),
+    ];
+    solidcraft_kernel::profiles::revolve_curves(&p, [0.0; 3], [0.0, 0.0, 1.0], angle, true, None).unwrap()
+}
+
+/// The near-side volume between the spheres of radii `a < b` about the origin within `rho` of a
+/// line through the origin.
+fn sphere_disc(a: f64, b: f64, rho: f64) -> f64 {
+    let cap = |r: f64| r.powi(3) - (r * r - rho * rho).powf(1.5);
+    std::f64::consts::TAU / 3.0 * (cap(b) - cap(a))
+}
+
+/// The face the ray from `from` along `dir` meets first in `b`, and where.
+fn first_hit(b: &Body, from: [f64; 3], dir: [f64; 3]) -> (usize, [f64; 3]) {
+    let h = b.face_hits_by_ray(from, dir).unwrap();
+    (h[0].face, h[0].point)
+}
+
+/// The unit direction at polar angle `polar` from +Z, `azimuth` round it.
+fn radial(polar: f64, azimuth: f64) -> [f64; 3] {
+    [polar.sin() * azimuth.cos(), polar.sin() * azimuth.sin(), polar.cos()]
+}
+
+/// Two flat, square sheets: the curved site is the flat site and the bodies on it are
+/// [`spot_weld`]'s, every look.
+#[test]
+fn on_flat_square_sheets_the_curved_site_and_bodies_are_the_flat_ones() {
+    let lower = sheet(0.0, 1.5);
+    let upper = sheet(1.5, 1.0);
+    let both: &[&Body] = &[&lower, &upper];
+    let p = [2.0, 3.0, 2.5];
+    let face = face_at(&upper, p);
+    let flat = spot_site(both, 1, face, p, D).unwrap();
+    let curved = spot_site_curved(both, 1, face, p, D).unwrap();
+    assert!(near(flat.at, curved.at) && near(flat.normal, curved.normal), "{flat:?} {curved:?}");
+    for (a, b) in flat.sheets.iter().zip(&curved.sheets) {
+        assert!((a.sheet, a.near, a.far) == (b.sheet, b.near, b.far) && (a.thickness - b.thickness).abs() < 1e-9, "{a:?} {b:?}");
+    }
+    for style in STYLES {
+        let spot = SpotWeld { at: flat.at, normal: flat.normal, thicknesses: flat.sheets.iter().map(|x| x.thickness).collect(), diameter: D, style };
+        let want = pieces(&spot);
+        let got = spot_weld_on(both, &curved, D, style).unwrap();
+        assert_eq!(got.len(), want.len());
+        for (g, w) in got.iter().zip(&want) {
+            assert_eq!((g.zone, g.side), (w.zone, w.side));
+            close(volume(&g.body), volume(&w.body), "flat stack through the curved path");
+        }
+    }
+}
+
+/// A pressed dome (concentric sphere shells, R 50 to 51.5 below, 51.5 to 52.5 above), picked on
+/// its top off the revolve seam: the line runs radially in; every mark zone is the closed-form
+/// solid between its sphere and the sphere the marks' thickness out, on the convex top and on the
+/// concave underside, each outside its sheet; the thin pin is the solid between the outer spheres
+/// within its radius; the ball is a ball.
+#[test]
+fn on_a_dome_each_mark_zone_and_the_pin_are_their_closed_form() {
+    let lower = dome(50.0, 51.5, 0.5);
+    let upper = dome(51.5, 52.5, 0.5);
+    let both: &[&Body] = &[&lower, &upper];
+    let dir = radial(0.25, 1.0);
+    let (face, p) = first_hit(&upper, dir.map(|v| 60.0 * v), dir.map(|v| -v));
+    let site = spot_site_curved(both, 1, face, p, D).unwrap();
+    assert!(site.normal.iter().zip(dir).all(|(a, b)| (a + b).abs() < 1e-9), "{site:?}");
+    let h = 0.006 * D;
+    let radii = [0.0, 0.55 * D / 2.0, D / 2.0, 1.05 * D / 2.0];
+    let marks = spot_weld_on(both, &site, D, SpotLook::Marks.style()).unwrap();
+    assert_eq!(marks.len(), 6);
+    for (i, piece) in marks.iter().enumerate() {
+        // the first sheet is the picked one: its outer face (`Lower`) is the convex top
+        let (a, b, sheet) = match piece.side {
+            SpotSide::Lower => (52.5, 52.5 + h, &upper),
+            SpotSide::Upper => (50.0 - h, 50.0, &lower),
+            SpotSide::Through => panic!("no pin in this look"),
+        };
+        let z = i % 3;
+        close(volume(&piece.body), sphere_disc(a, b, radii[z + 1]) - sphere_disc(a, b, radii[z]), "dome mark zone");
+        assert!(boolean(&piece.body, sheet, BoolOp::Intersect).unwrap().is_none(), "mark {i} inside its sheet");
+        check(&piece.body, "dome mark zone");
+    }
+    let pinned = spot_weld_on(both, &site, D, SpotLook::MarksThinPin.style()).unwrap();
+    let pin: Vec<_> = pinned.iter().filter(|x| x.zone == SpotZone::Inside).collect();
+    assert_eq!(pin.len(), 1);
+    close(volume(&pin[0].body), sphere_disc(50.0, 52.5, 0.55 * D / 2.0), "dome pin");
+    let ball = spot_weld_on(both, &site, D, SpotLook::Ball.style()).unwrap();
+    let inside: Vec<_> = ball.iter().filter(|x| x.zone == SpotZone::Inside).collect();
+    assert_eq!(inside.len(), 1);
+    close(volume(&inside[0].body), 4.0 / 3.0 * PI * (D / 2.0).powi(3), "dome ball");
+}
+
+/// `∫ 2πρ h dρ` from `a` to `b` of the height `h(ρ) = s (√(rf² - ρ²) - rf)` off its tangent plane
+/// at the axis of a sphere of radius `rf` crossed by the axis: `s = 1` for a convex face (seen
+/// from outside), `-1` for a concave one.
+fn sag_volume(rf: f64, s: f64, a: f64, b: f64) -> f64 {
+    s * (2.0 * PI / 3.0 * ((rf * rf - a * a).powf(1.5) - (rf * rf - b * b).powf(1.5)) - PI * rf * (b * b - a * a))
+}
+
+/// What a dished end of depth `c` takes off a pin of radius `r` whose end is a sphere of radius
+/// `rf` crossed by the axis (`s` as in [`sag_volume`]): the pin within the end's sphere, the
+/// sphere through the rim at height 0 and `c` in on the axis.
+fn dished_end(rf: f64, s: f64, r: f64, c: f64) -> f64 {
+    let rp = (r * r + c * c) / (2.0 * c);
+    // the end's face less the sphere's cap, as heights off the tangent plane
+    let gap = |rho: f64| s * ((rf * rf - rho * rho).sqrt() - rf) - (rp - c - (rp * rp - rho * rho).sqrt());
+    // on a convex end the sphere leaves the face inside the rim: where the two cross
+    let edge = if gap(r) >= 0.0 {
+        r
+    } else {
+        let (mut lo, mut hi) = (0.0, r);
+        for _ in 0..200 {
+            let mid = 0.5 * (lo + hi);
+            if gap(mid) > 0.0 { lo = mid } else { hi = mid }
+        }
+        lo
+    };
+    // ∫ 2πρ (rp - c - √(rp² - ρ²)) dρ from 0 to edge, the cap's heights
+    let cap = PI * (rp - c) * edge * edge - 2.0 * PI / 3.0 * (rp.powi(3) - (rp * rp - edge * edge).powf(1.5));
+    sag_volume(rf, s, 0.0, edge) - cap
+}
+
+/// The dished looks on the pressed dome: [`SpotLook::Dent`]'s three zones on the convex top and
+/// on the concave underside are each the closed-form solid between the face and the flat look's
+/// sphere placed at the point, each outside its sheet; [`SpotLook::MarksPinConcaveEnds`]' pin is
+/// the solid between the outer spheres within its radius less what each end's sphere takes (on
+/// the convex top it leaves the face inside the rim, on the concave underside it cuts the pin's
+/// wall down to the rim).
+#[test]
+fn on_a_dome_the_dished_looks_are_their_closed_form() {
+    let lower = dome(50.0, 51.5, 0.5);
+    let upper = dome(51.5, 52.5, 0.5);
+    let both: &[&Body] = &[&lower, &upper];
+    let dir = radial(0.25, 1.0);
+    let (face, p) = first_hit(&upper, dir.map(|v| 60.0 * v), dir.map(|v| -v));
+    let site = spot_site_curved(both, 1, face, p, D).unwrap();
+    // the dent's dish: 0.04 d high at the rim, 0.004 d in the middle
+    let (rim, middle) = (0.04 * D, 0.004 * D);
+    let radii = [0.0, 0.55 * D / 2.0, D / 2.0, 1.05 * D / 2.0];
+    let dent = spot_weld_on(both, &site, D, SpotLook::Dent.style()).unwrap();
+    assert_eq!(dent.len(), 6);
+    for (i, piece) in dent.iter().enumerate() {
+        // the first sheet is the picked one: its outer face (`Lower`) is the convex top
+        let (rf, s, sheet) = match piece.side {
+            SpotSide::Lower => (52.5, 1.0, &upper),
+            SpotSide::Upper => (50.0, -1.0, &lower),
+            SpotSide::Through => panic!("no pin in this look"),
+        };
+        let z = i % 3;
+        let (a, b) = (radii[z], radii[z + 1]);
+        close(volume(&piece.body), dish_zone(a, b, rim, middle, radii[3]) - sag_volume(rf, s, a, b), "dome dished zone");
+        assert!(boolean(&piece.body, sheet, BoolOp::Intersect).unwrap().is_none(), "dished mark {i} inside its sheet");
+        check(&piece.body, "dome dished zone");
+    }
+    let pinned = spot_weld_on(both, &site, D, SpotLook::MarksPinConcaveEnds.style()).unwrap();
+    let pin: Vec<_> = pinned.iter().filter(|x| x.zone == SpotZone::Inside).collect();
+    assert_eq!((pinned.len(), pin.len()), (7, 1));
+    // the pin's ends: the convex top in the picked sheet (1.0 thick), the concave underside in the other (1.5)
+    let r = D / 2.0;
+    let want = sphere_disc(50.0, 52.5, r) - dished_end(52.5, 1.0, r, 0.3 * 1.0) - dished_end(50.0, -1.0, r, 0.3 * 1.5);
+    close(volume(&pin[0].body), want, "dome pin with dished ends");
+    check(&pin[0].body, "dome pin with dished ends");
+}
+
+/// Dished marks on the inside of a small pipe (R 2): the face curves up into the dish's sphere,
+/// so the marks would dip under it; the diameter named clears and builds.
+#[test]
+fn dished_marks_a_concave_face_curves_into_are_refused_with_a_diameter_that_builds() {
+    let lower = shell(2.0, 2.8, 2.5);
+    let upper = shell(2.8, 3.6, 2.5);
+    let both: &[&Body] = &[&lower, &upper];
+    let dir = [1.25_f64.cos(), 1.25_f64.sin(), 0.0];
+    let (face, p) = first_hit(&lower, [0.0; 3], dir);
+    let d = 1.2;
+    let site = spot_site_curved(both, 0, face, p, d).unwrap();
+    let got = spot_weld_on(both, &site, d, SpotLook::Dent.style());
+    let Err(SpotRefusal::DishUnderFace { sheet: 0, diameter, fits, .. }) = got else {
+        panic!("{got:?}");
+    };
+    assert_eq!(diameter, d);
+    let fits = fits.expect("a smaller dish clears the face");
+    assert!(fits < d, "fits {fits}");
+    let site = spot_site_curved(both, 0, face, p, fits).unwrap();
+    let marks = spot_weld_on(both, &site, fits, SpotLook::Dent.style()).unwrap();
+    assert_eq!(marks.len(), 6);
+    for piece in &marks {
+        let sheet = if piece.side == SpotSide::Lower { &lower } else { &upper };
+        assert!(boolean(&piece.body, sheet, BoolOp::Intersect).unwrap().is_none(), "dished mark inside its sheet");
+    }
+}
+
+/// Near the dome's rim the edges lie closer to the spot's line than half the diameter: refused
+/// with twice the distance from the line to the nearest rim (on the R 50 face, 50 sin 0.03), and a
+/// spot just under it fits.
+#[test]
+fn a_spot_near_a_dome_s_rim_is_refused_with_the_distance_to_the_line() {
+    let lower = dome(50.0, 51.5, 0.5);
+    let upper = dome(51.5, 52.5, 0.5);
+    let both: &[&Body] = &[&lower, &upper];
+    let dir = radial(0.47, 1.0);
+    let (face, p) = first_hit(&upper, dir.map(|v| 60.0 * v), dir.map(|v| -v));
+    let got = spot_site_curved(both, 1, face, p, D);
+    let Err(SpotRefusal::PastFaceEdge { diameter, fits, .. }) = got else {
+        panic!("{got:?}");
+    };
+    assert_eq!(diameter, D);
+    let want = 2.0 * 50.0 * 0.03_f64.sin();
+    assert!((fits - want).abs() < 1e-6, "fits {fits} != {want}");
+    assert!(spot_site_curved(both, 1, face, p, 0.99 * want).is_ok());
+}
+
+/// A sheet whose top curls over into a ledge beside the spot (one B-spline face): within the
+/// footprint the face turns away from the line, so it is not single-valued there; a fit, when the
+/// search names one, is a site that holds.
+#[test]
+fn a_face_curling_over_within_the_footprint_is_not_single_valued() {
+    let lower = block([-30.0, -20.0, -1.0], [60.0, 40.0, 1.0]);
+    let top = solidcraft_kernel::profiles::ProfileCurve::Nurbs {
+        degree: 3,
+        points: [(-30.0, 1.0), (-10.0, 1.0), (1.0, 1.0), (3.0, 1.0), (3.0, 4.0), (0.0, 4.0), (1.0, 5.5), (30.0, 5.5)]
+            .iter()
+            .map(|&(x, z)| [x, -20.0, z, 1.0])
+            .collect(),
+        knots: vec![0.0, 0.0, 0.0, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.0, 1.0, 1.0],
+    };
+    let profile = [
+        pline([30.0, -20.0, 0.0], [-30.0, -20.0, 0.0]),
+        pline([-30.0, -20.0, 0.0], [-30.0, -20.0, 1.0]),
+        top,
+        pline([30.0, -20.0, 5.5], [30.0, -20.0, 0.0]),
+    ];
+    let upper = solidcraft_kernel::profiles::extrude_curves(&profile, [0.0, 1.0, 0.0], 40.0, true).unwrap();
+    let both: &[&Body] = &[&lower, &upper];
+    let p = [0.0, 0.0, -1.0];
+    let face = face_at(&lower, p);
+    let got = spot_site_curved(both, 0, face, p, D);
+    let Err(SpotRefusal::FaceNotSingleValued { sheet: 1, diameter, fits, .. }) = got else {
+        panic!("{got:?}");
+    };
+    assert_eq!(diameter, D);
+    if let Some(fits) = fits {
+        assert!(fits < D, "fits {fits}");
+        assert!(spot_site_curved(both, 0, face, p, fits).is_ok(), "fits {fits}");
+    }
+}
+
+/// Marks on the inside of a small pipe (R 2), thicker than its radius: the offset folds; the
+/// diameter named builds there.
+#[test]
+fn marks_thicker_than_a_concave_face_curves_are_refused_with_a_diameter_that_builds() {
+    let lower = shell(2.0, 2.8, 2.5);
+    let upper = shell(2.8, 3.6, 2.5);
+    let both: &[&Body] = &[&lower, &upper];
+    let dir = [1.25_f64.cos(), 1.25_f64.sin(), 0.0];
+    let (face, p) = first_hit(&lower, [0.0; 3], dir);
+    let d = 1.2;
+    let site = spot_site_curved(both, 0, face, p, d).unwrap();
+    // marks 2 d thick: 2.4 off the R 2 face, towards its axis
+    let style = SpotStyle { marks: Some(SpotMarks { top: MarkTop::Flat { thickness: 2.0 }, ..MARKS }), ..NONE };
+    let got = spot_weld_on(both, &site, d, style);
+    let Err(SpotRefusal::OffsetFolds { sheet: 0, diameter, fits, .. }) = got else {
+        panic!("{got:?}");
+    };
+    assert_eq!(diameter, d);
+    assert!(fits < d && fits > 0.5, "fits {fits}");
+    let site = spot_site_curved(both, 0, face, p, fits).unwrap();
+    assert_eq!(spot_weld_on(both, &site, fits, style).unwrap().len(), 6);
+}

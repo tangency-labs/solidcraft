@@ -750,6 +750,17 @@ pub enum KernelError {
     /// A dome the face or the height cannot take.
     #[error("the operation failed: {0}")]
     Dome(#[from] DomeRefusal),
+    /// An offset (`op`: a thicken, a shell, an offset) whose wall is thicker than a face curves,
+    /// so the face's offset would fold: SMLib's refusal from solidcore's one construction, with the
+    /// largest wall that works where the kernel names one. The same words as an invalid input.
+    #[error("invalid input: {}", fold_words(.op, .largest))]
+    WallFolds { op: String, largest: Option<f64> },
+}
+
+/// The words of [`KernelError::WallFolds`] after "invalid input: ".
+pub(crate) fn fold_words(op: &str, largest: &Option<f64>) -> String {
+    let largest = largest.map(|w| format!("; the largest wall that works is {} mm", blend::trimmed_mm(w))).unwrap_or_default();
+    format!("{op}: the wall is thicker than a face curves, so the face's offset would fold{largest}")
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;

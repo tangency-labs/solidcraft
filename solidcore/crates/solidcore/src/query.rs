@@ -17,6 +17,7 @@ pub mod edge_turn;
 #[cfg(test)]
 pub(crate) mod exact;
 pub mod face;
+pub mod face_normal_angle;
 mod face_surface;
 pub mod faces_continue;
 pub mod flush_contact;

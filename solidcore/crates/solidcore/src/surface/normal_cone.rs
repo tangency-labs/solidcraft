@@ -11,6 +11,7 @@
 //! | Rust                               | Kind                                          |
 //! |------------------------------------|-----------------------------------------------|
 //! | [`Surface::normal_cone_in_ball`]   | plane, cylinder, cone, sphere, ring torus     |
+//! | `NormalCone::angle_interval` (crate) | the normals' angles to a direction            |
 //! | [`intersection_reach`]             | a curve with a hull (`curve/proximity.rs`)    |
 //! | [`crossing_line_in_ball`]          | the two surfaces' crossing over a ball        |
 //!
@@ -37,6 +38,13 @@
 //! `e = gamma_16 (|m| + |o| + |R|)`, added to the ball and taken off the distance it is
 //! divided by, and the angle grows by `gamma_8` relative and absolute.
 //!
+//! **The normals' angles to a direction.** In one sense of the cone's axis `a` (the nappe a
+//! normal at a point inside the ball lies in: the cone is a quarter turn or narrower, so a
+//! continuous normal field stays in one), every normal is within the half angle `h` of `a`,
+//! so its angle to a unit `d` lies within `h` of the angle `theta` between `a` and `d`
+//! (the triangle inequality on the sphere): `[theta - h, theta + h]` within `[0, pi]`, with
+//! `theta` rounded down and up by `gamma_8` relative and absolute.
+//!
 //! **The angle.** Over a ball, the two surfaces cross at no less than the angle between
 //! the two cones' axes (as lines) less both half angles.
 //!
@@ -56,6 +64,7 @@
 
 use crate::curve::curve::Curve;
 use crate::error::Result;
+use crate::geom::certified::above;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::vector3d::Vec3;
 use crate::kernel::Kernel;
@@ -86,6 +95,32 @@ pub(crate) struct NormalCone {
     pub(crate) axis: Vec3,
     /// Its half angle in radians, rounding included; below a quarter turn.
     pub(crate) half_angle: f64,
+}
+
+impl NormalCone {
+    /// A proved interval `[lo, hi]` (radians, within `0..=pi`) of the angle between the unit
+    /// `d` and every normal in the nappe of the cone that holds `toward`, a normal of the same
+    /// field at a point inside the ball (module docs); `None` where `toward` decides no nappe
+    /// (square to the axis, or not finite).
+    pub(crate) fn angle_interval(&self, toward: Vec3, d: Vec3) -> Option<[f64; 2]> {
+        let sense = self.axis.dot(toward);
+        if !above(sense.abs(), 0.0) {
+            return None;
+        }
+        let a = if sense < 0.0 {
+            self.axis * -1.0
+        } else {
+            self.axis
+        };
+        let theta = det::atan2(a.cross(d).length(), a.dot(d));
+        if !theta.is_finite() {
+            return None;
+        }
+        let pi = std::f64::consts::PI;
+        let lo = theta * (1.0 - gamma(8)) - gamma(8) - self.half_angle;
+        let hi = theta * (1.0 + gamma(8)) + gamma(8) + self.half_angle;
+        Some([lo.max(0.0), hi.min(pi)])
+    }
 }
 
 /// The angle within which every point of a ball of radius `rho` is seen from a point at

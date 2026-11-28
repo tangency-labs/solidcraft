@@ -1422,6 +1422,131 @@ fn a_body_of_unknown_naming_is_refused_by_the_check() {
     assert!(b.check(solidcore_ops::check::CheckLevel::All).is_ok());
 }
 
+/// The proved normal angle interval, each against its closed form:
+/// - a box's top: `[0, 0]` from `+z`, `pi / 2` from `+x`, `pi` from `-z`;
+/// - the convex side of a strip of a radius-40 cylinder across `y` in `[-10, 10]`: from
+///   `+x` its normals turn up to `asin(10 / 40)`, so the interval starts at 0 and ends at or
+///   past that, within 0.03 (whole or split at the seam);
+/// - the concave side of the same strip (the box less the cylinder), whose outward normals
+///   point back at the axis: from `+x` the interval ends at pi and starts at or below
+///   `pi - asin(10 / 40)`, within 0.03;
+/// - a cap of a radius-5 sphere (`|y|, |z| <= 1`): from `+x` its normals turn up to
+///   `acos(sqrt(23) / 5)` at its corners, the end within 0.06 of it (whole, or split in two
+///   at the sphere's seam, each half bounded over its own wider ball);
+/// - a whole tube and a whole sphere prove nothing; a bad index or direction is refused.
+#[test]
+fn a_face_normal_angle_interval_holds_every_normal_s_angle() {
+    all_fixes();
+    let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+    let (_, order) = b.to_record().unwrap();
+    let top = (0..order.faces.len())
+        .find(|&f| b.face_plane_normal(&order, f).unwrap().unwrap().value[2] > 0.99)
+        .unwrap();
+    let at = |d: [f64; 3]| {
+        b.face_normal_angle_interval(&order, top, d)
+            .unwrap()
+            .unwrap()
+    };
+    let [lo, hi] = at([0.0, 0.0, 2.0]);
+    assert!(lo <= 0.0 && (0.0..=1e-9).contains(&hi), "{lo} {hi}");
+    let [lo, hi] = at([1.0, 0.0, 0.0]);
+    assert!(lo <= PI / 2.0 && near(lo, PI / 2.0, 1e-9), "{lo}");
+    assert!(hi >= PI / 2.0 && near(hi, PI / 2.0, 1e-9), "{hi}");
+    let [lo, hi] = at([0.0, 0.0, -1.0]);
+    assert!(near(lo, PI, 1e-9) && hi >= PI, "{lo} {hi}");
+    assert_eq!(
+        b.face_normal_angle_interval(&order, top, [0.0; 3]).unwrap(),
+        None
+    );
+    assert!(matches!(
+        b.face_normal_angle_interval(&order, top, [f64::NAN, 0.0, 1.0]),
+        Err(Error::Argument)
+    ));
+    assert!(matches!(
+        b.face_normal_angle_interval(&order, order.faces.len(), [0.0, 0.0, 1.0]),
+        Err(Error::Argument)
+    ));
+
+    // asin(10 / 40) and acos(sqrt(23) / 5), written out: ops tests compute no geometry
+    let strip_turn = 0.252_680_255_142_078_65;
+    let cap_turn = 0.286_756_552_211_548_67;
+    let curved = |body: &Body| -> Vec<[f64; 2]> {
+        let (_, order) = body.to_record().unwrap();
+        (0..order.faces.len())
+            .filter(|&f| body.face_plane_normal(&order, f).unwrap().is_none())
+            .map(|f| {
+                body.face_normal_angle_interval(&order, f, [1.0, 0.0, 0.0])
+                    .unwrap()
+                    .unwrap()
+            })
+            .collect()
+    };
+    let block = || make_box([30.0, -10.0, -1.0], [20.0, 20.0, 4.0]).unwrap();
+    let tube = || make_cylinder([0.0; 3], 40.0, 2.0).unwrap();
+    let convex = solidcore_ops::boolean::boolean(
+        tube(),
+        block(),
+        solidcore_ops::boolean::BooleanOp::Intersect,
+    )
+    .unwrap()
+    .unwrap();
+    let got = curved(&convex);
+    assert!(!got.is_empty());
+    let hi = got.iter().fold(0.0_f64, |m, i| m.max(i[1]));
+    assert!(got.iter().all(|i| i[0] <= 0.0), "{got:?}");
+    assert!(
+        (strip_turn..strip_turn + 0.03).contains(&hi),
+        "{hi} against {strip_turn}"
+    );
+    let concave = solidcore_ops::boolean::boolean(
+        block(),
+        tube(),
+        solidcore_ops::boolean::BooleanOp::Subtract,
+    )
+    .unwrap()
+    .unwrap();
+    let got = curved(&concave);
+    assert!(!got.is_empty());
+    let lo = got.iter().fold(PI, |m, i| m.min(i[0]));
+    assert!(got.iter().all(|i| i[1] >= PI), "{got:?}");
+    assert!(
+        (PI - strip_turn - 0.03..=PI - strip_turn).contains(&lo),
+        "{lo} against {}",
+        PI - strip_turn
+    );
+    let cap = solidcore_ops::boolean::boolean(
+        make_sphere([0.0; 3], 5.0).unwrap(),
+        make_box([3.0, -1.0, -1.0], [5.0, 2.0, 2.0]).unwrap(),
+        solidcore_ops::boolean::BooleanOp::Intersect,
+    )
+    .unwrap()
+    .unwrap();
+    // the sphere's seam may split the cap in two, each half in a wider ball
+    let got = curved(&cap);
+    assert!((1..=2).contains(&got.len()), "{got:?}");
+    let hi = got.iter().fold(0.0_f64, |m, i| m.max(i[1]));
+    assert!(got.iter().all(|i| i[0] <= 0.0), "{got:?}");
+    assert!(
+        (cap_turn..cap_turn + 0.06).contains(&hi),
+        "{hi} against {cap_turn}"
+    );
+
+    for whole in [
+        make_cylinder([0.0; 3], 5.0, 20.0).unwrap(),
+        make_sphere([0.0; 3], 5.0).unwrap(),
+    ] {
+        let (_, order) = whole.to_record().unwrap();
+        for f in 0..order.faces.len() {
+            if whole.face_plane_normal(&order, f).unwrap().is_none() {
+                let got = whole
+                    .face_normal_angle_interval(&order, f, [1.0, 0.0, 0.0])
+                    .unwrap();
+                assert_eq!(got, None, "face {f}");
+            }
+        }
+    }
+}
+
 /// `Body::curve_face_gap_bound` bounds a spline and a conic on a face near 0, bounds a lifted
 /// spline at its shift, rejects out-of-range face indices, returns `None` for invalid interval
 /// or floor, and honours cancellation.

@@ -2582,6 +2582,26 @@ impl Body {
         }
     }
 
+    /// A proved interval `[lo, hi]` (radians, within `0..=pi`) of the angle between `direction`
+    /// and face `face_index`'s outward normal at every point of the face
+    /// ([`solidcore_ops::Body::face_normal_angle_interval`]; planes, cylinders, cones, spheres and
+    /// ring tori for now). An upper end below a quarter turn makes the face's projection along
+    /// `direction` a local diffeomorphism, not a one-to-one one. `None` where nothing is proved,
+    /// for a mesh body, an index out of range or a direction that is zero or not finite; `Err`
+    /// for the kernel's failure (a face with material on both sides).
+    pub fn face_normal_angle_interval(&self, face_index: usize, direction: Vec3) -> Result<Option<[f64; 2]>> {
+        let Some(form) = self.ops_body() else { return Ok(None) };
+        let (body, order) = &*form;
+        if face_index >= self.record.faces.len() {
+            return Ok(None);
+        }
+        match body.face_normal_angle_interval(order, face_index, [direction.x, direction.y, direction.z]) {
+            Ok(interval) => Ok(interval),
+            Err(solidcore_ops::Error::Argument) => Ok(None),
+            Err(e) => Err(KernelError::Failed(format!("face normal angle: {e}"))),
+        }
+    }
+
     /// The body's exact form for `what`, which a mesh body and a record the kernel refuses have
     /// none of.
     fn exact_form(&self, what: &str) -> Result<OpsForm> {
