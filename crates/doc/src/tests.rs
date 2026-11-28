@@ -4,6 +4,180 @@ use solidcraft_kernel::measure;
 use solidcraft_sketch::{ConstraintKind, Sketch};
 
 use crate::*;
+#[cfg(test)]
+mod weld_tests {
+    use super::*;
+    fn record() -> crate::weld::WeldRecord {
+        crate::weld::WeldRecord {
+            id: 42,
+            number: 1,
+            settings: crate::weld::WeldSettings::default(),
+            symbol: Some(solidcraft_geom::weld::Weld {
+                arrow_side: Some(solidcraft_geom::weld::WeldSide {
+                    kind: solidcraft_geom::weld::Kind::Fillet,
+                    size: Some(solidcraft_geom::weld::Size::Throat(3.)),
+                    length_mm: None,
+                    intermittent: None,
+                    contour: None,
+                }),
+                other_side: None,
+                all_round: false,
+                field: true,
+                tail: None,
+            }),
+        }
+    }
+    #[test]
+    fn weld_graphics_round_trip_and_old_design_default() {
+        let mut doc = Document::new("Welds");
+        doc.welds.push(record());
+        let text = serde_json::to_string(&doc).unwrap();
+        let back = crate::format::read(&text).unwrap();
+        assert_eq!(back.welds, doc.welds);
+        assert!(back.next_item_id().unwrap() > 42);
+        let old = crate::format::read(&serde_json::to_string(&Document::new("Old")).unwrap()).unwrap();
+        assert!(old.welds.is_empty());
+    }
+    #[test]
+    fn weld_butt_full_penetration_round_trip() {
+        let mut weld = record();
+        weld.settings.weld_type = "butt".into();
+        weld.settings.size = [("h".into(), 1.)].into_iter().collect();
+        weld.settings.face = "flat".into();
+        weld.settings.process = Some("135".into());
+        let symbol = weld.symbol.as_mut().unwrap();
+        symbol.tail = Some("135".into());
+        let side = symbol.arrow_side.as_mut().unwrap();
+        side.kind = solidcraft_geom::weld::Kind::SingleVButt;
+        side.size = None;
+        side.contour = Some(solidcraft_geom::weld::Contour::Flush);
+        let mut doc = Document::new("Butt");
+        doc.welds.push(weld);
+        let back = crate::format::read(&serde_json::to_string(&doc).unwrap()).unwrap();
+        assert_eq!(back.welds, doc.welds);
+        assert!(back.welds[0].settings.density.is_none());
+    }
+    #[test]
+    fn weld_settings_validate_names_sizes_and_spans() {
+        use crate::weld::{WeldSettings, WeldSpans};
+        let settings = WeldSettings::default();
+        assert!(settings.validate().is_ok());
+        assert_eq!(settings.size.keys().map(String::as_str).collect::<Vec<_>>(), ["a"]);
+        for (field, value) in [
+            ("weld_type", "groove"),
+            ("process", "MAG"),
+            ("process", ""),
+            ("process", "1234"),
+            ("process", "１２"),
+            ("side", "left"),
+            ("ends", "round"),
+            ("spot_look", "unknown"),
+            ("reference_plane", "0"),
+            ("face", "unknown"),
+            ("symbol_standard", "jis"),
+            ("groove", "double_v"),
+            ("penetration", "unknown"),
+            ("root", "unknown"),
+            ("tack_mode", "unknown"),
+        ] {
+            let mut raw = serde_json::to_value(&settings).unwrap();
+            raw[field] = serde_json::json!(value);
+            let bad: WeldSettings = serde_json::from_value(raw).unwrap();
+            assert!(bad.validate().is_err(), "{field}={value}");
+        }
+        for typ in crate::weld::TYPES {
+            let mut settings = settings.clone();
+            settings.weld_type = (*typ).into();
+            for key in crate::weld::SIZE_KEYS {
+                settings.size = [((*key).into(), 1.)].into_iter().collect();
+                if *typ == "butt" {
+                    settings.penetration = if *key == "s" { "partial" } else { "full" }.into();
+                }
+                if *typ == "tack" {
+                    settings.size.insert("l".into(), 5.);
+                    settings.tack_mode = if *key == "n" { "count" } else { "pitch" }.into();
+                    if *key != "n" {
+                        settings.size.insert("e".into(), 40.);
+                    }
+                }
+                assert_eq!(settings.validate().is_ok(), crate::weld::size_keys(typ).contains(key), "{typ}/{key}");
+            }
+        }
+        for (count, length_mm, pitch_mm, valid) in [
+            (1, 1., 1., true),
+            (10000, 1., 2., true),
+            (0, 1., 2., false),
+            (10001, 1., 2., false),
+            (2, 0., 2., false),
+            (2, 1., -1., false),
+            (2, f64::NAN, 2., false),
+            (2, 1., f64::INFINITY, false),
+        ] {
+            let settings = WeldSettings { spans: Some(WeldSpans { count, length_mm, pitch_mm }), ..Default::default() };
+            assert_eq!(settings.validate().is_ok(), valid);
+        }
+    }
+    #[test]
+    fn weld_graphics_refuse_hostile_saved_records() {
+        let mut doc = Document::new("Welds");
+        doc.welds.push(record());
+        for (path, bad) in [
+            (vec!["id"], serde_json::json!(0)),
+            (vec!["number"], serde_json::json!(0)),
+            (vec!["settings", "weld_type"], serde_json::json!("unknown")),
+            (vec!["settings", "size", "a"], serde_json::json!(-1)),
+            (vec!["settings", "process"], serde_json::json!(7)),
+            (vec!["symbol", "arrow_side", "size", "mm"], serde_json::json!(0)),
+        ] {
+            let mut value = serde_json::to_value(&doc).unwrap();
+            let mut target = &mut value["welds"][0];
+            for key in path {
+                target = &mut target[key];
+            }
+            *target = bad;
+            assert!(crate::format::read(&value.to_string()).is_err());
+        }
+        let mut value = serde_json::to_value(&doc).unwrap();
+        value["welds"] = serde_json::json!([record(), record()]);
+        assert!(crate::format::read(&value.to_string()).is_err());
+    }
+
+    #[test]
+    fn weld_choices_and_new_sizes_round_trip_without_changing_legacy_defaults() {
+        use crate::weld::WeldSettings;
+        let legacy: WeldSettings = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(legacy.symbol_standard, "iso2553_2019_a");
+        assert_eq!((&*legacy.groove, &*legacy.penetration, &*legacy.root, &*legacy.tack_mode), ("v", "full", "as_welded", "pitch"));
+        for standard in crate::weld::SYMBOL_STANDARDS {
+            let mut r = record();
+            r.settings.symbol_standard = (*standard).into();
+            r.settings.root_gap = Some(0.);
+            r.settings.size.extend([("z1".into(), 4.), ("z2".into(), 6.), ("s".into(), 5.)]);
+            let back: crate::weld::WeldRecord = serde_json::from_value(serde_json::to_value(&r).unwrap()).unwrap();
+            assert_eq!(back, r);
+        }
+        for (mode, sizes) in [("pitch", vec![("l", 5.), ("e", 40.)]), ("count", vec![("l", 5.), ("n", 4.)]), ("points", vec![("l", 5.)])] {
+            let settings = WeldSettings {
+                weld_type: "tack".into(),
+                tack_mode: mode.into(),
+                size: sizes.into_iter().map(|(k, v)| (k.into(), v)).collect(),
+                ..Default::default()
+            };
+            settings.validate().unwrap();
+            let back: WeldSettings = serde_json::from_value(serde_json::to_value(&settings).unwrap()).unwrap();
+            assert_eq!(back, settings);
+        }
+        for n in [0., -1., 1.5, f64::NAN, f64::INFINITY] {
+            let settings = WeldSettings {
+                weld_type: "tack".into(),
+                tack_mode: "count".into(),
+                size: [("l".into(), 5.), ("n".into(), n)].into_iter().collect(),
+                ..Default::default()
+            };
+            assert!(settings.validate().is_err());
+        }
+    }
+}
 
 fn rel(a: f64, b: f64) -> f64 {
     (a - b).abs() / b.abs().max(1e-12)
@@ -92,6 +266,25 @@ fn component_lookup_refuses_duplicate_names_and_keeps_explicit_ids() {
     assert_eq!(named.resolve_component("Design").unwrap(), Some(0));
 }
 
+#[test]
+fn model_parameters_respect_the_document_limit() {
+    for named in [false, true] {
+        let mut doc = Document::new("At the limit");
+        doc.params = (0..MAX_PARAMS - 1)
+            .map(|i| Param { name: format!("p{i}"), expr: "1 mm".into(), unit: "mm".into(), comment: String::new(), model: false })
+            .collect();
+        let create = |doc: &mut Document, name: &str| {
+            if named { doc.new_named_model_param(name, "2 mm", "mm") } else { doc.new_model_param("2 mm", "mm") }
+        };
+        create(&mut doc, "dim").unwrap();
+        let before = doc.clone();
+        assert_eq!(doc.params.len(), MAX_PARAMS);
+        assert!(create(&mut doc, "other").unwrap_err().to_string().contains("too many parameters"));
+        assert_eq!(doc, before);
+        assert_eq!(Document::from_json(&doc.to_json()).unwrap().params.len(), MAX_PARAMS);
+    }
+}
+
 /// 40 x 30 rectangle with its width and height driven by `width` / d2.
 fn plate_doc() -> (Document, u64) {
     let mut doc = Document::new("plate");
@@ -106,9 +299,9 @@ fn plate_doc() -> (Document, u64) {
     sk.add_constraint(Horizontal { l: l[2] }, None).unwrap();
     sk.add_constraint(Vertical { l: l[1] }, None).unwrap();
     sk.add_constraint(Vertical { l: l[3] }, None).unwrap();
-    let d1 = doc.new_model_param("width", "mm");
+    let d1 = doc.new_model_param("width", "mm").unwrap();
     sk.add_constraint(Length { l: l[0], value: 40.0 }, Some(d1)).unwrap();
-    let d2 = doc.new_model_param("30 mm", "mm");
+    let d2 = doc.new_model_param("30 mm", "mm").unwrap();
     sk.add_constraint(Length { l: l[1], value: 30.0 }, Some(d2)).unwrap();
     let s = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
     doc.add_feature(
@@ -137,6 +330,9 @@ fn plate_doc() -> (Document, u64) {
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
+                to_ref: None,
+                from_ref: None,
+                extend_to_face: false,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -250,6 +446,9 @@ fn an_outline_closed_by_point_on_curve_tangent_joints_extrudes() {
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
+                to_ref: None,
+                from_ref: None,
+                extend_to_face: false,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -771,6 +970,133 @@ fn a_pattern_reads_the_bodies_its_source_cuts() {
     doc.set_param("w", "4 mm", None, None).unwrap();
     m.evaluate(&doc);
     assert_eq!(summary(&m.state()), from_scratch(&doc));
+}
+
+/// The cap the pattern tests share: a disc with a conical hollow in its top, a bore through it
+/// clear of the hollow, a post in the hollow up to the hollow's wall joined to the disc, and a
+/// circular pattern that holds the bore and the post. The post's own join takes the face its To
+/// Object points at, so a copy of it has to be built where the post was built (#14305).
+fn cap_with_a_pattern(doc: &mut Document, component: u64) {
+    // A disc with a conical hollow in its top.
+    add_in(
+        doc,
+        component,
+        "Body1",
+        serde_json::json!({"type": "cylinder", "base": ["0", "0", "0"], "axis": [0.0, 0.0, 1.0], "radius": "20", "height": "20", "operation": "new_body"}),
+    );
+    add_in(
+        doc,
+        component,
+        "Hollow",
+        serde_json::json!({"type": "cone", "base": ["0", "0", "20"], "axis": [0.0, 0.0, -1.0], "radius": "5", "top_radius": "0", "height": "10", "operation": "cut"}),
+    );
+    // A bore through the disc, clear of the hollow.
+    let mut sk = Sketch::new();
+    sk.add_circle(Vec2::new(15.0, 0.0), 1.0, None, None).unwrap();
+    let bore_sketch =
+        doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, Some("Bore sketch")).unwrap();
+    add_in(
+        doc,
+        component,
+        "Bore",
+        serde_json::json!({"type": "extrude", "sketch": bore_sketch, "profiles": {"type": "all"}, "extent": {"distance": "30", "through_all": true}, "operation": "cut"}),
+    );
+    // A post in the hollow, up to the hollow's conical wall, joined to the disc.
+    let mut sk = Sketch::new();
+    sk.add_circle(Vec2::new(3.0, 0.0), 0.6, None, None).unwrap();
+    let post_sketch = doc
+        .add_feature(
+            FeatureKind::Sketch {
+                plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "18".into() },
+                sketch: sk,
+            },
+            Some("Post sketch"),
+        )
+        .unwrap();
+    add_in(
+        doc,
+        component,
+        "Post",
+        serde_json::json!({"type": "extrude", "sketch": post_sketch, "profiles": {"type": "all"}, "extent": {"convention": "total_distance", "direction": "negative", "distance": "4", "to": [3.0, 0.0, 14.0]}, "operation": "join", "targets": ["Body1"]}),
+    );
+    for f in doc.features.iter_mut().filter(|f| f.name == "Body1") {
+        f.body_names = vec!["Body1".into()];
+    }
+    let bore = doc.find_feature("Bore").map_or(0, |f| f.id);
+    let post = doc.find_feature("Post").map_or(0, |f| f.id);
+    add_in(
+        doc,
+        component,
+        "Pattern",
+        serde_json::json!({"type": "pattern", "features": [bore, post], "pattern": {"type": "circular", "origin": [0.0, 0.0, 0.0], "axis": [0.0, 0.0, 1.0], "count": "4", "angle": "360 deg"}}),
+    );
+}
+
+/// The cap's pattern: the post stands at radius 3 and the bore is cut at radius 15, each at the
+/// four places a circular pattern round the Z axis puts them. The post is read in the hollow it
+/// stands in (17 mm above the base) and the bore in the disc it goes through (10 mm above it).
+fn assert_pattern_posts_and_bores(body: &crate::kernel::Body) {
+    for (x, y) in [(3.0, 0.0), (0.0, 3.0), (-3.0, 0.0), (0.0, -3.0)] {
+        assert!(body.contains(Vec3::new(x, y, 17.0)), "the post stands at ({x}, {y}, 17)");
+    }
+    for (x, y) in [(15.0, 0.0), (0.0, 15.0), (-15.0, 0.0), (0.0, -15.0)] {
+        assert!(!body.contains(Vec3::new(x, y, 10.0)), "the bore is cut at ({x}, {y}, 10)");
+    }
+}
+
+/// A pattern that holds several features builds with all of them (#14305): the bore it holds is
+/// cut at each of its copies, and the post it holds stands at each of its copies. The copy of a
+/// feature that points at a face with its To Object is built where the feature was built, so the
+/// face that the feature's own join took is still there and the copy is that feature's own tool,
+/// moved.
+#[test]
+fn a_pattern_that_holds_several_features_builds_with_all_of_them() {
+    let mut doc = Document::new("cap with a pattern of several features");
+    cap_with_a_pattern(&mut doc, 0);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    assert_eq!(summary(&m.state()), from_scratch(&doc));
+    // One body: the disc with the hollow in it, the four bores the pattern cut and the four
+    // posts it added.
+    let st = m.state();
+    assert_eq!(st.bodies.len(), 1);
+    // The post stands at each of the four places the pattern puts it and the bore is cut at each
+    // of its four places: a pattern that copies the bores alone leaves the posts out.
+    assert_pattern_posts_and_bores(&st.bodies[0].body);
+}
+
+/// The same pattern in a document with two components: a cold rebuild prefetches each component's
+/// chain in parallel, and a pattern's copies are built against the model as it was before the
+/// feature they copy ran, there as in the sequential loop (#14305).
+///
+/// The prefetch runs here (the document has two components and the evaluation is cold), and it
+/// stops before the pattern: a pattern whose source points at a face with its To Object reads
+/// bodies it cannot name, so it is no relative change and the parallel chain does not take it
+/// (`Feature::reads` in `crates/doc/src/eval.rs`). The sequential loop evaluates the pattern,
+/// against the states its copies are built on, and gives the model the user sees.
+#[test]
+fn a_pattern_in_a_component_of_many_builds_with_all_of_its_features() {
+    let mut doc = Document::new("two components with a pattern of several features");
+    let cap = doc.add_component(Some("Cap"), 0).unwrap();
+    let other = doc.add_component(Some("Other"), 0).unwrap();
+    cap_with_a_pattern(&mut doc, cap);
+    // A second component, so the document has more than one and the prefetch runs.
+    add_in(
+        &mut doc,
+        other,
+        "Block",
+        serde_json::json!({"type": "box", "corner": ["100", "0", "0"], "length": "10", "width": "10", "height": "10", "operation": "new_body"}),
+    );
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    // The same model as an evaluation without the prefetch gives.
+    assert_eq!(summary(&m.state()), from_scratch(&doc));
+    let st = m.state();
+    assert_eq!(st.bodies.len(), 2);
+    // The same posts and bores as in a document with one component: the pattern copies them all.
+    assert_pattern_posts_and_bores(&st.body("Body1").unwrap().body);
 }
 
 /// A cut of several bodies cuts again only those that changed: the rod, which `w` does not
@@ -1821,6 +2147,9 @@ fn box_fillet_cut_timeline() {
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
+                to_ref: None,
+                from_ref: None,
+                extend_to_face: false,
             },
             operation: Operation::Cut,
             targets: vec![],
@@ -1856,6 +2185,7 @@ fn errors_are_reported_not_fatal() {
             angle2: None,
             symmetric: false,
             convention: Default::default(),
+            join_profile_arcs: false,
             to: None,
         },
         None,
@@ -2164,6 +2494,43 @@ fn copy_lineage_resolves_seed_material_and_respects_overrides() {
     doc.materials.insert("B".into(), "Steel".into());
     doc.materials.insert("A (2)".into(), DEFAULT_MATERIAL.into());
     assert_eq!(doc.body_material("A (2)"), DEFAULT_MATERIAL);
+
+    // Combined Mirror: single-seed unmerged lump inherits its seed; multi-seed unmerged lumps
+    // inherit unanimously when every seed shares the same material.
+    let single_mir_id = doc
+        .add_feature(
+            FeatureKind::Mirror {
+                features: Vec::new(),
+                plane: PlaneRef::Origin { name: "YZ".into() },
+                bodies: vec!["A".into()],
+                combine: true,
+                placements: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(single_mir_id).unwrap().body_names = vec!["A_mir".into()];
+    assert_eq!(doc.copy_seed_body("A_mir"), Some("A"));
+    assert_eq!(doc.body_material("A_mir"), "Steel");
+
+    let multi_mir_id = doc
+        .add_feature(
+            FeatureKind::Mirror {
+                features: Vec::new(),
+                plane: PlaneRef::Origin { name: "XZ".into() },
+                bodies: vec!["A".into(), "B".into()],
+                combine: true,
+                placements: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(multi_mir_id).unwrap().body_names = vec!["AB_mir".into()];
+    assert_eq!(doc.copy_seed_body("AB_mir"), None);
+    assert!(doc.has_copy_material_lineage("AB_mir"));
+    assert_eq!(doc.body_material("AB_mir"), "Steel");
+    doc.materials.insert("B".into(), "Brass".into());
+    assert_eq!(doc.body_material("AB_mir"), DEFAULT_MATERIAL);
 }
 
 #[test]
@@ -2902,6 +3269,9 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
+                to_ref: None,
+                from_ref: None,
+                extend_to_face: false,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -3414,6 +3784,9 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
             from_level: false,
             picked_placements: Vec::new(),
             one_sided_direction: None,
+            to_ref: None,
+            from_ref: None,
+            extend_to_face: false,
         },
         operation: Operation::NewBody,
         targets: vec![],
@@ -3506,6 +3879,39 @@ fn a_sketch_on_the_construction_plane_of_another_component_lies_on_it() {
     close(crate::apply_vector(&m, solved.plane.normal()), want.normal(), "normal");
     let end = solved.plane.origin + solved.plane.x * 10.0 + solved.plane.y * 5.0;
     close(crate::apply_point(&m, end), want.origin + want.x * 10.0 + want.y * 5.0, "line end");
+}
+
+/// An extrude To Object on the construction plane of another component ends where that
+/// component puts the plane, not where the plane's numbers fall in the extrude's own, placed
+/// component (#8527, as #11734 for sketches).
+#[test]
+fn an_extrude_to_the_construction_plane_of_another_component_ends_on_it() {
+    let (mut doc, sketch) = plate_doc();
+    let owner = doc.add_component(Some("Owner"), 0).unwrap();
+    let part = doc.add_component(Some("Part"), 0).unwrap();
+    doc.occurrences.iter_mut().find(|o| o.component == part).unwrap().transform = rigid(Vec3::new(0.0, 0.0, 10.0), Vec3::ZERO, Vec3::Z, 0.0);
+    let offset = PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "25 mm".into() };
+    let plane = doc.add_feature(FeatureKind::ConstructionPlane { plane: offset }, Some("Target")).unwrap();
+    doc.feature_mut(plane).unwrap().component = owner;
+    // The plane comes first in the timeline, then the sketch and the extrude of the part.
+    let at = doc.features.iter().position(|f| f.id == plane).unwrap();
+    let moved = doc.features.remove(at);
+    doc.features.insert(0, moved);
+    let extrude = doc.features.iter().find(|f| matches!(f.kind, FeatureKind::Extrude { .. })).unwrap().id;
+    doc.feature_mut(sketch).unwrap().component = part;
+    let f = doc.feature_mut(extrude).unwrap();
+    f.component = part;
+    let FeatureKind::Extrude { extent, .. } = &mut f.kind else { panic!("an extrude") };
+    extent.to = Some(crate::FacePick(Vec3::new(0.0, 0.0, 25.0)));
+    extent.to_ref =
+        Some(crate::ObjectRef(crate::construct::GeoRef::Plane { plane: PlaneRef::Construction { feature: plane.into(), placement: None } }));
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    // The part sits 10 mm up, so the plane at 25 mm is 15 mm above its sketch.
+    let body = &model.state().bodies[0];
+    assert!(rel(measure(&body.body).unwrap().volume, 1200.0 * 15.0) < 1e-9, "{}", measure(&body.body).unwrap().volume);
 }
 
 /// Freeze the persisted v6 face-role encoding independently of display-mesh fields and serde layout.
@@ -5091,6 +5497,9 @@ fn capture_position_20644_isolation_for_to_object_mirror_pattern_plane_and_joint
                     to_offset2: None,
                     picked_placements: Vec::new(),
                     one_sided_direction: None,
+                    to_ref: None,
+                    from_ref: None,
+                    extend_to_face: false,
                 },
                 operation: Operation::NewBody,
                 targets: Vec::new(),
@@ -5433,6 +5842,9 @@ fn extrude_start_offset_caps_are_named_consistently_across_rotations() {
                         from_level: false,
                         picked_placements: Vec::new(),
                         one_sided_direction: None,
+                        to_ref: None,
+                        from_ref: None,
+                        extend_to_face: false,
                     },
                     operation: Operation::NewBody,
                     targets: vec![],
@@ -5491,4 +5903,104 @@ fn asymmetric_profile_and_old_designs_preserve_face_names() {
     for (i, name) in names.iter().enumerate() {
         assert!(!name.is_empty(), "face {i} has valid name");
     }
+}
+
+/// #18815: a design with a failing feature still keeps a partial model cache for all valid
+/// upstream and independent features; reopening adopts those cached states, re-evaluates only
+/// the failing feature (`last_recomputed == 1`), and reproduces the exact error and final state.
+#[test]
+fn partial_model_cache_keeps_valid_features_around_an_error_and_reproduces_it() {
+    // Case 1: valid upstream -> failing middle feature -> valid independent downstream feature.
+    let mut doc = Document::new("Partial cache");
+    let upstream = boxed(&mut doc, 0, "Upstream", 0.0, &["UpstreamBody"]);
+    add_in(
+        &mut doc,
+        0,
+        "Broken",
+        serde_json::json!({
+            "type": "box",
+            "corner": [50.0, 0.0, 0.0],
+            "length": "0",
+            "width": "10",
+            "height": "10",
+            "operation": "new_body",
+        }),
+    );
+    let broken = doc.find_feature("Broken").unwrap().id;
+    let downstream = boxed(&mut doc, 0, "Downstream", 100.0, &["DownstreamBody"]);
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.result(upstream).unwrap().error.is_none());
+    assert!(model.result(broken).unwrap().error.is_some(), "Broken must fail evaluation");
+    assert!(model.result(downstream).unwrap().error.is_none());
+    assert_eq!(model.state().bodies.len(), 2);
+
+    let saved = model.saved(&doc).expect("valid features keep a partial model cache");
+    let features = saved.records["features"].as_array().unwrap();
+    assert!(features[0].get("state").is_some() && features[0].get("errored").is_none());
+    assert!(features[1].get("state").is_none() && features[1].get("errored") == Some(&serde_json::json!(true)));
+    assert!(features[2].get("state").is_some() && features[2].get("errored").is_none());
+    assert_eq!(saved.final_state().unwrap().bodies.len(), 2);
+
+    // Thinning also works on a partial cache that carries an errored feature.
+    let pieces: Vec<Vec<(usize, usize)>> = (0..saved.bodies.len()).map(|i| vec![(i, 1024)]).collect();
+    let (thinned, _, _) = saved.thinned(&pieces, 0).expect("thinning a partial cache succeeds");
+    assert_eq!(thinned.final_state().unwrap().bodies.len(), 2);
+
+    let adopted = Model::adopt(&doc, &saved).expect("partial cache adopts cleanly");
+    assert_eq!(adopted.last_recomputed, 1, "only the failing feature is re-evaluated on open");
+    assert_eq!(adopted.result(upstream).unwrap().ms, model.result(upstream).unwrap().ms);
+    assert_eq!(adopted.result(downstream).unwrap().ms, model.result(downstream).unwrap().ms);
+    assert_eq!(adopted.result(broken).unwrap().error, model.result(broken).unwrap().error);
+    same_as_opened(&adopted, &doc, "partial cache around a failing middle feature");
+
+    // Case 2: failing feature is the last feature in the timeline.
+    let mut tail_doc = Document::new("Tail error");
+    let base = boxed(&mut tail_doc, 0, "Base", 0.0, &["BaseBody"]);
+    add_in(
+        &mut tail_doc,
+        0,
+        "TailBroken",
+        serde_json::json!({
+            "type": "box",
+            "corner": [50.0, 0.0, 0.0],
+            "length": "0",
+            "width": "10",
+            "height": "10",
+            "operation": "new_body",
+        }),
+    );
+    let tail_broken = tail_doc.find_feature("TailBroken").unwrap().id;
+    let mut tail_model = Model::new();
+    tail_model.evaluate(&tail_doc);
+    let tail_saved = tail_model.saved(&tail_doc).expect("valid upstream feature keeps a partial cache");
+    assert_eq!(tail_saved.final_state().unwrap().bodies.len(), 1);
+    let tail_pieces: Vec<Vec<(usize, usize)>> = (0..tail_saved.bodies.len()).map(|i| vec![(i, 1024)]).collect();
+    let (tail_thin, _, _) = tail_saved.thinned(&tail_pieces, 0).expect("thinning a tail-error partial cache succeeds");
+    assert_eq!(tail_thin.final_state().unwrap().bodies.len(), 1);
+    let tail_adopted = Model::adopt(&tail_doc, &tail_saved).expect("tail-error partial cache adopts cleanly");
+    assert_eq!(tail_adopted.last_recomputed, 1, "only the failing tail feature is re-evaluated");
+    assert_eq!(tail_adopted.result(base).unwrap().ms, tail_model.result(base).unwrap().ms);
+    assert_eq!(tail_adopted.result(tail_broken).unwrap().error, tail_model.result(tail_broken).unwrap().error);
+    same_as_opened(&tail_adopted, &tail_doc, "partial cache before a failing tail feature");
+
+    // Case 3: when every non-skipped feature fails, no cache is saved.
+    let mut all_bad = Document::new("All failed");
+    add_in(
+        &mut all_bad,
+        0,
+        "OnlyBroken",
+        serde_json::json!({
+            "type": "box",
+            "corner": [0.0, 0.0, 0.0],
+            "length": "0",
+            "width": "10",
+            "height": "10",
+            "operation": "new_body",
+        }),
+    );
+    let mut all_bad_model = Model::new();
+    all_bad_model.evaluate(&all_bad);
+    assert!(all_bad_model.saved(&all_bad).is_none());
 }

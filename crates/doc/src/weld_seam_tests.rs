@@ -1,8 +1,8 @@
 //! Resistance seam welds: every zone of a band along a line, a line and an arc turning either way,
 //! a sharp corner (its notice and the rounded union), spots apart and overlapping, against their
-//! closed-form volumes; the kernel's check on every body, on a tilted seam too; the refusals; and
-//! the site of a seam drawn on stacks of boxes, with a notch the path passes and a joint off the
-//! face.
+//! closed-form volumes; the kernel's check on every body, on a tilted seam too; the refusals, an
+//! arc bulging past the size limit among them; and the site of a seam drawn on stacks of boxes,
+//! with a notch the path passes, an arc tighter than the seam and a joint off the face.
 
 use std::f64::consts::{FRAC_PI_2, PI};
 
@@ -171,7 +171,10 @@ fn bad_seams_are_refused_as_invalid_input() {
     assert!(bad(band(vec![to(0.0, 0.0)])));
     assert!(bad(band(vec![SeamPiece::Arc { center: [0.0, 10.0, 0.0], to: [12.0, 10.0, 0.0], turn: Turn::Left }])));
     assert!(bad(band(vec![SeamPiece::Arc { center: [0.0, 10.0, 0.0], to: [0.0, 0.0, 0.0], turn: Turn::Left }])));
-    assert!(bad(SeamWeld { start: [f64::NAN, 0.0, 0.0], ..ok }));
+    assert!(bad(SeamWeld { start: [f64::NAN, 0.0, 0.0], ..ok.clone() }));
+    // centre 5e8 out, but the long way round over the top reaches y = 1.01e9, past the size limit
+    let bulge = SeamPiece::Arc { center: [0.0, 5e8, 0.0], to: [1e8, 0.0, 0.0], turn: Turn::Right };
+    assert!(bad(SeamWeld { start: [-1e8, 0.0, 0.0], path: vec![bulge], ..ok }));
 }
 
 // ---- where a seam sits ----
@@ -246,6 +249,20 @@ fn a_path_passing_a_face_edge_is_refused_with_the_width_that_fits() {
     };
     assert_eq!(width, W);
     assert!((fits - 3.0).abs() < 1e-9, "fits {fits}");
+}
+
+/// An arc of radius 2 drawn on the top is tighter than the edge zone (2.625): refused at the site,
+/// as the build refuses it, with the same width that fits.
+#[test]
+fn a_site_refuses_an_arc_tighter_than_the_seam() {
+    let lower = sheet(0.0, 1.5);
+    let upper = sheet(1.5, 1.0);
+    let tight = SeamPiece::Arc { center: [0.0, 0.0, 2.5], to: [2.0, 0.0, 2.5], turn: Turn::Left };
+    let got = site(&[&lower, &upper], 1, [-2.0, 0.0, 2.5], &[tight]);
+    let Err(SeamRefusal::ArcTighterThanSeam { piece: 0, fits }) = got else {
+        panic!("{got:?}");
+    };
+    assert!((fits - 4.0 / 1.05).abs() < 1e-9, "{fits}");
 }
 
 /// A path whose end runs off the picked face is refused at that joint with the spot's reason.

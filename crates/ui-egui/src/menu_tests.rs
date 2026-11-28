@@ -406,11 +406,14 @@ fn isolate_on_body_and_component_menus_toggles_unisolate() {
     let kept = body(&app);
     let t = Target::Body { name: kept.clone() };
     // #3504: each entry shows its key.
-    assert!(context_menu::items(&app, &t).iter().any(|i| i.label == "Isolate" && i.shortcut == "Ctrl+I"));
+    assert!(context_menu::items(&app, &t).iter().any(|i| i.label == "Isolate" && i.shortcut == crate::ui_kit::chord_label("Ctrl+I")));
     act(&mut app, &t, "Isolate");
     assert!(!app.session.visibility.hidden_bodies.is_empty());
     let after = context_menu::items(&app, &t);
-    assert!(after.iter().any(|i| i.label == "Exit Isolation" && i.shortcut == "Ctrl+Shift+I"), "same menu offers Exit Isolation");
+    assert!(
+        after.iter().any(|i| i.label == "Exit Isolation" && i.shortcut == crate::ui_kit::chord_label("Ctrl+Shift+I")),
+        "same menu offers Exit Isolation"
+    );
     // On what is already all that shows, Isolate would change nothing: Exit Isolation alone.
     assert!(!after.iter().any(|i| i.label == "Isolate"), "only Exit Isolation on the isolated body");
     let other = app.session.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).find(|n| n != &kept).unwrap();
@@ -2288,6 +2291,117 @@ fn contribution_unresolvable_face_does_not_edit_the_body_creator() {
     assert!(find(&items, "Find in Browser").enabled, "the body is still known");
 }
 
+/// A face of `body` whose persistent name starts with `prefix`, picked at a point on it.
+fn pick_face(app: &SolveApp, body: &str, prefix: &str) -> solidcraft_engine::Sel {
+    let state = app.session.world_state().unwrap();
+    let b = state.body(body).unwrap();
+    let names = solidcraft_engine::doc::naming::face_names(b);
+    let index = names.iter().position(|n| n.starts_with(prefix)).unwrap_or_else(|| panic!("no `{prefix}` face in {names:?}"));
+    let mesh = b.mesh();
+    let point = mesh
+        .triangles
+        .iter()
+        .enumerate()
+        .find_map(|(i, t)| (mesh.tri_face.get(i).copied() == Some(index as u32)).then(|| mesh.tri(t)).flatten())
+        .map(|t| (t[0] + t[1] + t[2]) / 3.0)
+        .unwrap_or(Vec3::ZERO);
+    solidcraft_engine::Sel::Face { body: body.into(), index, point }
+}
+
+/// A body moved into a component keeps Edit Feature, Edit Profile Sketch and Find in Timeline on
+/// its faces, and the History lights the face's feature: the features stay in this design's
+/// timeline wherever the body sits now, also on a second placement of the component and after a
+/// rename (#23190).
+#[test]
+fn faces_of_a_body_moved_into_a_component_still_open_their_features() {
+    use solidcraft_engine::Sel;
+    for moved in ["root", "component.from_bodies", "component.move_bodies", "second placement", "renamed"] {
+        let mut app = SolveApp::new(Session::default(), Services::default());
+        app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+        app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
+        app.run("sketch.finish", json!({})).unwrap();
+        app.run("solid.extrude", json!({"sketch": "Base", "distance": 20, "name": "Block"})).unwrap();
+        let b = body(&app);
+        let id = |app: &SolveApp, name: &str| app.session.doc.features.iter().find(|f| f.name == name).unwrap().id;
+        let (sketch, block) = (id(&app, "Base"), id(&app, "Block"));
+        app.run("solid.fillet", json!({"edges": [[0, 0, 10]], "radius": 2})).unwrap();
+        let fillet = app.session.doc.features.last().unwrap().id;
+        let b = match moved {
+            "component.from_bodies" | "second placement" | "renamed" => {
+                let made = app.run("component.from_bodies", json!({"bodies": [b]})).unwrap();
+                if moved == "second placement" {
+                    let component = made["components"][0]["component"].clone();
+                    app.run("occurrence.copy", json!({"component": component, "translate": [0, 60, 0]})).unwrap();
+                    let state = app.session.world_state().unwrap();
+                    let copy = state.bodies.iter().find(|p| p.definition_name() == b && p.name != b).map(|p| p.name.clone());
+                    copy.unwrap_or_else(|| panic!("no second copy of {b}"))
+                } else if moved == "renamed" {
+                    app.run("body.rename", json!({"body": b, "name": "Renamed"})).unwrap();
+                    "Renamed".to_string()
+                } else {
+                    b
+                }
+            }
+            "component.move_bodies" => {
+                let made = app.run("component.create", json!({"name": "Holder"})).unwrap();
+                app.run(moved, json!({"bodies": [b], "component": made["component"]})).unwrap();
+                b
+            }
+            _ => b,
+        };
+        let state = app.session.world_state().unwrap();
+        let placed = state.body(&b).unwrap();
+        assert_eq!(app.session.doc.model_body_component(placed) == 0, moved == "root", "{moved}: the body's component");
+        for (prefix, feature, profile) in [(format!("F{fillet}:"), fillet, None), (format!("F{block}:"), block, Some(sketch))] {
+            app.session.selection = vec![pick_face(&app, &b, &prefix)];
+            let items = context_menu::items(&app, &Target::Viewport);
+            for label in ["Edit Feature", "Find in Timeline"] {
+                let item = find(&items, label);
+                assert!(item.enabled, "{moved}: {label} on {prefix}");
+                assert_eq!(item.params.as_ref().unwrap()["feature"], json!(feature), "{moved}: {label} on {prefix}");
+            }
+            if let Some(sketch) = profile {
+                let item = find(&items, "Edit Profile Sketch");
+                assert!(item.enabled, "{moved}: Edit Profile Sketch on {prefix}");
+                assert_eq!(item.params.as_ref().unwrap()["sketch"], json!(sketch), "{moved}");
+            }
+            assert_eq!(crate::timeline::picked_feature(&app), Some(feature), "{moved}: the History lights {prefix}'s feature");
+            act(&mut app, &Target::Viewport, "Find in Timeline");
+            assert_eq!(app.session.selection, vec![Sel::Feature { id: feature }], "{moved}");
+        }
+        // Last: the editor rolls the timeline back to the feature it edits.
+        app.session.selection = vec![pick_face(&app, &b, &format!("F{block}:"))];
+        act(&mut app, &Target::Viewport, "Edit Feature");
+        assert_eq!(app.dialog.as_ref().unwrap().editing.unwrap().0, block, "{moved}");
+    }
+}
+
+/// A face of an inserted design keeps its menu: Edit Feature and Find in Timeline act on the
+/// feature that placed the design, not on a feature of this design with the same number (#23190).
+#[test]
+fn faces_of_an_inserted_design_keep_their_menu() {
+    let mut h = crate::scenario::Harness::new();
+    let part = h.dir.join("part.solidcraft");
+    let mut source = Session::default();
+    source.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+    source.execute("solid.fillet", &json!({"edges": [[0, 0, 10]], "radius": 2})).unwrap();
+    source.execute("file.save", &json!({"path": part})).unwrap();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Plate"})).unwrap();
+    h.app.run("solid.fillet", json!({"edges": [[0, 0, 10]], "radius": 2})).unwrap();
+    h.app.run("component.from_bodies", json!({"bodies": ["Plate"]})).unwrap();
+    let inserted = h.app.run("component.insert_design", json!({"path": part})).unwrap();
+    let link = inserted["feature"].as_u64().unwrap();
+    let b = inserted["bodies"][0].as_str().unwrap().to_string();
+    let state = h.app.session.world_state().unwrap();
+    for name in solidcraft_engine::doc::naming::face_names(state.body(&b).unwrap()).iter() {
+        h.app.session.selection = vec![pick_face(&h.app, &b, name)];
+        let items = context_menu::items(&h.app, &Target::Viewport);
+        for label in ["Edit Feature", "Find in Timeline"] {
+            assert_eq!(find(&items, label).params.as_ref().unwrap()["feature"], json!(link), "{label} on {name}");
+        }
+    }
+}
+
 #[test]
 fn every_context_target_has_identified_icon_rows_including_submenus() {
     fn check(rows: &[Item]) {
@@ -2472,6 +2586,52 @@ fn mesh_export_from_a_selected_browser_body_takes_the_selected_bodies() {
             assert_eq!(dialog.inputs[0].items, bodies, "{label}: clicked {clicked}, selected {selected:?}");
         }
     }
+}
+
+#[test]
+fn component_export_names_are_opt_in_and_keep_existing_defaults() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.session.doc_mut().name = "Assembly".into();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "RootBody"})).unwrap();
+    let part = h.app.run("component.create", json!({"name": "Bracket", "activate": true})).unwrap();
+    let component = part["component"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "body_name": "PartBody"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+    let names = seen.clone();
+    h.app.services.pick_save = Some(Box::new(move |name, _| {
+        names.borrow_mut().push(name.to_string());
+        Box::pin(std::future::ready(None))
+    }));
+    let targets = [
+        Target::Component { id: component },
+        Target::Occurrence { path: h.app.session.doc.first_path(component) },
+        Target::Body { name: "PartBody".into() },
+        Target::Component { id: 0 },
+    ];
+    for target in &targets {
+        act(&mut h.app, target, "Export…");
+        h.frames(3);
+        h.settle();
+    }
+    let defaults = seen.borrow().clone();
+    assert_eq!(defaults[0], "PartBody.step");
+    assert_eq!(defaults[1], defaults[0]);
+    assert_eq!(defaults[2], defaults[0]);
+    h.app.preferences.export_name = "{component}".into();
+    seen.borrow_mut().clear();
+    for target in &targets {
+        act(&mut h.app, target, "Export…");
+        h.frames(3);
+        h.settle();
+    }
+    assert_eq!(*seen.borrow(), ["Bracket.step", "Bracket.step", defaults[2].as_str(), defaults[3].as_str()]);
+    h.app.preferences.export_name = "{body}".into();
+    act(&mut h.app, &targets[0], "Export…");
+    h.frames(3);
+    h.settle();
+    assert_eq!(seen.borrow().last().map(String::as_str), Some("PartBody.step"));
 }
 
 /// A selected browser body exports the *full* body selection, just as Save As Mesh and
@@ -2882,7 +3042,17 @@ mod browser_rows {
         right_click(&mut h, plate + half, true);
         assert!(h.app.viewport.context_menu.is_some());
         assert_eq!(h.app.menu.target, Target::Body { name: "Plate".into() });
-        right_click(&mut h, origin + half, true);
+        // The click goes to a part of the Origin row the open menu does not cover: the menu is
+        // placed to fit the window, and a long one reaches up over the rows above Plate.
+        let menu = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_context_menu"))).expect("the Plate menu");
+        // The row's handle is 120 pt into the row, so there is room left of a menu opened there.
+        let mut on_origin = origin + half;
+        let near = menu.expand(16.0);
+        if near.contains(on_origin) {
+            on_origin.x = near.left() - 8.0;
+        }
+        assert!(!near.contains(on_origin), "the Origin row is under the menu at {on_origin:?}: {menu:?}");
+        right_click(&mut h, on_origin, true);
         assert!(h.app.viewport.context_menu.is_some(), "a right-click on another row opens that row's menu");
         assert_eq!(h.app.menu.target, Target::Origin);
 
@@ -3048,6 +3218,8 @@ fn the_history_bar_feature_menu_is_reported_and_picked() {
     let mut h = crate::scenario::Harness::new();
     h.app.home.open = false;
     h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Blk"})).unwrap();
+    // A second feature, so the delete after the marker below takes more than the clicked one.
+    h.app.run("solid.box", json!({"corner": [40, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Spare"})).unwrap();
     h.frames(3);
     let (id, name) = (h.app.session.doc.features[0].id, h.app.session.doc.features[0].name.clone());
     let labels = |menu: &serde_json::Value| -> Vec<String> {
@@ -3104,7 +3276,46 @@ fn the_history_bar_feature_menu_is_reported_and_picked() {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     h.frames(2);
-    assert!(h.app.session.doc.feature(id).is_none(), "the features after the marker are deleted");
+    assert!(h.app.session.doc.features.is_empty(), "the features after the marker are deleted");
+}
+
+/// The ids of the "Delete N Features After History Marker" entries in a History bar feature's menu.
+fn delete_after_marker_entries(app: &SolveApp, id: u64) -> Vec<serde_json::Value> {
+    let items = crate::timeline::feature_items(app, id);
+    items.into_iter().filter(|item| item.id == "ui.deleteAfterMarker").map(|item| item.params.unwrap_or_default()).collect()
+}
+
+#[test]
+fn delete_after_marker_is_offered_only_when_it_deletes_more_than_the_clicked_feature() {
+    let mut app = crate::SolveApp::new(Session::default(), Services::default());
+    for (i, name) in ["Box1", "Box2", "Box3"].into_iter().enumerate() {
+        let corner = [i as f64 * 30.0, 0.0, 0.0];
+        app.run("solid.box", json!({"corner": corner, "length": 10, "width": 10, "height": 10, "body_name": name})).unwrap();
+    }
+    let ids: Vec<u64> = app.session.doc.features.iter().map(|f| f.id).collect();
+    let (box1, box2, box3) = (ids[0], ids[1], ids[2]);
+
+    // Only Box3 after the marker: Delete in its menu does the same, so no second entry (#23191).
+    app.run("timeline.roll_to", json!({"position": 2})).unwrap();
+    assert_eq!(delete_after_marker_entries(&app, box3), Vec::<serde_json::Value>::new());
+    // A feature before the marker does not offer it, as before: the entry would delete
+    // features other than the one the menu is for.
+    assert_eq!(delete_after_marker_entries(&app, box1), Vec::<serde_json::Value>::new());
+    assert_eq!(delete_after_marker_entries(&app, box2), Vec::<serde_json::Value>::new());
+
+    // Box2 and Box3 after the marker: both of them, from either one's menu, as before.
+    app.run("timeline.roll_to", json!({"position": 1})).unwrap();
+    for id in [box2, box3] {
+        assert_eq!(delete_after_marker_entries(&app, id), vec![json!({"features": [box2, box3]})]);
+    }
+    assert_eq!(delete_after_marker_entries(&app, box1), Vec::<serde_json::Value>::new());
+
+    // Several selected features: not offered, whatever lies after the marker.
+    app.session.selection = vec![solidcraft_engine::Sel::Feature { id: box2 }, solidcraft_engine::Sel::Feature { id: box3 }];
+    assert_eq!(delete_after_marker_entries(&app, box3), Vec::<serde_json::Value>::new());
+    app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+    app.session.selection = vec![solidcraft_engine::Sel::Feature { id: box1 }, solidcraft_engine::Sel::Feature { id: box3 }];
+    assert_eq!(delete_after_marker_entries(&app, box3), Vec::<serde_json::Value>::new());
 }
 
 #[test]

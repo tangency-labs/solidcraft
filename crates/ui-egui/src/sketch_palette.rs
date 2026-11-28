@@ -464,12 +464,15 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         _ => false,
     };
     let mut set: Option<(String, bool)> = None;
+    let selected_only = app.ui.constraint_glyphs_selected_only;
+    let mut toggle_selected_only = false;
     let open_view = app.ui.sketch_open_view;
     let mut chosen_open_view = None;
     let mut linetype = None;
     let mut construction = false;
     let mut look = false;
     let mut finish = false;
+    let mut cancel = false;
     let mut slice_changed = false;
     let mut tie = false;
     let mut start = None;
@@ -484,6 +487,10 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Preferences; kept for the next time the tool runs.
     let arc_snap = app.preferences.sketch_arc_tangent_snap;
     let mut arc_snap_clicked = false;
+    // Whether a shape's key starts the tool listed next to it rather than the one used last
+    // (#22247): a mode of the shape tools, so it is here and not in Preferences; kept.
+    let listed = app.preferences.shortcut_starts_listed_tool;
+    let mut listed_clicked = false;
     let has_curves = !selected_curves(app).is_empty();
     let selected_types = if has_curves { selected_linetypes(app) } else { std::array::from_fn(|i| mode(app) == i as u8) };
     // A construction line tool that takes a length has a line type of its own, which the Line
@@ -540,6 +547,15 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                     arc_snap_clicked =
                         crate::ui_kit::checkbox_row(ui, "arc_tangent_snap", solidcraft_ui_text::tr("ui.palette_arc_tangent_snap"), arc_snap);
                 }
+                // Only for a family whose tools a key starts.
+                if family.commands.iter().any(|id| crate::keymap::display_for(app, id).is_some()) {
+                    listed_clicked = crate::ui_kit::checkbox_row(
+                        ui,
+                        "shortcut_starts_listed_tool",
+                        solidcraft_ui_text::tr("ui.palette_shortcut_starts_listed_tool"),
+                        listed,
+                    );
+                }
                 section.inner
             });
             start = section.flatten();
@@ -586,6 +602,13 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             row_types.get(1).copied().unwrap_or(false),
         );
         crate::ui_kit::section(ui, "more", more, false, |ui| {
+            // Keep the normal palette height and canvas click area unchanged.
+            toggle_selected_only = crate::ui_kit::checkbox_row(
+                ui,
+                "constraint_glyphs_selected_only",
+                solidcraft_ui_text::tr("ui.palette_constraint_glyphs_selected_only"),
+                selected_only,
+            );
             for &(key, label) in TOGGLES {
                 if !["show_constraints", "show_dimensions", "show_points", "snap"].contains(&key)
                     && crate::ui_kit::checkbox_row(ui, key, option_label(label), shown(key))
@@ -611,11 +634,18 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         section_alias("sketch_palette:options_fold", more);
     };
     let mut draw_footer = |ui: &mut egui::Ui| {
-        let button = crate::ui_kit::wide_primary_button(ui, "Finish Sketch");
+        // Cancel Sketch beside Finish Sketch, Cancel left of OK as in every dialog footer; the same
+        // discard as the ribbon's X (#19961). "Cancel Sketch", not "Cancel": an open dialog's Cancel
+        // stays the only one.
+        let (cancel_button, button) = crate::ui_kit::wide_secondary_and_primary(ui, solidcraft_ui_text::tr("cmd.sketch_cancel"), "Finish Sketch");
+        crate::panel_runtime::register_content_focus(ui.ctx(), &cancel_button);
         crate::panel_runtime::register_content_focus(ui.ctx(), &button);
-        crate::scenario::publish_rect("sketch_palette:finish", button.rect);
-        crate::scenario::publish_handle("sketch_palette:finish", button.rect.center());
+        for (name, response) in [("sketch_palette:finish", &button), ("sketch_palette:cancel", &cancel_button)] {
+            crate::scenario::publish_rect(name, response.rect);
+            crate::scenario::publish_handle(name, response.rect.center());
+        }
         finish = button.clicked();
+        cancel = cancel_button.clicked();
         let (at, slice) = crate::ui_kit::button_pair(
             ui,
             "sketch_palette",
@@ -649,6 +679,9 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
     if set.is_none() && slice_changed {
         set = Some(("slice".into(), !opts.slice));
+    }
+    if toggle_selected_only {
+        app.ui.constraint_glyphs_selected_only = !selected_only;
     }
     if let Some(choice) = chosen_open_view {
         app.ui.sketch_open_view = choice;
@@ -692,6 +725,9 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     if arc_snap_clicked {
         app.preferences.sketch_arc_tangent_snap = !arc_snap;
     }
+    if listed_clicked {
+        app.preferences.shortcut_starts_listed_tool = !listed;
+    }
     if let Some(id) = start {
         app.start(id);
     }
@@ -707,6 +743,8 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if finish {
         app.finish_sketch();
+    } else if cancel {
+        app.cancel_sketch();
     }
 }
 
@@ -767,6 +805,24 @@ mod tests {
         h.call("ui.click", json!({"x":infinite.x,"y":infinite.y}));
         assert_eq!(mode(&h.app), 3);
         set_mode(&mut h.app, 0);
+    }
+
+    #[test]
+    fn selected_constraint_glyphs_are_a_palette_option() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.settle();
+        assert!(!h.app.ui.constraint_glyphs_selected_only);
+        assert!(crate::scenario::handle_at("sketch_palette:toggle:constraint_glyphs_selected_only").is_none());
+        let more = crate::scenario::handle_at("sketch_palette:options_fold").expect("more sketch options");
+        h.call("ui.click", json!({"x":more.x,"y":more.y}));
+        let undo = h.app.session.undo.len();
+        for selected in [true, false] {
+            let at = crate::scenario::handle_at("sketch_palette:toggle:constraint_glyphs_selected_only").expect("palette option");
+            h.call("ui.click", json!({"x":at.x,"y":at.y}));
+            assert_eq!(h.app.ui.constraint_glyphs_selected_only, selected);
+            assert_eq!(h.app.session.undo.len(), undo);
+        }
     }
 
     /// Whether a placed image follows a frame in the sketch is the Canvas and Decal tools' own
@@ -852,12 +908,37 @@ mod tests {
         let look = crate::scenario::rect_of("sketch_palette:look_at").expect("Look At | Slice stay");
         let slice = crate::scenario::rect_of("sketch_palette:slice").unwrap();
         let finish = crate::scenario::rect_of("sketch_palette:finish").unwrap();
-        assert_eq!((finish.left(), finish.right()), (look.left(), slice.right()), "Finish {finish:?} shares the pair's inset");
+        let cancel = crate::scenario::rect_of("sketch_palette:cancel").expect("Cancel Sketch beside it (#19961)");
+        assert_eq!((cancel.left(), finish.right()), (look.left(), slice.right()), "Cancel {cancel:?} | Finish {finish:?} share the pair's inset");
         assert_eq!(finish.height(), Tokens::get().form_button_height);
         assert!(look.top() - finish.bottom() >= Tokens::get().space_6, "the footer rows remain distinct");
         assert!(crate::scenario::handle_at("button:sketch.finish").is_some(), "and so does the ribbon's Finish");
         h.call("ui.click", json!({"x":at.x,"y":at.y}));
         assert!(h.app.session.active_sketch.is_none());
+    }
+
+    #[test]
+    fn palette_cancel_discards_the_sketch_like_sketch_cancel() {
+        let features = |h: &crate::scenario::Harness| h.app.session.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+        let mut left = Vec::new();
+        for panel in [true, false] {
+            let mut h = crate::scenario::Harness::new();
+            let before = features(&h);
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.app.run("sketch.line", json!({"points": [[0, 0], [30, 10]]})).unwrap();
+            h.settle();
+            if panel {
+                let at = crate::scenario::handle_at("sketch_palette:cancel").expect("the palette has Cancel");
+                h.call("ui.click", json!({"x":at.x,"y":at.y}));
+            } else {
+                h.app.run("sketch.cancel", json!({})).unwrap();
+            }
+            h.settle();
+            assert!(h.app.session.active_sketch.is_none(), "panel {panel}: the sketch is left");
+            assert_eq!(features(&h), before, "panel {panel}: the sketch is discarded");
+            left.push(features(&h));
+        }
+        assert_eq!(left[0], left[1], "the panel's Cancel does what sketch.cancel does");
     }
 
     #[test]

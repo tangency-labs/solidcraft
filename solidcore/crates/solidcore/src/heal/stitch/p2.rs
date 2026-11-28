@@ -614,14 +614,18 @@ impl Stitch<'_> {
                 let edges = bp1::edges(b, None)?;
                 let mut edge_tree: Tree<EdgeId> = Tree::new_spatial(&brep_bbox);
                 for &e in &edges {
-                    let ebox = edge_box(k, b, e)?;
+                    let mut ebox = edge_box(k, b, e)?;
+                    if self.per_entity_candidate_split {
+                        ebox.expand_absolute(edge::tolerance(b, e)?);
+                    }
                     edge_tree.add_to_spatial_tree(&ebox, Some(e), NodeGeomType::default())?;
                 }
 
                 let vertices = bp1::vertices(b, None)?;
 
                 // Check only if either vertex or edge is on candidate list (upstream
-                // never resets these two flags).
+                // never resets these two flags; callers that opt into
+                // `per_entity_candidate_split` evaluate them per vertex and per edge).
                 let mut candidate_vtx = true;
                 let mut candidate_edge = true;
 
@@ -634,13 +638,20 @@ impl Stitch<'_> {
                         continue;
                     }
 
-                    if candidate_vertices.is_some() && !cand_vertices.contains(&v) {
+                    if self.per_entity_candidate_split {
+                        candidate_vtx = candidate_vertices.is_none() || cand_vertices.contains(&v);
+                    } else if candidate_vertices.is_some() && !cand_vertices.contains(&v) {
                         candidate_vtx = false;
                     }
 
                     // for every edge near this vertex
                     let mut vbox = Extent3d::from_point(vertex::point(b, v)?);
-                    vbox.expand_absolute(tol_3d);
+                    let query_tol = if self.per_entity_candidate_split {
+                        smos_max(tol_3d, vertex::tolerance(b, v)?)
+                    } else {
+                        tol_3d
+                    };
+                    vbox.expand_absolute(query_tol);
                     for object in edge_tree.objects_in_box(&vbox)? {
                         let e = object.ok_or_else(|| deref("tree object"))?;
 
@@ -652,7 +663,9 @@ impl Stitch<'_> {
                             continue;
                         }
 
-                        if candidate_edges.is_some() && !cand_edges.contains(&e) {
+                        if self.per_entity_candidate_split {
+                            candidate_edge = candidate_edges.is_none() || cand_edges.contains(&e);
+                        } else if candidate_edges.is_some() && !cand_edges.contains(&e) {
                             candidate_edge = false;
                         }
 
@@ -713,13 +726,19 @@ impl Stitch<'_> {
                             cand_vertices.push(new_v);
                             if !candidate_vtx {
                                 cand_vertices.push(v);
+                                if self.per_entity_candidate_split {
+                                    candidate_vtx = true;
+                                }
                             }
                         }
 
                         // when split created a new edge
                         if let Some(new_e) = split.new_edge {
                             // add new edge->curve to edge spatial tree
-                            let ebox = edge_box(k, b, new_e)?;
+                            let mut ebox = edge_box(k, b, new_e)?;
+                            if self.per_entity_candidate_split {
+                                ebox.expand_absolute(edge::tolerance(b, new_e)?);
+                            }
                             edge_tree.add_to_spatial_tree(
                                 &ebox,
                                 Some(new_e),
@@ -2454,5 +2473,86 @@ mod tests {
         assert_eq!(r.stitched_edges, 0);
         let r = stitch_into_shell(&mut k, &mut b, false, f64::NAN).unwrap();
         assert_eq!(r.max_edge_gap, 0.0);
+    }
+
+    /// When `per_entity_candidate_split` is enabled, a candidate face whose lamina edge meets
+    /// a T-junction vertex on pre-existing non-candidate faces still splits and sews along both
+    /// halves even though the non-candidate vertices and edges appear earlier in traversal order.
+    #[test]
+    fn per_entity_candidate_split_splits_candidate_edge_after_non_candidate_entities() {
+        use crate::math::Point3;
+        use crate::topology::face::p4 as face4;
+
+        let run = |per_entity: bool| -> (u64, u64) {
+            let p = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
+            let mut k = Kernel::default();
+            let mut b = crate::topology::brep::p3::new_brep(
+                &mut k,
+                crate::geom::tol::USE_DEFAULT,
+                crate::geom::tol::USE_DEFAULT,
+            )
+            .unwrap();
+            // Two non-candidate squares sharing the T-junction vertex (1, 0, 0) along y = 0,
+            // created first so their vertices and edges precede the candidate face in the B-rep.
+            add_planar_face(
+                &mut k,
+                &mut b,
+                &polygon(&[
+                    p(0.0, 0.0, 0.0),
+                    p(1.0, 0.0, 0.0),
+                    p(1.0, 1.0, 0.0),
+                    p(0.0, 1.0, 0.0),
+                ]),
+            );
+            add_planar_face(
+                &mut k,
+                &mut b,
+                &polygon(&[
+                    p(1.0, 0.0, 0.0),
+                    p(2.0, 0.0, 0.0),
+                    p(2.0, 1.0, 0.0),
+                    p(1.0, 1.0, 0.0),
+                ]),
+            );
+            // Candidate face whose top edge runs straight from (0, 0, 0) to (2, 0, 0) without a
+            // vertex at (1, 0, 0).
+            add_planar_face(
+                &mut k,
+                &mut b,
+                &polygon(&[
+                    p(0.0, -1.0, 0.0),
+                    p(2.0, -1.0, 0.0),
+                    p(2.0, 0.0, 0.0),
+                    p(0.0, 0.0, 0.0),
+                ]),
+            );
+            let faces = bp1::faces(&b, None).unwrap();
+            let candidate = faces[2];
+            let cand_verts = face4::vertices(&b, candidate, None, false, None).unwrap();
+            let cand_edges = face4::edges(&b, candidate, None, false, None).unwrap();
+
+            let mut cb = DefaultStitchCallback::new();
+            let mut stitch = Stitch::new(&mut cb, 1e-4, false, true);
+            stitch.making_manifold_solid = true;
+            stitch.split_edges_with_vertices = true;
+            stitch.per_entity_candidate_split = per_entity;
+            let r = stitch
+                .do_stitching(
+                    &mut k,
+                    &mut b,
+                    Some(&cand_verts),
+                    Some(&cand_edges),
+                    MinGapRequest::default(),
+                )
+                .unwrap();
+            (r.stitched_edges, r.lamina_edges)
+        };
+
+        // Upstream behavior latches both flags to false on the first non-candidate entities,
+        // so the candidate edge is never split at (1, 0, 0) and neither half sews.
+        assert_eq!(run(false).0, 0);
+        // With per-entity candidate splitting, (1, 0, 0) splits the candidate edge and both
+        // halves sew cleanly.
+        assert_eq!(run(true).0, 2);
     }
 }

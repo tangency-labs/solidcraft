@@ -16,6 +16,23 @@ document remains the reference implementation today.
 
 ## Start it
 
+With [uv](https://docs.astral.sh/uv/) there is nothing to install first: `uvx solidcraft mcp` runs
+the MCP server over stdio from the `solidcraft` package on PyPI, whose wheel carries
+`solidcraft-cli` on Linux (x86_64, aarch64), macOS and Windows (elsewhere the package finds an
+installed `solidcraft-cli` on `PATH` or through `SOLIDCRAFT_CLI`) (`pip install solidcraft` installs the same `solidcraft`
+command). Any MCP client takes it as command `uvx`, args `["solidcraft", "mcp"]`:
+
+```json
+{
+  "mcpServers": {
+    "solidcraft": { "command": "uvx", "args": ["solidcraft", "mcp"] }
+  }
+}
+```
+
+`uvx solidcraft <args>` is `solidcraft-cli <args>`, so every flag below works the same way.
+Claude Code: `claude mcp add solidcraft -- uvx solidcraft mcp`.
+
 ```sh
 # Headless: an in-process design session, no window (screenshots are drawn on the GPU).
 solidcraft-cli mcp
@@ -41,6 +58,79 @@ automatic discovery starts a headless session, the engine answers; connected, th
 Picking screenshot `pixels` requires a connection to the running SolidCraft app; `frame:
 "model"` chooses the pixels of a rendered model image and does not enable headless pixel picks.
 See `ui.pick` in the [control protocol](control-protocol.md) for pixel and ray parameters.
+
+### Reuse a headless session from another program
+
+For a program that makes many parts, keep one `solidcraft-cli mcp --headless`
+process running and use its stdio connection for successive tool calls. The
+server holds one active design, including its parameters and history, until
+the process exits. Use `new_design` or `open` between independent jobs,
+and save each result before replacing the active design. Use separate server
+processes for independent concurrent jobs; do not interleave edits to different
+designs on one connection.
+
+For example, install the Python MCP SDK (`pip install mcp==2.3.0` for this example) in your application's
+environment and run this script with the CLI on your PATH. It creates two
+independent parts, measures them, and saves a design and STEP file for each:
+
+```python
+import asyncio
+import json
+from pathlib import Path
+
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+
+async def main():
+    output = Path("headless-parts").resolve()
+    output.mkdir()  # A fresh directory: do not overwrite an earlier job.
+    server = StdioServerParameters(
+        command="solidcraft-cli",
+        args=["mcp", "--headless", "--allow-path", str(output),
+              "--require-allow-path"],
+    )
+    async with stdio_client(server) as (read, write):
+        async with ClientSession(read, write) as session:
+            info = await session.initialize()
+            print("SolidCraft version:", info.server_info.version)
+
+            async def call(name, arguments):
+                result = await session.call_tool(name, arguments)
+                if result.is_error:
+                    raise RuntimeError(result.content)
+                return result
+
+            # Both parts use the same server process and connection.
+            for length in (10, 20):
+                name = f"Part-{length}"
+                await call("new_design", {"name": name})
+                await call("execute", {
+                    "command": "solid.box",
+                    "params": {"length": length, "width": 5, "height": 2},
+                })
+                measured = await call("measure", {})
+                print(json.loads(measured.content[0].text)["total"]["volume_mm3"])
+                await call("save", {"path": str(output / f"{name}.sc")})
+                await call("export", {"path": str(output / f"{name}.step")})
+
+
+asyncio.run(main())
+```
+
+Expected volumes are 100 and 200 mm³. The output directory is explicitly
+allowed; see [file access rules](#which-files-the-agent-can-reach).
+For sheet-metal jobs, call the flat-pattern and bend-table commands through
+`execute`, using `describe_command` to discover their inputs.
+
+The MCP protocol revision is negotiated at initialization. For production
+integrations, record the server version, pin the SolidCraft release used for
+your jobs, and test your command inputs and result handling before upgrading.
+Use `tools/list`, `list_commands` and `describe_command` to discover the
+available tools and command contracts. Check tool errors before proceeding.
+A negotiated MCP revision does not pin SolidCraft's command schemas or CAD
+results across releases. This example uses the process interface; it does not
+require Python bindings to the Rust engine.
 
 ### The app listens when turned on
 
@@ -207,6 +297,25 @@ The command line can only turn it on: with the preference on, a server started w
 solidcraft-cli mcp --connect 127.0.0.1:7878 --compact
 SOLIDCRAFT_MCP_COMPACT=1 solidcraft-cli mcp --connect 127.0.0.1:7878
 ```
+
+### Structured results
+
+`solidcraft-cli mcp --structured` is for programs that call the tools, such as a Python client,
+rather than for chat clients. Every tool result then also carries its reply as data, in MCP's
+`structuredContent`:
+
+```json
+{"result": <the reply as JSON, or its text when the reply is a message>, "notes": ["<a notice>", "<the selection>"]}
+```
+
+`result` is read from the first text block, the one the tool itself returns; `notes` holds the
+text blocks the server adds after it and is left out when there are none. An image result keeps
+its image block, and its text block is the `result`. An error keeps `isError: true`, and keys an
+error already carries (`panel_error`, `plugin_error`) stay. The text blocks are unchanged, so the
+same tools, current and future, reach a program and an agent alike.
+
+It is off by default, and only the command line turns it on: some chat clients show the model both
+the text and the structured copy, which would double what it reads.
 
 ### Desktop app management
 
@@ -413,7 +522,7 @@ carrying one is treated as any step with a key the batch does not know. Volume a
 say nothing about which kernel built the design, which is the point: the check holds whatever
 builds it.
 | `inspect_design` | `measure?` (default true), `sketches?` (default true), `joints?` (`true`: the default, every joint; `"summary"`: every joint but the rigid joints holding an imported assembly's contents, which `joint_summary` counts; `false`: no joints), `timeline?` (`true`: the default; `"summary"`: each feature as `id`, `name` and `type`, with `error`, `warning`, `suppressed` and `rolled_back` only when it has them; `false`: no timeline), `bodies?` (`true`: the default; `"names"`: only the body names, nothing measured; `false`: no bodies); with [compact output](#compact-output) `sketches?` (names or ids, `true`, or `false` / `"summary"`: the default) and `bodies?` also takes a list of names | On a design of hundreds of features and bodies, `timeline: "summary"` and `bodies: "names"` (or `false`) keep the reply small enough for an agent's tool output. Design properties (`metadata`: project, author… and other tools' keys; set them with `execute` `document.metadata.set`), parameters, timeline (type, suppressed, rolled back, error, warning, timing), bodies (volume, area, centre of mass, bbox, face/edge/vertex counts, visible; `removed_later: true` while a sketch is being edited on a rolled-back timeline and a later feature deletes the body, which is then not shown), sketches (curves, points, constraints, profiles, DOF, solve status, visible), joints when the design has any (as `joint.inspect` gives them: each origin's occurrence, component and path, the snap as saved, the feature, face, edge or sketch curve (`sketch: {id, name, curve}`) its persistent names refer to, `resolves` and the `error` when it is lost; kind, offset, angle, flip, values, limits, expressions, motion links; `execute` `joint.inspect {joint}` gives one joint; with `joints: "summary"` the rigid joints that hold an imported assembly's contents together, one per placement, are left out, and `joint_summary` (`joints`, `by_type`, `suppressed`, `rigid_groups: [{component, name, joints, members}]`, the 20 largest, and `more_rigid_groups: {groups, joints}` counting the rest) counts them instead, or, when it can't be had, is `{omitted, error}`: what was left out and why: `execute` `joint.list` with `exclude_rigid_groups`, `moving_only`, `kinds`, `occurrences` or `dof_free_only` narrows the full list the same way), selection, undo depth. Hide helper sketches, bodies or construction planes with `execute` `browser.visibility` (`{items, visible}` or `{folder, visible}`), and joint glyphs with `{joints: [id or name], visible}` or `{folder: "joints", visible}` (a hidden joint still constrains and drives; `joint.list` reports each joint's `visible`). |
-| `measure` | `body?` or `items?`, `summary?` (default false), `within?`: {min, max}, `mode?`: intersects (default) or inside | Area (mm²), bbox, topology counts and `closed` per body. Volume (mm³), volume centre of mass, density and mass are reported only for closed, consistently oriented bodies (null or omitted for open surfaces). Volume/mass totals skip open bodies; `total.open_bodies_skipped` gives their count. Area and topology totals include all bodies. With `items` (one or two selections as `execute` takes them: `face`, `edge`, `vertex`, `sketch_curve`, `profile`), the picked geometry instead: faces and edges need only `type`, `body` and either `point` or `index` (from `model.faces` / `model.edges`). See below. `summary: true` keeps one short object per body (`name`, `volume_mm3`, `bbox: {min, max}`, `faces`, `closed`; a body that could not be measured keeps its `error`), `body_count` and `total.volume_mm3`, nothing else: what a stage check against computed numbers needs, at a fraction of the size. It applies to the bodies reply, not to `items`. With `within`, measure only bodies whose world-coordinate bounding boxes overlap or touch the specified box (mm); `mode: "inside"` requires complete containment. Totals cover only matching bodies. |
+| `measure` | `body?` or `items?`, `summary?` (default false), `within?`: {min, max}, `mode?`: intersects (default) or inside | Area (mm²), bbox, topology counts and `closed` per body. Volume (mm³), volume centre of mass, density and mass are reported only for closed, consistently oriented bodies (null or omitted for open surfaces). Volume/mass totals skip open bodies; `total.open_bodies_skipped` gives their count. Area and topology totals include all bodies. With `items` (one or two selections as `execute` takes them: `face`, `edge`, `vertex`, `sketch_curve`, `profile`; or 3 to 64 round edges or cylinder faces, for their spacing), the picked geometry instead: faces and edges need only `type`, `body` and either `point` or `index` (from `model.faces` / `model.edges`). See below. `summary: true` keeps one short object per body (`name`, `volume_mm3`, `bbox: {min, max}`, `faces`, `closed`; a body that could not be measured keeps its `error`), `body_count` and `total.volume_mm3`, nothing else: what a stage check against computed numbers needs, at a fraction of the size. It applies to the bodies reply, not to `items`. With `within`, measure only bodies whose world-coordinate bounding boxes overlap or touch the specified box (mm); `mode: "inside"` requires complete containment. Totals cover only matching bodies. |
 | `body_topology` | `body`, `faces?` (`all`, `cylinders`; default `all`) | Edges (index, midpoint, length, ends) and faces (index, name, area, centroid, normal, `point`, and for a cylindrical face its `cylinder`: `origin`, `axis`, `radius`). An edge midpoint is the `[x,y,z]` that picks that edge for fillet and chamfer. A face's `point` lies on it and picks it (its centroid may not: that of a face with a hole is in the hole); a face's `name` picks it for the commands that take faces (`face.delete`, `solid.shell`, `solid.draft`, `solid.offset_face`, `solid.split_face`, `solid.replace_face`, and `face` of `sheet.convert`). `faces: "cylinders"` replies `cylinders` instead of `edges` and `faces`: one entry per cylinder, `{radius, origin, axis, extent, names}`, the halves the kernel splits a cylinder into merged (same radius, same axis line; `origin` and `axis` as the first half's `cylinder` gives them), `extent` the `[min, max]` distance along `axis` from `origin` that the body's points on the cylinder span (the faces' `point`s and the ends of the edges lying on it; left out when none were found), and `names` the merged faces' names, any of which picks the face. Enough to check where every hole and boss is, in a few lines instead of the whole topology. |
 | `set_parameter` | `name`, `value` or `expression` (number or expression), `unit?`, `comment?` | Create or change a user parameter and recompute. `expression` is another name for `value` (the one `parameters.change` uses): give one of them, or both only when they agree; neither, or two that differ, is an error. Reports `recomputed` (features rebuilt), `restored` (features whose earlier result for the same inputs was reused, e.g. a value set back) and features that now fail. An expression `new_name = expression` renames the parameter as it sets it; in any other tool's expression parameter it adds the user parameter `new_name` and the input uses it (`defined`, `definitions` in the reply). |
 | `check_parameters` | `set: {name: value}` (a number or an expression each, as `set_parameter`'s `value`), `report?` (`measure`, `cylinders`, `errors`; default all three), `bodies?` (a list of body names: only those are measured and their cylinders listed; default all), `summary?` (`measure` as the `measure` tool's `summary: true`; default false) | Try parameter values without keeping them: one `edit.checkpoint`, every value set in one `parameters.change {changes}` (one rebuild; an app without `changes` gets one change per name), the reports read, then `edit.restore_checkpoint`, so the design, its parameters and its undo history are exactly as before. The reply has `values` (each parameter's value with the tried expressions in), `recomputed`, `measure` (volume, bbox, bodies and faces per body, as the `measure` tool reports them), `errors` and `warnings` (the features that fail or warn: `{feature, name, error}`) with `parameter_errors` (the parameters that don't evaluate), `cylinders` (every cylindrical face of every body as `{body, radius, origin, axis, faces, name, area}`; the halves a kernel splits one cylinder into are one entry, `origin` is the axis point closest to the world origin and `axis` points so that its first non-zero component is positive) and `restored: true`. On a large design, `bodies` with the bodies a change touches and `summary: true` keep the reply small. A name the design has no parameter of, a value that is not a number or a string, an expression that does not evaluate, an unknown report item or a `bodies` that is not a list of names is an error, and nothing changes; a body name the design does not have after the change is an error after the design is put back. If the checkpoint cannot be restored the call is an error with `restored: false`, `restore_error` and a note that the tried values are still in the design: set them back before saving. Replaces the loop `set_parameter`, `measure`, `body_topology`, `set_parameter` back, which cost every agent session three to five calls and up to 16 s of rebuilds. Not a `batch` step. |
@@ -458,6 +567,24 @@ the top level. With two items:
   and axis to plane, line or point;
 - `measure`: the distance the Measure panel shows first (`center` where there is one, else `min`);
 - `angle_deg` between two planar faces or straight edges.
+
+With three or more items, all round (circle or arc edges, cylinder faces) and with parallel
+axes, as holes along a row or round a bolt circle, the reply has `spacing` instead, measured
+centre to centre in the plane through the first item's centre square to its axis:
+
+- `pattern`: `line` (the centres are on one line), `circle` (on one circle) or `none`;
+- `order`: the items (indices into `items`) in order along the row, from the end item given
+  first, or round the circle about the first item's axis, from the first item; for `none`, as given;
+- `gaps` (with `gap_points`, each gap's two centres): the distance between each neighbouring
+  pair in `order`; a circle has one more, from the last back to the first;
+- `span`: from the first centre in `order` to the last;
+- `even`, `pitch` and `odd_gaps`: whether every gap is the same; the gap when they are, else
+  the gap most of the others share (absent when no two are the same); and the gaps (indices
+  into `gaps`) that differ from it, as where a hole is left out of a row;
+- for a circle: `pcd` (the pitch-circle diameter), `pcd_center`, `angle_deg` (the angle at the
+  centre for each gap) and, when the gaps are even, `angle_pitch_deg`.
+
+Items that are not all round, axes that are not parallel and two items on one centre are refused.
 
 Earlier fields are unchanged, so older scripts keep working.
 

@@ -503,6 +503,7 @@ impl FileLoad {
                 _ => std::path::Path::new(&request.path).file_name().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
             },
             steps: None,
+            importer_status: None,
             percent: false,
             queued: true,
             cancelled: false,
@@ -510,6 +511,7 @@ impl FileLoad {
         };
         let running = self.running.as_ref().map(|r| FileOperation {
             steps: steps(r),
+            importer_status: if r.cancelled() { None } else { importer_status(&r.progress) },
             percent: r.request.kind != Kind::UpdateLinks && work(r).is_some_and(|(stage, _, _)| crate::operations::bytes_stage(stage)),
             queued: false,
             cancelled: r.cancelled(),
@@ -534,6 +536,7 @@ pub(crate) struct FileOperation {
     pub command: &'static str,
     pub name: String,
     pub steps: Option<(usize, usize)>,
+    pub importer_status: Option<String>,
     /// The steps are bytes (the file being read).
     pub percent: bool,
     pub queued: bool,
@@ -727,8 +730,10 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
             Kind::ExportDxf | Kind::ExportSheet => {
                 let (command, params) = request.command();
                 let r = app.run(command, params);
-                if r.is_ok() && !request.path.is_empty() {
-                    app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", crate::display_user_path(&request.path))]), false);
+                if let Ok(reply) = &r
+                    && !request.path.is_empty()
+                {
+                    app.set_status(crate::drawing_workspace::export::saved_status(crate::display_user_path(&request.path), reply), false);
                 }
                 r
             }
@@ -1015,6 +1020,10 @@ fn start(app: &mut SolveApp) {
     } else {
         Session::default()
     };
+    // A view DXF without planes of its own is cut by the Section Analysis on show (#22913).
+    if request.kind == Kind::ExportDxf {
+        scratch.set_section_state(app.session.section_state());
+    }
     // A design opened or recovered here is run through the host's pre-command check too, and
     // evaluated under the user's validation mode.
     scratch.set_command_check(app.session.command_check());
@@ -1841,7 +1850,7 @@ pub(crate) fn cancel_waiting(app: &mut SolveApp, serial: u64) {
     let running = app.file_load.waiting.remove(at);
     app.file_load.drop_warm(serial);
     crate::operations::ended(app, &format!("file:{serial}"), Outcome::Cancelled);
-    app.set_status("file operation cancelled", false);
+    app.set_status(solidcraft_ui_text::tr("file_load.cancelled"), false);
     running.request.answer(Err("file operation cancelled".into()));
 }
 
@@ -1859,12 +1868,12 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
         let request = &running.request;
         match job {
             Ok(made) if request.kind.exports() && request.print => {
-                crate::drawing_workspace::print::written(app, &request.path);
+                crate::drawing_workspace::print::written(app, &request.path, &made.result);
                 request.answer(Ok(made.result));
             }
             Ok(made) if request.kind.exports() && (!request.sheet_in_reply() || !running.cancelled()) => {
                 if !request.path.is_empty() {
-                    app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", crate::display_user_path(&request.path))]), false);
+                    app.set_status(crate::drawing_workspace::export::saved_status(crate::display_user_path(&request.path), &made.result), false);
                 }
                 request.answer(Ok(made.result));
             }
@@ -2078,6 +2087,13 @@ pub(crate) fn phase(app: &SolveApp) -> Option<&'static str> {
 /// (the kernel's `converting`), then the model is built and shown; a design is read, its
 /// features rebuilt, then shown. `work` is the kernel's last report, which stays at its end
 /// once the step is over; `features` is (built, total).
+fn importer_status(progress: &solidcraft_engine::doc::progress::Progress) -> Option<String> {
+    progress.importer().map(|(plugin, preparing)| {
+        let key = if preparing { "file_load.plugin_preparing" } else { "file_load.plugin_importing" };
+        solidcraft_ui_text::format(key, &[("plugin", &plugin)])
+    })
+}
+
 fn load_steps(
     cad: bool,
     phase: u8,
@@ -2140,9 +2156,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let export = r.request.kind.exports();
     // What Cancel says once it has stopped the job.
     let stopped = match r.request.kind {
-        Kind::ExportDxf => solidcraft_ui_text::tr_label("dxf.cancelled"),
-        Kind::ExportSheet => solidcraft_ui_text::tr_label("drawing_export.cancelled"),
-        _ => "file operation cancelled",
+        Kind::ExportDxf => solidcraft_ui_text::tr("dxf.cancelled"),
+        Kind::ExportSheet => solidcraft_ui_text::tr("drawing_export.cancelled"),
+        _ => solidcraft_ui_text::tr("file_load.cancelled"),
     };
     let work = r.work().filter(|(_, d, t)| export || (phase == 0 && d < t));
     let screen = ctx.content_rect();
@@ -2215,7 +2231,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             // An open or an import goes through three steps the card lists; the other operations
             // (and a cancelled one) say what they are doing in a line.
             let stepped = !cancelled && matches!(r.request.kind, Kind::Open | Kind::Insert | Kind::InsertDesign | Kind::Recover { .. });
-            if stepped {
+            if let Some(status) = (!cancelled).then(|| importer_status(&r.progress)).flatten() {
+                ui_kit::steps(ui, "file_load", &[status.as_str()], 0, None);
+            } else if stepped {
                 let cad = matches!(r.request.kind, Kind::Open | Kind::Insert)
                     && (solidcraft_engine::io::is_step_path(&r.request.path) || solidcraft_engine::io::is_iges_path(&r.request.path));
                 let (labels, current, detail) = load_steps(cad, phase, r.progress.work(), (done, total));
@@ -2308,6 +2326,7 @@ mod tests {
                 disabled: false,
                 groups: Default::default(),
                 entries: vec![entry],
+                declarations: Default::default(),
                 ribbon_groups: Vec::new(),
                 images: Default::default(),
                 swatches: Default::default(),
