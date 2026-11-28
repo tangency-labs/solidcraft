@@ -2105,6 +2105,16 @@ pub struct FeatureResult {
 }
 
 impl FeatureResult {
+    /// A name pin or an adopted sketch solution keeps the geometry that the import slots describe.
+    fn refingerprint(&mut self, fingerprint: u64, layouts: &mut BTreeMap<u64, ImportLayout>) {
+        if let Some(layout) = layouts.get_mut(&self.id)
+            && layout.result == self.fingerprint
+        {
+            layout.result = fingerprint;
+        }
+        self.fingerprint = fingerprint;
+    }
+
     /// The largest fitting size reported by a blend refusal on this feature, if any.
     pub fn largest_fit(&self) -> Option<kernel::BlendFit> {
         self.error.as_deref().and_then(kernel::named_blend_fit)
@@ -2125,6 +2135,8 @@ pub struct Model {
     /// The reads of the imports whose SMLib check of their parts has not been settled yet
     /// ([`HeldReads`]).
     held_reads: HeldReads,
+    /// Source slots of the STEP assemblies in `results`. Geometry stays in its feature result.
+    import_layouts: BTreeMap<u64, ImportLayout>,
     pub param_errors: BTreeMap<String, String>,
     empty: Arc<ModelState>,
     /// Features recomputed by the last `evaluate`.
@@ -2359,6 +2371,75 @@ impl Drop for ImportReads {
         if let Some(outer) = self.outer.take() {
             IMPORT_READS.with(|r| *r.borrow_mut() = Some(outer));
         }
+    }
+}
+
+/// Enough to recognize the same imported geometry after a component's deletion added skipped
+/// slots. The result fingerprint pairs the slots with the exact evaluation that produced them.
+#[derive(Clone, Debug)]
+struct ImportLayout {
+    input: u64,
+    result: u64,
+    skip: Vec<u64>,
+}
+
+impl ImportLayout {
+    fn of(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, shared: u64, digests: &ImportDigests) -> Option<Self> {
+        let FeatureKind::Import { components, step, records: None, skip, .. } = &f.kind else { return None };
+        if components.is_empty() || step.is_empty() || digests.has_digest_only_heal(f.id) {
+            return None;
+        }
+        let mut source = f.clone();
+        source.body_names.clear();
+        if let FeatureKind::Import { skip, .. } = &mut source.kind {
+            skip.clear();
+        }
+        let input = fingerprint(doc, shared, &source, vals, false, digests);
+        Some(Self { input, result: 0, skip: skip.clone() })
+    }
+
+    /// Reuse only pinned, previously visible slots. Replacing the source, restoring an unseen
+    /// slot, a missing face lineage, or a name collision goes through the ordinary importer.
+    fn append_subset(&self, old: &FeatureResult, f: &Feature, skip: &[u64], st: &mut ModelState) -> bool {
+        use std::collections::HashSet;
+        if old.fingerprint != self.result || old.stale || old.unkept || old.skipped || old.error.is_some() || skip.len() <= self.skip.len() {
+            return false;
+        }
+        let skipped: HashSet<_> = skip.iter().copied().collect();
+        if !self.skip.iter().all(|k| skipped.contains(k)) {
+            return false;
+        }
+        let old_skip: HashSet<_> = self.skip.iter().copied().collect();
+        let mut slots = (0usize..).filter(|k| !old_skip.contains(&(*k as u64)));
+        let mut kept = Vec::new();
+        let mut end = 0;
+        for (b, slot) in old.state.bodies.iter().filter(|b| b.feature == f.id).zip(&mut slots) {
+            end = slot + 1;
+            if skipped.contains(&(slot as u64)) {
+                continue;
+            }
+            if f.body_names.get(slot).map(|s| s.trim()) != Some(b.name.as_str()) || !matches!(b.made, crate::lineage::Made::Traced(_)) {
+                return false;
+            }
+            kept.push(b);
+        }
+        let names: HashSet<_> = kept.iter().map(|b| b.name.as_str()).collect();
+        // The ordinary importer reserves pins past the file's bodies before assigning names.
+        // The last previously visible slot gives a conservative bound when its tail was skipped.
+        if names.len() != kept.len()
+            || st.bodies.iter().any(|b| names.contains(b.name.as_str()))
+            || f.body_names.iter().skip(end).any(|name| names.contains(name.trim()))
+        {
+            return false;
+        }
+        let _span = solidcraft_profile::span("doc", "import.filter_slots");
+        st.threads.extend(old.state.threads.iter().filter(|t| t.feature == f.id && names.contains(t.body.as_str())).cloned());
+        for source in kept {
+            let mut body = ModelBody::new(source.name.clone(), source.body.clone(), f.id);
+            body.made = source.made.clone();
+            st.bodies.push(body);
+        }
+        true
     }
 }
 
@@ -6378,7 +6459,7 @@ impl Model {
             let eval_doc: &Document = stepper.as_ref().map_or(doc, CaptureStepper::doc);
             prev_fp = chain_fingerprint(eval_doc, &vals, f, prev_fp, i >= marker, &steps, Some(&before), &constructions);
             if let Some(r) = self.results.get_mut(i).filter(|r| r.id == f.id) {
-                r.fingerprint = prev_fp;
+                r.refingerprint(prev_fp, &mut self.import_layouts);
                 if i < marker && !f.suppressed && !r.skipped && r.error.is_none() {
                     if let Some(s) = stepper.as_mut() {
                         s.advance(&mut resolved_joints, &vals, f, &prev_state, &r.state);
@@ -6571,6 +6652,8 @@ impl Model {
         self.context = ctx;
         let prev_import_digests = std::mem::take(&mut self.import_digests);
         self.import_digests = ImportDigests::of(doc, &prev_import_digests, heal);
+        let mut import_layouts: BTreeMap<_, _> =
+            doc.features.iter().filter_map(|f| Some((f.id, ImportLayout::of(doc, &vals, f, shared_ctx, &self.import_digests)?))).collect();
         let primed: Vec<Primed> = self.primed.iter().filter(|p| !self.no_cache && p.context == ctx).cloned().collect();
         // Per-component ancestor-chain digests and feature->component map, built once per pass.
         let component_digests = ComponentDigests::of(doc);
@@ -6581,10 +6664,20 @@ impl Model {
         let constructions = construction_indices(doc);
         let watched = crate::progress::begin(doc.features.len());
         let prefetch_limit = doc.features.len().min(marker).min(watched.hold_limit());
+        // A worker starting from an empty state cannot filter the previous result. Leave these
+        // imports to the timeline, where the incoming body names are known.
+        let subset_imports = import_layouts
+            .iter()
+            .filter_map(|(&id, new)| {
+                let old = self.import_layouts.get(&id)?;
+                (old.input == new.input && new.skip.len() > old.skip.len()).then_some(id)
+            })
+            .collect();
         let prepared_imports = parallel::prefetch_imports(
             doc,
             &vals,
             &self.results,
+            &subset_imports,
             &prev_import_digests,
             &self.import_digests,
             &self.cache,
@@ -6602,6 +6695,7 @@ impl Model {
             &vals,
             &self.param_errors,
             &self.results,
+            &subset_imports,
             &self.empty,
             &self.frame_bodies,
             &self.cache,
@@ -7037,6 +7131,10 @@ impl Model {
                                 heal,
                                 meshes,
                                 prepared_imports.get(f.id),
+                                self.import_layouts
+                                    .get(&f.id)
+                                    .filter(|_| !self.no_cache && subset_imports.contains(&f.id))
+                                    .zip(self.results.get(i).filter(|r| r.id == f.id)),
                                 Some(&before_states),
                             );
                             IMPORT_HEALS.with(|h| *h.borrow_mut() = None);
@@ -7267,6 +7365,12 @@ impl Model {
         self.poses = poses;
         self.component_keys = component_keys;
         self.results = out;
+        for r in &self.results {
+            if let Some(layout) = import_layouts.get_mut(&r.id) {
+                layout.result = r.fingerprint;
+            }
+        }
+        self.import_layouts = import_layouts;
         self.note_states();
         for (feature, read) in reads.finish() {
             self.held_reads.hold(feature, read);
@@ -8004,7 +8108,7 @@ impl Model {
             }
             let eval_doc: &Document = stepper.as_ref().map_or(doc, CaptureStepper::doc);
             prev = chain_fingerprint(eval_doc, &vals, f, prev, i >= marker, &self.import_digests, Some(&before), &constructions);
-            r.fingerprint = prev;
+            r.refingerprint(prev, &mut self.import_layouts);
             let prev_state = before;
             before = r.state.clone();
             if i < marker
@@ -18729,10 +18833,11 @@ fn eval_feature(
     heal: bool,
     prepared_meshes: Option<&PreparedMeshImport>,
     prepared_import: Option<&parallel::PreparedImport>,
+    previous_import: Option<(&ImportLayout, &FeatureResult)>,
     sources: Option<&SourceStates>,
 ) -> Result<()> {
     JOINED_TARGETS.with(|n| n.borrow_mut().clear());
-    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair, heal, prepared_meshes, prepared_import, sources);
+    let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair, heal, prepared_meshes, prepared_import, previous_import, sources);
     for note in JOINED_TARGETS.with(|n| std::mem::take(&mut *n.borrow_mut())) {
         append_warning(warning, note);
     }
@@ -18802,6 +18907,7 @@ fn eval_feature_kind(
     heal: bool,
     prepared_meshes: Option<&PreparedMeshImport>,
     prepared_import: Option<&parallel::PreparedImport>,
+    previous_import: Option<(&ImportLayout, &FeatureResult)>,
     sources: Option<&SourceStates>,
 ) -> Result<()> {
     // Its tools meet bodies in other placements where those are shown (#3383).
@@ -20422,6 +20528,13 @@ fn eval_feature_kind(
             Ok(())
         }
         FeatureKind::Import { file, step, skip, records, .. } => {
+            if let Some((layout, old)) = previous_import
+                && layout.append_subset(old, f, skip, st)
+            {
+                warning.clone_from(&old.warning);
+                import_report.clone_from(&old.import_report);
+                return Ok(());
+            }
             #[cfg(test)]
             cost_tests::count(|c| c.imports_read += 1);
             // A linked design's bodies left out of the file, and not read back when it opened.
