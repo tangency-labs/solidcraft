@@ -22,7 +22,7 @@ thread_local! {
 }
 
 fn context_menu_area(ctx: &egui::Context) -> bool {
-    ctx.memory(|m| m.area_rect(egui::Id::unique("sc_context_menu"))).is_some()
+    crate::ui_kit::Menu::is_open(ctx, egui::Id::unique("sc_context_menu"))
 }
 
 fn info(focused: bool) -> egui::ViewportInfo {
@@ -398,8 +398,15 @@ fn find_in_timeline_from_the_popped_out_browser_shows_the_history_tab() {
     let body_menu = |h: &Harness| matches!(h.app.menu.target, crate::context_menu::Target::Body { .. });
     assert!(right_click_rows(&mut h, browser, body_menu), "a body row opens its menu");
     let target = h.app.menu.target.clone();
-    let row = crate::context_menu::items(&h.app, &target).iter().position(|item| item.id == "ui.findTimeline");
-    h.app.menu.key_row = Some(row.expect("the body menu offers Find in Timeline"));
+    let rows = crate::context_menu::items(&h.app, &target);
+    let row = rows.iter().position(|item| item.id == "ui.findTimeline").expect("the body menu offers Find in Timeline");
+    let steps = rows[..row].iter().filter(|item| item.enabled && !item.is_sep() && !item.is_heading()).count();
+    send(browser, type_key(egui::Key::Home, ""));
+    frame(&mut h, Vec::new());
+    for _ in 0..steps {
+        send(browser, type_key(egui::Key::ArrowDown, ""));
+        frame(&mut h, Vec::new());
+    }
     send(browser, type_key(egui::Key::Enter, ""));
     frame(&mut h, Vec::new());
     frame(&mut h, Vec::new());

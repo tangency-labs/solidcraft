@@ -4132,6 +4132,7 @@ mod tests {
     use crate::geom::attribute::{AttributeStore, ObjectKey};
     use crate::geom::axis2_placement::Axis2Placement;
     use crate::geom::vector2d::Vec2;
+    use crate::math::det;
     use crate::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
     use crate::nurbs::b_spline_surface::BSplineSurface;
     use crate::surface::extend::Continuity;
@@ -7026,12 +7027,12 @@ mod tests {
             panic!("a box's top is a plane");
         };
         let q = *plane.position();
-        let (s, c) = (deg * PI / 180.0).sin_cos();
+        let (s, c) = det::sin_cos(deg * PI / 180.0);
         let (x, y) = (
             q.x_axis() * c + q.y_axis() * s,
             q.y_axis() * c - q.x_axis() * s,
         );
-        let (ts, tc) = (2.0 * PI / 180.0).sin_cos();
+        let (ts, tc) = det::sin_cos(2.0 * PI / 180.0);
         let tilt = |v: Vec3| Vec3::new(v.x, tc * v.y - ts * v.z, ts * v.y + tc * v.z);
         let given = Surface::from(Plane::new(
             q.origin() + Vec3::Z,

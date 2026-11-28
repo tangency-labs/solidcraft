@@ -28,7 +28,7 @@ use egui::{Key, Modifiers, Pos2, Rect, Sense, Stroke, pos2, vec2};
 use solidcraft_theme::Tokens;
 
 use crate::BackingTooltipExt as _;
-use crate::menu::{Item, Menu, MenuItem};
+use crate::menu::{Item, Menu};
 use crate::{Row, RowResp, eye_drag_id, tree_row, tree_row_rect};
 
 /// A row's identity, chosen by the host and stable from frame to frame.
@@ -882,28 +882,18 @@ impl Rows<'_> {
                 self.done.events.push(Event::Menu { id, at });
             }
         }
-        if let (NodeMenu::Items(items), Some(response)) = (menu, out.resp.as_ref()) {
-            let mut chosen = None;
-            Menu::context(response, |ui| {
-                for item in items() {
-                    if item.is_sep() {
-                        Menu::separator(ui);
-                        continue;
-                    }
-                    if item.is_heading() {
-                        Menu::heading(ui, &item.label);
-                        continue;
-                    }
-                    let entry = MenuItem::from_item(&item, false).show(ui);
-                    solidcraft_ui_registry::publish_handle(&format!("browser:menu:{}", item.id), entry.rect.center());
-                    if entry.clicked() && item.enabled {
-                        chosen = Some((item.id.clone(), item.params.clone()));
-                        ui.close();
-                    }
-                }
-            });
-            if let Some((action, params)) = chosen {
-                self.done.events.push(Event::Action { id, action, params });
+        if let (NodeMenu::Items(items), Some(response)) = (menu, out.resp.as_ref())
+            && Menu::context_active(response)
+        {
+            let entries = items()
+                .into_iter()
+                .map(|mut item| {
+                    item.aliases.push(format!("browser:menu:{}", item.id));
+                    item
+                })
+                .collect::<Vec<_>>();
+            if let Some(picked) = Menu::context_items(response, &entries) {
+                self.done.events.push(Event::Action { id, action: picked.id, params: picked.params });
             }
         }
         let mut drag_started = false;

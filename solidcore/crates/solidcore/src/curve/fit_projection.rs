@@ -6,6 +6,7 @@
 //! certificate; ill-conditioned joins retain the defining Bézier spans. Extent subdivision has
 //! an explicit depth bound of 48 and a caller work budget; no input-dependent recursion.
 
+use crate::math::det;
 use crate::math::Vec2;
 use crate::prism::read::PlanarSpline;
 use crate::{Result, SolidError};
@@ -41,7 +42,7 @@ fn divided(p: Vec2, d: f64) -> Vec2 {
 }
 fn distance(a: Vec2, b: Vec2) -> f64 {
     let d = a - b;
-    d.x.hypot(d.y)
+    det::hypot(d.x, d.y)
 }
 fn lerp(a: Vec2, b: Vec2, t: f64) -> Vec2 {
     a + (b - a) * t
@@ -751,11 +752,11 @@ mod tests {
                     .map(|i| {
                         if periodic {
                             let a = std::f64::consts::TAU * i as f64 / (count - 1) as f64;
-                            Vec2::new(10. * a.cos(), 7. * a.sin())
+                            Vec2::new(10. * det::cos(a), 7. * det::sin(a))
                         } else {
                             Vec2::new(
                                 0.01 * (i * i) as f64 + i as f64 * 0.1,
-                                (i as f64 * 0.37).sin() * 3.,
+                                det::sin(i as f64 * 0.37) * 3.,
                             )
                         }
                     })

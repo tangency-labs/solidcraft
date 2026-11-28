@@ -431,16 +431,19 @@ pub fn paint_assembly_section(
                     state.selected_features.clear();
                 }
 
-                crate::ui_kit::Menu::context(&resp, |ui| {
-                    crate::dialogs_assembly::joint_menu(app, ui, (joint.id, joint.kind, joint.suppressed), &mut open, &mut run);
-                    if run.is_some() && run_targets.is_empty() {
-                        run_targets = if state.selected_joints.contains(&joint.id) {
-                            app.session.doc.assembly.joints.iter().map(|j| j.id).filter(|id| state.selected_joints.contains(id)).collect()
-                        } else {
-                            vec![joint.id]
-                        };
+                if crate::ui_kit::Menu::context_active(&resp) {
+                    let items = crate::dialogs_assembly::joint_menu_items(app, (joint.id, joint.kind, joint.suppressed));
+                    if let Some(picked) = crate::ui_kit::Menu::context_items(&resp, &items) {
+                        crate::dialogs_assembly::run_joint_menu_item(app, &picked, (joint.id, joint.suppressed), &mut open, &mut run);
+                        if run.is_some() && run_targets.is_empty() {
+                            run_targets = if state.selected_joints.contains(&joint.id) {
+                                app.session.doc.assembly.joints.iter().map(|j| j.id).filter(|id| state.selected_joints.contains(id)).collect()
+                            } else {
+                                vec![joint.id]
+                            };
+                        }
                     }
-                });
+                }
 
                 let stroke_color = if is_selected {
                     if is_active { t.text } else { t.text_dim }

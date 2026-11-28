@@ -99,6 +99,7 @@ use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::acos;
 use crate::geom::vector3d::Point3;
 use crate::geom::vector3d::Vec3;
+use crate::math::det;
 use crate::math::{
     max2, min2, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE,
 };
@@ -2906,7 +2907,7 @@ fn coons_corner_stations(stations: &[f64], fixed: [bool; 2]) -> Vec<f64> {
             continue;
         };
         // 2^-(e / 4) is exact, and so the product's only rounding is the one of `q`
-        let f = q * 0.5_f64.powi(i32::try_from(e / 4).unwrap_or(0));
+        let f = q * det::powi(0.5_f64, i32::try_from(e / 4).unwrap_or(0));
         if at_start {
             corners.push(s0 + (s1 - s0) * f);
         }
@@ -4280,11 +4281,11 @@ mod tests {
             Plane::create_canonical(&Axis2Placement::new(
                 Point3::ZERO,
                 Vec3::X,
-                Vec3::new(0.0, a.cos(), a.sin()),
+                Vec3::new(0.0, det::cos(a), det::sin(a)),
             ))
             .unwrap(),
         );
-        let n_bot = Vec3::new(0.0, -a.sin(), a.cos());
+        let n_bot = Vec3::new(0.0, -det::sin(a), det::cos(a));
         let uv = |x: f64| {
             BSplineCurve::create_line_segment(2, Point3::new(x, 0.0, 0.0), Point3::new(x, 1.0, 0.0))
                 .unwrap()

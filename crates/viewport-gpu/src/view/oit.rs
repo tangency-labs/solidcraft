@@ -8,7 +8,10 @@
 //! sorted, on the CPU or the GPU, however many see-through triangles there are. The targets share
 //! the frame's depth (tested, not written), so the opaque model hides what lies behind it.
 
-use super::{TriSource, color_layout, depth_compare, instance_layout, planned_layout, shared_layout, tri_layout};
+use super::{
+    SEE_THROUGH_BIAS, TriSource, color_layout, depth_bias, depth_compare, face_push, instance_layout, planned_layout, push_options, shared_layout,
+    split_push, tri_layout,
+};
 
 /// The accumulated colour (premultiplied, weighted) and alpha.
 const ACCUM: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
@@ -101,6 +104,14 @@ impl Pipelines {
         let built_buffers = [Some(tri_layout())];
         let evaluated = [Some(planned_layout()), Some(color_layout())];
         let placed = [Some(shared_layout()), Some(instance_layout())];
+        let (depth_stencil, push) = split_push(depth.map(|format| wgpu::DepthStencilState {
+            format,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(depth_compare(reversed, wgpu::CompareFunction::LessEqual)),
+            stencil: Default::default(),
+            bias: depth_bias(reversed, SEE_THROUGH_BIAS),
+        }));
+        let push = face_push(push);
         let pipeline = |label: &str, source: TriSource| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
@@ -113,16 +124,10 @@ impl Pipelines {
                         TriSource::Planned => &evaluated[..],
                         TriSource::Instanced | TriSource::InstancedFlat => &placed[..],
                     },
-                    compilation_options: Default::default(),
+                    compilation_options: push_options(&push),
                 },
                 primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
-                depth_stencil: depth.map(|format| wgpu::DepthStencilState {
-                    format,
-                    depth_write_enabled: Some(false),
-                    depth_compare: Some(depth_compare(reversed, wgpu::CompareFunction::LessEqual)),
-                    stencil: Default::default(),
-                    bias: Default::default(),
-                }),
+                depth_stencil: depth_stencil.clone(),
                 multisample,
                 fragment: Some(wgpu::FragmentState {
                     module,
