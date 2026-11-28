@@ -323,7 +323,8 @@ pub enum ThreadHand {
 }
 
 /// A thread form: ISO metric and Unified inch 60°, metric trapezoidal 30°, Acme 29°, metric buttress 3°/30°,
-/// buttress inch 7°/45°, square, and the 55° and 60° pipe threads.
+/// buttress inch 7°/45°, square, the 55° and 60° pipe threads, and a custom profile (the ISO 68-1
+/// basic profile at the included angle its designation gives).
 #[derive(Clone, Copy, Debug, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ThreadForm {
@@ -338,6 +339,7 @@ pub enum ThreadForm {
     Rp,
     Bspt,
     Npt,
+    Custom,
 }
 
 impl From<&solidcraft_doc::ThreadInfo> for ModelThread {
@@ -363,6 +365,7 @@ impl From<&solidcraft_doc::ThreadInfo> for ModelThread {
                 Form::Rp => ThreadForm::Rp,
                 Form::Bspt => ThreadForm::Bspt,
                 Form::Npt => ThreadForm::Npt,
+                Form::Custom => ThreadForm::Custom,
             },
             hand: match t.hand {
                 Hand::Right => ThreadHand::Right,
