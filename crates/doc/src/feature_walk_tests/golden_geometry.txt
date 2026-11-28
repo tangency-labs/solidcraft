@@ -2,6 +2,9 @@ newer_file_feature
 frame_end_cap
   moves: ends[0].plane.axis_dir[0], ends[0].plane.axis_dir[1], ends[0].plane.axis_origin[0], ends[0].plane.axis_origin[1], ends[0].plane.axis_origin[2]
 frame_member_turn
+dogbone
+  moves: along[0], along[2], edges[0][0], edges[0][1], edges[0][2], faces[0][0], faces[0][1], faces[0][2]
+  face points: [0, 0, 0]
 frame_gusset
   moves: supports[0].plane.axis_dir[0], supports[0].plane.axis_dir[1], supports[0].plane.axis_origin[0], supports[0].plane.axis_origin[1], supports[0].plane.axis_origin[2], supports[1].plane.axis_dir[0], supports[1].plane.axis_dir[1], supports[1].plane.axis_origin[0], supports[1].plane.axis_origin[1], supports[1].plane.axis_origin[2]
 body_transfer
@@ -50,6 +53,7 @@ cone
   moves: axis[0], axis[2], base[0], base[1], base[2]
   placement: cone.x, cone.y, cone.z
 combine
+finger_joint
 pattern_rectangular
   moves: pattern.dir1[0], pattern.dir1[1], pattern.dir2[1], pattern.dir2[2]
 pattern_circular
@@ -160,6 +164,9 @@ sheet_base
 sheet_contour
 sheet_flange
   moves: edges[0].point[0], edges[0].point[1], edges[0].point[2], edges[1].point[0], edges[1].point[1], edges[1].point[2]
+sheet_flange_with_corners
+  moves: edges[0].point[0], edges[0].point[1], edges[0].point[2], edges[1].point[0], edges[1].point[1], edges[1].point[2]
+sheet_corner_join
 sheet_hem
   moves: edges[0][0], edges[0][1], edges[0][2]
 sheet_perforate
@@ -228,6 +235,9 @@ surface_match
 surface_fair
   moves: faces[0][0], faces[0][1], faces[0][2]
   face points: [0, 0, 0]
+surface_morph
+  moves: base_face[0], base_face[1], base_face[2], control_face[0], control_face[1], control_face[2], faces[0][0], faces[0][1], faces[0][2]
+  face points: [0, 0, 0]
 unstitch
   moves: faces[0][0], faces[0][1], faces[0][2]
 reverse_normal
@@ -241,6 +251,8 @@ surface_extend_to_plane
   moves: edges[0][0], edges[0][1], edges[0][2], up_to.plane.axis_dir[0], up_to.plane.axis_dir[1], up_to.plane.axis_origin[0], up_to.plane.axis_origin[1], up_to.plane.axis_origin[2]
 surface_extend_to_face
   moves: edges[0][0], edges[0][1], edges[0][2], up_to.face.point[0], up_to.face.point[1], up_to.face.point[2]
+surface_extend_law
+  moves: edges[0][0], edges[0][1], edges[0][2]
 surface_ruled
   moves: direction[0], direction[2], edges[0][0], edges[0][1], edges[0][2], face[1], face[2]
   face points: [1, 0, 0]

@@ -94,6 +94,7 @@ fn object(kind: CheckedKind, id: u64) -> CheckedObject {
 /// What sheet `sheet` shows (`shown`): its views that draw nothing, its dimensions that don't stand
 /// with the model, what it shows as it last was, and what lies outside it.
 fn on_sheet(d: &Drawing, sheet: u64, shown: SheetScene) -> Result<Vec<Finding>> {
+    let outside = outside_sheet(d, sheet, &shown, CHECK)?;
     let mut out: Vec<Finding> = shown.views.iter().filter_map(|view| view_finding(sheet, view)).collect();
     let dimensions =
         shown.dimensions.into_iter().filter_map(|state| status_finding(sheet, object(CheckedKind::Dimension, state.dimension), state.status));
@@ -116,12 +117,21 @@ fn on_sheet(d: &Drawing, sheet: u64, shown: SheetScene) -> Result<Vec<Finding>> 
             out.push(finding(FindingKind::OutOfDate, sheet, object(kind, id), last.into()));
         }
     }
+    out.extend(outside);
+    Ok(out)
+}
+
+/// What lies outside sheet `sheet` as it is shown (`shown`), in the order of the records named: the
+/// one rule for `drawing.check` and for what `drawing.export` and `drawing.print` say of the sheets
+/// they write. `cmd` is the command an error names.
+pub(super) fn outside_sheet(d: &Drawing, sheet: u64, shown: &SheetScene, cmd: &str) -> Result<Vec<Finding>> {
+    let mut out = Vec::new();
     // A view belongs where its sheet's Room says, by its boundary as the sheet shows it. Anything
     // else is held to the paper, whose box is display data, as the scene's boxes are: it decides
     // nothing in the model.
-    let record = crate::drawing_view::sheet(d, sheet, CHECK)?;
-    let room = Room::on(record, CHECK)?;
-    let size = record.sheet.size_mm().map_err(|e| bad(CHECK, e.to_string()))?;
+    let record = crate::drawing_view::sheet(d, sheet, cmd)?;
+    let room = Room::on(record, cmd)?;
+    let size = record.sheet.size_mm().map_err(|e| bad(cmd, e.to_string()))?;
     let paper = Aabb2 { min: Vec2::ZERO, max: size }.inflated(EPS);
     let off = |bounds: Aabb2| !(paper.contains(bounds.min) && paper.contains(bounds.max));
     let off_paper = |kind, id| finding(FindingKind::OutsideSheet, sheet, object(kind, id), "it lies off the paper".into());
@@ -162,6 +172,8 @@ fn on_sheet(d: &Drawing, sheet: u64, shown: SheetScene) -> Result<Vec<Finding>> 
             out.push(off_paper(CheckedKind::Image, group.object));
         }
     }
+    // By the record each names, as the check lists them; a view's two findings keep their order.
+    out.sort_by_cached_key(|f| ids::decode(&f.object.id));
     Ok(out)
 }
 

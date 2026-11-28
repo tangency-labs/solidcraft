@@ -61,6 +61,13 @@
 //!   the edge: two of them closer than 0.001° there are coincident only where their faces
 //!   stay within the tolerance band of each other's plane; walls 3.3e-7 rad apart through
 //!   the edge, 2.8e-5 apart 85 mm from it, are classified by their exact binormals.
+//! - **The parting step** (not upstream). Once the steps grow with how fast the faces part,
+//!   they aim by the parabola through the edge and the last two steps where the faces are
+//!   twice the tolerance apart, or, where the parabola tops out lower (faces that cross again),
+//!   midway between the tolerance and its top: past the exit at the tolerance, before the
+//!   faces turn back. Upstream aimed at the tolerance along a line through 0, and faces
+//!   parting at a small angle settled short of it until their steady distance read as a
+//!   coincidence.
 //! - **Loops.** The step-off loops of both classifications keep upstream's bound (20
 //!   rounds of growing step-offs). No recursion.
 
@@ -321,6 +328,7 @@ pub fn calculate_tight_bounding_box(
 
     if !curve_bbox.is_contained_by(&edge_bbox, tol) {
         // Do the tight BBox computation.
+        k.work_counters.add_edge_tight_box_solve();
         let curve_bbox = curve.calculate_tight_bounding_box(k, &e.interval)?;
 
         edge_bbox = edge_bbox.union(&curve_bbox);
@@ -753,6 +761,52 @@ pub fn radial_sector_classify_at_edge(
     )
 }
 
+/// The next step off the edge of [`sector_classify`] (not upstream): where two faces that
+/// leave the edge at a small angle are farther apart than the `tolerance` and still parting,
+/// from their distances `d1` and `d2` at the last two steps `s1` and `s2` (`(s1, d1)`,
+/// `(s2, d2)`). `None` where the model never rises.
+///
+/// The distance of two faces stepped `s` off a common edge is `θ s + κ s² / 2` to second
+/// order, `θ` their angle at the edge and `κ` the difference of their normal curvatures across
+/// it, and it is 0 at the edge. That parabola through the edge and the two steps is
+/// `d(s) = a s + b s²`, `a + b sᵢ = dᵢ / sᵢ`: quadratic interpolation through three points
+/// (Muller's method, Burden and Faires, *Numerical Analysis*, §2.6), one of them the edge, a
+/// known root. The step solves `d(s) = target` for its first root,
+/// `s = 2 target / (a + √(a² + 4 b target))`.
+///
+/// The exit needs the faces farther apart than the tolerance, so the target is above it:
+/// twice it. Faces that cross again part only so far: a cylinder of radius r sunk d into a
+/// plane meets it in two lines 2√(2rd) apart, and between them their distance rises from 0
+/// to d at the middle and falls back (`b = −1/(2r)`). Past the middle the cylinder turns back
+/// towards the plane, its binormal crosses the plane's, and the sector reads the other side;
+/// past the far line the step leaves the face. So where the parabola's top, `a² / (−4 b)`,
+/// is under three times the tolerance, the target is midway between the tolerance and the
+/// top, which the faces reach before it. A top under the tolerance is aimed at itself: the
+/// faces never part, their distance stops changing there and reads as a coincidence.
+fn parting_step(last: (f64, f64), this: (f64, f64), tolerance: f64) -> Option<f64> {
+    let ((s1, d1), (s2, d2)) = (last, this);
+    if !(s1 > 0.0 && s2 > 0.0) || s1 == s2 {
+        return None;
+    }
+    let b = (d2 / s2 - d1 / s1) / (s2 - s1);
+    let a = d1 / s1 - b * s1;
+    // the parabola tops out at s = −a / (2b), where the faces are a² / (−4b) apart
+    let tops_out = b < 0.0 && a > 0.0;
+    let target = if tops_out {
+        (2.0 * tolerance).min(0.5 * (tolerance - a * a / (4.0 * b)))
+    } else {
+        2.0 * tolerance
+    };
+    let disc = a * a + 4.0 * b * target;
+    if disc >= 0.0 && a + disc.sqrt() > 0.0 {
+        Some(2.0 * target / (a + disc.sqrt()))
+    } else if tops_out {
+        Some(-a / (2.0 * b))
+    } else {
+        None
+    }
+}
+
 /// The body of [`radial_sector_classify_between`] (`step` set) and
 /// [`radial_sector_classify_at_edge`] (`step` clear: `None` instead of the first step).
 #[allow(clippy::too_many_arguments)] // upstream's arguments and the step choice
@@ -833,7 +887,7 @@ fn sector_classify(
     let mut ang1 = 0.0;
     let mut ang2 = 0.0;
     let mut ang3 = 0.0;
-    let mut last_step_off_distance = 0.0;
+    let mut last_step_off_distance: f64;
 
     // detect special case: all planar surfaces
     let all_planes = on_plane(brep, sector_eu)?
@@ -862,7 +916,10 @@ fn sector_classify(
     let mut sector_left = false;
     let mut radial_left = false;
 
+    // The step of the previous round, whose distance is `last_min`.
+    let mut last_round_step = 0.0;
     while !done {
+        let round_step = step_off_distance;
         let (last1, last2) = (s1, s2);
         // 1. get Edgeuse->Face stepoff binormal
         let off1 = !sector_left
@@ -1122,9 +1179,22 @@ fn sector_classify(
                     last_step_off_distance = step_off_distance;
                     step_off_distance = 2.0 * last_step_off_distance;
                 } else {
-                    let ratio = (step_off_distance - last_step_off_distance) / denom;
-                    last_step_off_distance = step_off_distance;
-                    step_off_distance = tolerance * ratio;
+                    let step = step_off_distance;
+                    last_step_off_distance = step;
+                    // (not upstream) The step aims where the faces' distance, modelled through
+                    // the edge and the last two steps ([`parting_step`]), is past the exit above
+                    // and still rising. Upstream's `(Δs / Δd) · tolerance` aims at the tolerance
+                    // along a line through 0: faces parting at a small angle and faster than
+                    // linearly (a sphere dipped 2e-5 into a face leaves it at 0.094 degrees)
+                    // settle short of it, their distance stops changing, and once the rounds run
+                    // out that reads as a coincidence. A falling distance doubles the step, as
+                    // upstream's negative step did, and so does a model that never rises.
+                    step_off_distance = if denom < 0.0 {
+                        -1.0
+                    } else {
+                        parting_step((last_round_step, last_min), (step, min_dist), tolerance)
+                            .unwrap_or(-1.0)
+                    };
                     // Don't let step distance grow or shrink by more than a factor of 3
                     if step_off_distance < 0.0 {
                         step_off_distance = 2.0 * last_step_off_distance;
@@ -1234,6 +1304,7 @@ fn sector_classify(
             break;
         }
 
+        last_round_step = round_step;
         last2_min = last_min;
         last_min = min_dist;
     }
@@ -1459,6 +1530,7 @@ fn euclid_step_off(
 mod tests {
     use super::*;
     use crate::curve::line::{BoundedLineOptions, Line};
+    use crate::math::det;
     use crate::topology::{
         Edge, Edgeuse, EdgeuseOwner, Region, Shell, Vertex, Vertexuse, VertexuseOwner,
     };
@@ -1622,7 +1694,7 @@ mod tests {
         assert!((gap(c.point) - c.distance).abs() < 1e-6, "{c:?}");
         for i in 0..360 {
             let a = f64::from(i).to_radians();
-            let p = Point3::new(5.0 * a.cos(), 5.0 * a.sin(), 0.0);
+            let p = Point3::new(5.0 * det::cos(a), 5.0 * det::sin(a), 0.0);
             assert!(c.distance <= gap(p) + 1e-6, "{p:?} is nearer than {c:?}");
         }
     }

@@ -1217,7 +1217,8 @@ fn copper_overlay_clips_a_drill_crossing_a_zone_boundary() {
       (via (at 2.1 10) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
       (zone (net 1) (net_name "GND") (layer "F.Cu")
         (filled_polygon (layer "F.Cu") (pts (xy 2 2) (xy 18 2) (xy 18 18) (xy 2 18)))))"#;
-    let options = KicadOptions { copper: KicadCopper::Overlay, components: false, silkscreen: false, ..Default::default() };
+    // The via is drilled: by default only mounting holes are.
+    let options = KicadOptions { copper: KicadCopper::Overlay, components: false, silkscreen: false, holes: KicadHoles::All, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "crossing.kicad_pcb", &options, &mut load).unwrap();
     assert!(imported.feature.warnings.is_empty(), "{:?}", imported.feature.warnings);
@@ -1243,7 +1244,7 @@ fn modelled_copper_is_a_closed_prism() {
       (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
       (segment (start 1 2) (end 10 2) (width 0.3) (layer "F.Cu") (net 1))
       (via (at 14 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1)))"#;
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "prism.kicad_pcb", &options, &mut load).unwrap();
     assert!(imported.feature.warnings.is_empty(), "{:?}", imported.feature.warnings);
@@ -1290,7 +1291,7 @@ fn a_fill_outline_that_touches_itself_keeps_its_area() {
     let points = [a[0], a[1], a[2], b[1], b[2], b[3], b[0], a[3]];
     let region = Region2 { outer: Loop2::polygon(&points), holes: Vec::new() };
     let loops = region_loops(&region).unwrap();
-    let (points, triangles) = solidcraft_kernel::services::tess::triangulate_planar(&loops).unwrap();
+    let (points, triangles) = solidcraft_kernel::tessellate::triangulate_planar(&loops).unwrap();
     let area: f64 = triangles
         .iter()
         .map(|[a, b, c]| {
@@ -1313,7 +1314,7 @@ fn a_wide_trace_reaches_the_copper_it_ends_on() {
       (segment (start 20 5) (end 30 5) (width 1.0) (layer "F.Cu") (net 1))
       (footprint "test:TH" (layer "F.Cu") (at 30 5)
         (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1.2) (layers "F.Cu" "B.Cu"))))"#;
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "wide.kicad_pcb", &options, &mut load).unwrap();
     let area = layer_area(&imported, "Copper F.Cu", 0.035);
@@ -1343,7 +1344,7 @@ fn trace_into_a_via_stops_at_its_drill() {
       (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
       (via (at 10 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
       (segment (start 10 5) (end 16 5) (width 0.4) (layer "F.Cu") (net 1)))"#;
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "via.kicad_pcb", &options, &mut load).unwrap();
     let area = copper_area(&imported, "Copper F.Cu", 0.035);
@@ -1361,7 +1362,7 @@ fn a_trace_crossing_a_hole_is_cut_at_the_hole() {
       (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
       (via (at 10 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
       (segment (start 6 5) (end 14 5) (width 0.4) (layer "F.Cu") (net 1)))"#;
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "via.kicad_pcb", &options, &mut load).unwrap();
     let area = copper_area(&imported, "Copper F.Cu", 0.035);
@@ -1397,7 +1398,7 @@ fn traces_stop_at_drilled_holes() {
       (footprint "test:TH" (layer "F.Cu") (at 10 5)
         (pad "1" thru_hole circle (at 0 0) (size 3 3) (drill 1.2) (layers "F.Cu" "B.Cu"))))"#;
     // Only the trace's copper: the pad's own ring is not built.
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "trace.kicad_pcb", &options, &mut load).unwrap();
     let area = layer_area(&imported, "Copper F.Cu", 0.035);
@@ -1429,7 +1430,7 @@ fn via_copper_is_a_ring_around_its_drill() {
     let source = r#"(kicad_pcb (general (thickness 1.6))
       (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
       (via (at 10 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1)))"#;
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "via.kicad_pcb", &options, &mut load).unwrap();
     let expected = std::f64::consts::PI * (0.6 * 0.6 - 0.3 * 0.3);
@@ -1447,7 +1448,7 @@ fn through_hole_pad_copper_has_the_drill_through_it() {
       (footprint "test:TH" (layer "F.Cu") (at 10 5)
         (property "Reference" "J1")
         (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1) (layers "F.Cu" "B.Cu"))))"#;
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "pad.kicad_pcb", &options, &mut load).unwrap();
     let expected = std::f64::consts::PI * (1.0 - 0.25);
@@ -1472,7 +1473,8 @@ fn a_pad_offset_moves_the_copper_off_its_hole() {
                 (property "Reference" "J1")
                 {pad}))"#
         );
-        let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+        // The pad holes come in: by default only mounting holes are drilled.
+        let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, holes: KicadHoles::Pads, ..Default::default() };
         let mut load = |_: &str| Err("not used".to_string());
         let imported = read_kicad(source.as_bytes(), "offset.kicad_pcb", &options, &mut load).unwrap();
         let board = parse_kicad_board(source.as_bytes(), "offset.kicad_pcb").unwrap();
@@ -1690,6 +1692,7 @@ fn model_face_colours_become_one_mesh_each() {
         opacity: 1.0,
         faces: vec![solidcraft_kernel::FacePaint { face: 0, color: [0.0, 0.0, 1.0], opacity: 1.0, name: None }],
         name: None,
+        layer: None,
     }));
     let meshes = model_body_meshes("part", &painted, Some([1.0, 0.0, 0.0])).expect("model meshes");
     assert_eq!(meshes.len(), 2, "{:?}", meshes.iter().map(|m| m.color).collect::<Vec<_>>());
@@ -1727,7 +1730,7 @@ fn a_pad_opens_up_for_any_hole_it_covers() {
       (via (at 5 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
       (footprint "part" (layer "F.Cu") (at 0 0)
         (pad "1" smd rect (at 5 5) (size 3 3) (layers "F.Cu" "F.Mask"))))"#;
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "unplated.kicad_pcb", &options, &mut load).unwrap();
     // A bare pad stands above the masked copper, so it is PAD_PROUD thicker.
@@ -2115,4 +2118,221 @@ fn footprint_copper_graphics_and_wildcard_pads_reach_the_inner_layers_or_are_rep
     let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
     assert!(!meshes.iter().any(|mesh| mesh.name.contains("In1")), "no inner copper in a board thinner than the foil");
     assert!(imported.feature.warnings.iter().any(|w| w.contains("thinner")), "{:?}", imported.feature.warnings);
+}
+
+/// One hole of each kind: a via, a plated pin, a peg's unplated hole, a mounting hole's plated
+/// pad, and a pin cut in half by the board's edge (a castellated hole).
+const HOLES: &str = r#"(kicad_pcb (general (thickness 1.6))
+  (gr_rect (start 0 0) (end 30 10) (layer "Edge.Cuts"))
+  (via (at 5 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
+  (footprint "Connector:Pin" (layer "F.Cu") (at 10 5)
+    (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1) (layers "*.Cu" "*.Mask")))
+  (footprint "Connector:Peg" (layer "F.Cu") (at 15 5)
+    (pad "" np_thru_hole circle (at 0 0) (size 1.5 1.5) (drill 1.5) (layers "*.Cu" "*.Mask")))
+  (footprint "MountingHole:MountingHole_3.2mm_M3_Pad" (layer "F.Cu") (at 22 5)
+    (pad "1" thru_hole circle (at 0 0) (size 6 6) (drill 3.2) (layers "*.Cu" "*.Mask")))
+  (footprint "Connector:Castellated" (layer "F.Cu") (at 27 10)
+    (pad "1" thru_hole circle (at 0 0) (size 1.6 1.6) (drill 1) (layers "*.Cu" "*.Mask"))))"#;
+
+#[test]
+fn each_holes_choice_keeps_its_own_holes() {
+    let (via, pin, peg, mounting, edge) = ([5.0, -5.0], [10.0, -5.0], [15.0, -5.0], [22.0, -5.0], [27.0, -10.0]);
+    for (holes, expected) in [
+        (KicadHoles::None, vec![edge]),
+        (KicadHoles::Mounting, vec![peg, mounting, edge]),
+        (KicadHoles::Pads, vec![pin, peg, mounting, edge]),
+        (KicadHoles::All, vec![via, pin, peg, mounting, edge]),
+    ] {
+        let mut board = parse_kicad_board(HOLES.as_bytes(), "holes.kicad_pcb").unwrap();
+        keep_holes(&mut board, holes);
+        let mut centres: Vec<[f64; 2]> = board.drills.iter().map(|d| d.center).collect();
+        centres.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        assert_eq!(centres, expected, "{holes:?}");
+    }
+}
+
+/// A 4 × 0.5 slot 1 mm from the board's edge: lying along the edge it keeps 0.75 mm clear and is
+/// left out with the other holes; standing across the edge it cuts the board and stays.
+#[test]
+fn a_slot_is_kept_for_the_edge_only_when_its_own_shape_reaches_it() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 30 10) (layer "Edge.Cuts"))
+      (footprint "Connector:Along" (layer "F.Cu") (at 10 9)
+        (pad "1" thru_hole oval (at 0 0) (size 4.5 1) (drill oval 4 0.5) (layers "*.Cu" "*.Mask")))
+      (footprint "Connector:Across" (layer "F.Cu") (at 20 9)
+        (pad "1" thru_hole oval (at 0 0) (size 1 4.5) (drill oval 0.5 4) (layers "*.Cu" "*.Mask"))))"#;
+    let mut board = parse_kicad_board(source.as_bytes(), "slots.kicad_pcb").unwrap();
+    keep_holes(&mut board, KicadHoles::None);
+    let centres: Vec<[f64; 2]> = board.drills.iter().map(|d| d.center).collect();
+    assert_eq!(centres, vec![[20.0, -9.0]]);
+}
+
+#[test]
+fn holes_default_to_mounting_holes_only() {
+    assert_eq!(KicadOptions::default().holes, KicadHoles::Mounting);
+    for holes in [KicadHoles::None, KicadHoles::Mounting, KicadHoles::Pads, KicadHoles::All] {
+        assert_eq!(KicadHoles::parse(holes.as_str()), Some(holes));
+    }
+    assert_eq!(KicadHoles::parse(" Vias "), None);
+}
+
+#[test]
+fn a_hole_left_out_is_left_out_of_every_layer() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (via (at 5 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
+      (footprint "Connector:Pin" (layer "F.Cu") (at 10 5)
+        (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1) (layers "*.Cu" "*.Mask")))
+      (footprint "Connector:Peg" (layer "F.Cu") (at 15 5)
+        (pad "" np_thru_hole circle (at 0 0) (size 1.5 1.5) (drill 1.5) (layers "*.Cu" "*.Mask"))))"#;
+    // The substrate is whole.
+    let mut board = parse_kicad_board(source.as_bytes(), "closed.kicad_pcb").unwrap();
+    keep_holes(&mut board, KicadHoles::None);
+    let mesh = kicad_board_mesh(&board, 1.6).unwrap();
+    let body = solidcraft_kernel::mesh_body(&mesh.positions, &mesh.triangles).unwrap();
+    let volume = solidcraft_kernel::measure(&body).unwrap().volume;
+    assert!((volume - 200.0 * 1.6).abs() < 1e-6, "{volume}");
+    // The copper closes over the holes: the via is a disc, the pin's pad is whole, and the peg,
+    // which is only a hole, leaves nothing.
+    let options = KicadOptions { holes: KicadHoles::None, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(source.as_bytes(), "closed.kicad_pcb", &options, &mut load).unwrap();
+    let via = copper_area(&imported, "Copper F.Cu", 0.035);
+    assert!((via - std::f64::consts::PI * 0.36).abs() < 0.01, "via: {via}");
+    let pads = copper_area(&imported, "Copper F.Cu pads", 0.035 + 0.005);
+    assert!((pads - std::f64::consts::PI).abs() < 0.02, "pads: {pads}");
+}
+
+#[test]
+fn plated_hole_walls_take_the_pads_colour() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "Connector:Pin" (layer "F.Cu") (at 5 5)
+        (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1) (layers "*.Cu" "*.Mask")))
+      (footprint "Connector:Slot" (layer "F.Cu") (at 10 5)
+        (pad "1" thru_hole oval (at 0 0 90) (size 3 1.5) (drill oval 2 0.8) (layers "*.Cu" "*.Mask")))
+      (footprint "Connector:Peg" (layer "F.Cu") (at 15 5)
+        (pad "" np_thru_hole circle (at 0 0) (size 1.5 1.5) (drill 1.5) (layers "*.Cu" "*.Mask"))))"#;
+    let board = parse_kicad_board(source.as_bytes(), "plated.kicad_pcb").unwrap();
+    assert!(board_bodies(&board, 1.6, false).unwrap().0.iter().all(|body| body.paint().is_none()), "no copper, no plating");
+    let bodies = board_bodies(&board, 1.6, true).unwrap().0;
+    let [body] = bodies.as_slice() else { panic!("one board body") };
+    let paint = body.paint().expect("the plated walls are painted");
+    let painted: HashSet<usize> = paint.faces.iter().map(|f| f.face).collect();
+    assert!(paint.faces.iter().all(|f| f.color == PAD_COLOR), "{paint:?}");
+    // Each side face by the profile segment it was extruded from: the outline, the pin's wall, the
+    // slot's wall or the peg's.
+    let mut walls = [0usize; 3];
+    for (face, source) in body.face_sources().expect("an extrusion knows its faces").iter().enumerate() {
+        let wall = match source {
+            Some(solidcraft_kernel::FaceSource::ExtrudeSide { segment, .. }) => {
+                let m = segment.mid();
+                ((m.y + 5.0).abs() < 1.6 && m.x > 1.0 && m.x < 19.0).then_some(if m.x < 7.5 {
+                    0
+                } else if m.x < 12.5 {
+                    1
+                } else {
+                    2
+                })
+            }
+            _ => None,
+        };
+        let plated = matches!(wall, Some(0 | 1));
+        assert_eq!(painted.contains(&face), plated, "face {face} ({wall:?}) {source:?}");
+        if let Some(wall) = wall {
+            walls[wall] += 1;
+        }
+    }
+    assert!(walls.iter().all(|n| *n > 0), "every hole has a wall: {walls:?}");
+    // The colours go into the board's STEP file, which is how the design gets them.
+    let options = KicadOptions { holes: KicadHoles::All, components: false, silkscreen: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let step = read_kicad(source.as_bytes(), "plated.kicad_pcb", &options, &mut load).unwrap().board_step.expect("a solid board");
+    let imported = solidcraft_kernel::step_import_shared(&step).unwrap();
+    let faces: usize = imported.bodies.iter().filter_map(|b| b.body.paint()).map(|p| p.faces.len()).sum();
+    assert_eq!(faces, painted.len());
+}
+
+/// A plated half-hole on the board's edge paints its wall, though the edge cuts it as chords whose
+/// middles fall inside it; a plated hole 0.001 mm clear of the edge paints its own wall and not the
+/// board's side, whose middle passes that close to it.
+#[test]
+fn a_plated_half_hole_paints_its_wall_and_a_hole_near_the_edge_only_its_own() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "Module:Castellated" (layer "F.Cu") (at 5 0)
+        (pad "1" thru_hole circle (at 0 0) (size 1.6 1.6) (drill 1) (layers "*.Cu" "*.Mask")))
+      (footprint "Connector:Pin" (layer "F.Cu") (at 10 8.999)
+        (pad "1" thru_hole circle (at 0 0) (size 2.4 2.4) (drill 2) (layers "*.Cu" "*.Mask"))))"#;
+    let board = parse_kicad_board(source.as_bytes(), "edge.kicad_pcb").unwrap();
+    let bodies = board_bodies(&board, 1.6, true).unwrap().0;
+    let [body] = bodies.as_slice() else { panic!("one board body") };
+    let painted: HashSet<usize> = body.paint().map(|p| p.faces.iter().map(|f| f.face).collect()).unwrap_or_default();
+    // In the board's frame Y is KiCad's turned over: the half-hole is about (5, 0), the near hole
+    // about (10, -8.999), and the board's side the near hole almost touches is y = -10.
+    let (half, near) = (Vec2::new(5.0, 0.0), Vec2::new(10.0, -8.999));
+    let dist = |p: Vec2, q: Vec2| (p.x - q.x).hypot(p.y - q.y);
+    let (mut half_walls, mut near_walls) = (0, 0);
+    for (face, source) in body.face_sources().expect("an extrusion knows its faces").iter().enumerate() {
+        let Some(solidcraft_kernel::FaceSource::ExtrudeSide { segment, .. }) = source else { continue };
+        let (a, m, b) = (segment.start(), segment.mid(), segment.end());
+        let side = matches!(segment, Seg2::Line { .. }) && dist(a, b) > 2.0;
+        let on_half = !side && [a, m, b].iter().all(|p| (dist(*p, half) - 0.5).abs() < 0.03);
+        let on_near = !side && [a, m, b].iter().all(|p| (dist(*p, near) - 1.0).abs() < 0.03);
+        half_walls += usize::from(on_half);
+        near_walls += usize::from(on_near);
+        assert_eq!(painted.contains(&face), on_half || on_near, "face {face} {segment:?}");
+    }
+    assert!(half_walls > 0 && near_walls > 0, "both holes have walls: {half_walls} {near_walls}");
+}
+
+/// Four 1.2 mm vias with 0.6 mm drills: one through the board, a microvia from the front to the
+/// first inner layer, a blind via from there to the back and a buried one between inner layers.
+const VIA_SPANS: &str = r#"(kicad_pcb (general (thickness 1.6))
+  (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+  (via (at 4 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
+  (via micro (at 8 5) (size 1.2) (drill 0.6) (layers "F.Cu" "In1.Cu") (net 1))
+  (via blind (at 12 5) (size 1.2) (drill 0.6) (layers "In1.Cu" "B.Cu") (net 1))
+  (via blind (at 16 5) (size 1.2) (drill 0.6) (layers "In1.Cu" "In2.Cu") (net 1)))"#;
+
+#[test]
+fn a_via_shows_only_on_the_faces_its_layers_reach() {
+    // Only the through via is a hole in the board.
+    let board = parse_kicad_board(VIA_SPANS.as_bytes(), "spans.kicad_pcb").unwrap();
+    let centres: Vec<[f64; 2]> = board.drills.iter().map(|d| d.center).collect();
+    assert_eq!(centres, vec![[4.0, -5.0]]);
+    // Each face has the vias that reach it: the through via a ring round its drill, one that stops
+    // inside the board a disc, as its drill does not come through. The buried via shows nowhere.
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(VIA_SPANS.as_bytes(), "spans.kicad_pcb", &options, &mut load).unwrap();
+    let (ring, disc) = (std::f64::consts::PI * (0.36 - 0.09), std::f64::consts::PI * 0.36);
+    for layer in ["Copper F.Cu", "Copper B.Cu"] {
+        let area = layer_area(&imported, layer, 0.035);
+        assert!((area - (ring + disc)).abs() < 0.02, "{layer}: {area} vs {}", ring + disc);
+    }
+}
+
+#[test]
+fn an_untented_via_is_bare_metal_on_that_side() {
+    // The board tents its vias on the back only; the second via overrides that, tented in front
+    // (`yes`) and bare behind (`no`), and the third follows the board (`none`).
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (setup (tenting (front no) (back yes)))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (via (at 4 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
+      (via (at 10 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (tenting (front yes) (back no)) (net 1))
+      (via (at 16 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (tenting (front none) (back none)) (net 1)))"#;
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(source.as_bytes(), "tenting.kicad_pcb", &options, &mut load).unwrap();
+    let ring = std::f64::consts::PI * (0.36 - 0.09);
+    // Bare copper is the pads' plating and stands proud of the masked copper, as a pad does.
+    let bare = 0.035 + 0.005;
+    for (layer, thickness, rings) in
+        [("Copper F.Cu pads", bare, 2.0), ("Copper F.Cu", 0.035, 1.0), ("Copper B.Cu pads", bare, 1.0), ("Copper B.Cu", 0.035, 2.0)]
+    {
+        let area = layer_area(&imported, layer, thickness);
+        assert!((area - rings * ring).abs() < 0.02, "{layer}: {area} vs {} rings", rings);
+    }
 }

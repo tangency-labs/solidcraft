@@ -785,8 +785,9 @@ fn radius_step(radius: f64) -> f64 {
 /// these edges works, with its result; `Ok(None)` when none does. Each candidate is a real fillet
 /// of the edges, so the radius returned is one that was built; the search runs up to 22 of
 /// them, with up to 6 led by the sizes the refusals name (a refusal of a fillet feature's exact
-/// fit runs it to name the largest that fits, and so does `fit: reduce`). No further candidate
-/// starts after 30 seconds. A refusal as too large or a failed operation permits another size;
+/// fit runs it to name the largest that fits, and so does `fit: reduce`). The budget is that
+/// count of candidates, never time, so the radius found is the same on every computer and
+/// however busy it is. A refusal as too large or a failed operation permits another size;
 /// bad input and kernel faults stop the search. The rounds turn at side edges as `turn` says.
 pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<Option<(f64, Body)>> {
     fillet_max_why(body, edges, radius, turn, None).map(|search| search.found)
@@ -829,12 +830,61 @@ pub fn chamfer_sides_max_why(body: &Body, edges: &[Vec3], d1: f64, side: Chamfer
     })
 }
 
+/// The largest fitting size reported by a blend refusal: a length in mm (radius, chord width, or
+/// chamfer distance) or a scale factor on a two-sided chamfer's distances.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum BlendFit {
+    /// A constant or curvature fillet radius (mm).
+    Radius(f64),
+    /// A chord-length fillet width (mm).
+    Chord(f64),
+    /// An equal or fixed-angle chamfer distance (mm).
+    Distance(f64),
+    /// A scale factor on a two-sided chamfer's distances.
+    Scale(f64),
+}
+
+impl BlendFit {
+    /// The fitting length in mm for a radius, chord width, or chamfer distance (`None` for a
+    /// two-sided scale factor).
+    pub fn length_mm(self) -> Option<f64> {
+        match self {
+            BlendFit::Radius(v) | BlendFit::Chord(v) | BlendFit::Distance(v) => Some(v),
+            BlendFit::Scale(_) => None,
+        }
+    }
+}
+
 /// The largest size in mm a refusal names ([`largest_fit_note`]): 3 for "...; the largest radius
 /// that fits is 3 mm". `None` where it names none, or names a scale ("2 times the distances").
 pub fn named_fit(why: &str) -> Option<f64> {
     let (_, rest) = why.split_once("that fits is ")?;
     let (number, _) = rest.split_once(" mm")?;
     number.parse::<f64>().ok().filter(|v| v.is_finite() && *v > 0.0)
+}
+
+/// The typed largest fitting size a refusal names ([`largest_fit_note`] or [`scale_fit_note`]).
+/// `None` where the refusal names no usable positive size.
+pub fn named_blend_fit(why: &str) -> Option<BlendFit> {
+    let (_, rest) = why.split_once("the largest ")?;
+    let positive = |n: &str| n.parse::<f64>().ok().filter(|v| v.is_finite() && *v > 0.0);
+    if let Some(after) = rest.strip_prefix("radius that fits is ") {
+        let (number, _) = after.split_once(" mm")?;
+        return positive(number).map(BlendFit::Radius);
+    }
+    if let Some(after) = rest.strip_prefix("chord width that fits is ") {
+        let (number, _) = after.split_once(" mm")?;
+        return positive(number).map(BlendFit::Chord);
+    }
+    if let Some(after) = rest.strip_prefix("distance that fits is ") {
+        let (number, _) = after.split_once(" mm")?;
+        return positive(number).map(BlendFit::Distance);
+    }
+    if let Some(after) = rest.strip_prefix("that fits is ") {
+        let (number, _) = after.split_once(" times the distances given")?;
+        return positive(number).map(BlendFit::Scale);
+    }
+    None
 }
 
 /// What [`largest_that_fits`] found: the largest size it built, with its result, or (none built)
@@ -874,18 +924,21 @@ pub struct FitSearch {
 ///
 /// Building is not monotone in the size: a narrow band of sizes can build between sizes that fail,
 /// so a search that found nothing has not shown that nothing smaller builds.
+///
+/// The search's budget is [`FIT_CANDIDATES`] candidates and nothing else. It reads no clock: a
+/// time limit would make the size depend on how fast the computer is and how busy it is, and
+/// `fit: reduce` keeps that size in the model. A cancelled evaluation stops the search with an
+/// error, before its next candidate or as the candidate it stopped returns.
 fn largest_that_fits(size: f64, hint: Option<f64>, blend: impl Fn(f64) -> Result<Body>) -> Result<FitSearch> {
-    let started = web_time::Instant::now();
-    largest_that_fits_while(size, hint, blend, || started.elapsed() < std::time::Duration::from_secs(30))
+    largest_that_fits_within(size, hint, blend, FIT_CANDIDATES)
 }
 
-/// The same search with a work budget, independent of wall-clock timing in tests.
-fn largest_that_fits_while(
-    size: f64,
-    hint: Option<f64>,
-    blend: impl Fn(f64) -> Result<Body>,
-    keep_searching: impl Fn() -> bool,
-) -> Result<FitSearch> {
+/// The most candidates [`largest_that_fits`] builds: enough to bisect the grid of up to 10,000
+/// sizes (14), with room for the estimates and the exploration below a failed first midpoint.
+const FIT_CANDIDATES: usize = 22;
+
+/// The same search with a budget of `budget` candidates (blends built or refused).
+fn largest_that_fits_within(size: f64, hint: Option<f64>, blend: impl Fn(f64) -> Result<Body>, budget: usize) -> Result<FitSearch> {
     if !(size.is_finite() && size > 1e-6) {
         return Ok(FitSearch { found: None, smallest_refused: None, tried: 0 });
     }
@@ -906,12 +959,13 @@ fn largest_that_fits_while(
     let mut next_hint = hint.and_then(|e| lead(e, size));
     // Steps up from `lo` while climbing from a built estimate.
     let mut climb: Option<u64> = None;
-    // Share the existing 22-call cap between exploration and refinement. Reserve enough
-    // calls to bisect the remaining grid even when an estimate fails without narrowing it.
+    // Share the budget between exploration and refinement. Reserve enough calls to bisect the
+    // remaining grid even when an estimate fails without narrowing it.
     let (mut led, mut tried) = (0, 0);
     let mut failed_hint = false;
-    while hi - lo > 1 && tried < 22 && keep_searching() {
-        let cap = 2u64.saturating_pow(21u32.saturating_sub(tried as u32));
+    let last = u32::try_from(budget.saturating_sub(1)).unwrap_or(u32::MAX);
+    while hi - lo > 1 && tried < budget {
+        let cap = 2u64.saturating_pow(last.saturating_sub(u32::try_from(tried).unwrap_or(u32::MAX)));
         let guided = if led < 6 && hi - lo <= cap && (best.is_some() || !failed_hint) {
             match next_hint.take().filter(|h| lo < *h && *h < hi && !attempted.contains(h)) {
                 Some(h) => Some((h, true)),
@@ -945,10 +999,20 @@ fn largest_that_fits_while(
             climb = None;
             continue;
         }
+        // Stopped by its watch (the user or an agent cancelled the evaluation): no further
+        // candidate, and no smaller size than the full search finds.
+        if crate::watch::cancelled() {
+            return Err(crate::watch::cancelled_error("the search for the largest size that fits"));
+        }
         tried += 1;
         // A candidate fits only as a body SMLib's check accepts: each is checked as it is built,
         // whatever the evaluation's validation mode (`crate::validation`).
-        match crate::validation::validating(crate::Validation::EachStep, || blend(n as f64 * q)).0 {
+        let outcome = crate::validation::validating(crate::Validation::EachStep, || blend(n as f64 * q)).0;
+        // Cancelled while the candidate ran: its failure says nothing of its size.
+        if crate::watch::cancelled() {
+            return Err(crate::watch::cancelled_error("the search for the largest size that fits"));
+        }
+        match outcome {
             Ok(b) => {
                 let step = n - lo;
                 lo = n;
@@ -1012,9 +1076,9 @@ pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTur
         let pts: Vec<Vec3> = g.iter().filter_map(|i| edges.get(*i).copied()).collect();
         let r = match fillet_turning(body, &pts, radius, turn) {
             Ok(_) => continue,
-            Err(KernelError::TooLarge(_)) if searches < MAX_SEARCHES => {
+            Err(KernelError::TooLarge(why)) if searches < MAX_SEARCHES => {
                 searches += 1;
-                match fillet_max(body, &pts, radius, turn)? {
+                match fillet_max_why(body, &pts, radius, turn, named_fit(&why))?.found {
                     Some((r, _)) => r,
                     None => return one(),
                 }
@@ -1284,6 +1348,24 @@ pub fn blend_edge_middles(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
 /// For a caller that shows the chain: it needs no point looked up on a tessellated edge.
 pub fn tangent_chain_edges(body: &Body, picks: &[Vec3]) -> Result<Vec<usize>> {
     picked_chain(body, picks).map(|(_, chain, _)| chain)
+}
+
+/// Whether the tangent chain of the edge at `pick` ([`tangent_chain`]) closes on itself: each
+/// vertex of its edges is an end of two of them, as on a rim rounded at every corner. One radius
+/// law runs along an open chain only ([`crate::fillet_variable_spline_chain`]).
+pub fn tangent_chain_closes(body: &Body, pick: Vec3) -> Result<bool> {
+    let (rec, chain, _) = picked_chain(body, &[pick])?;
+    let mut ends: Vec<(u32, usize)> = Vec::new();
+    for e in &chain {
+        let edge = rec.rec.edges.get(*e).ok_or_else(|| KernelError::Failed("an edge of the chain".into()))?;
+        for v in edge.vertices {
+            match ends.iter_mut().find(|(w, _)| *w == v) {
+                Some((_, n)) => *n += 1,
+                None => ends.push((v, 1)),
+            }
+        }
+    }
+    Ok(!ends.is_empty() && ends.iter().all(|&(_, n)| n == 2))
 }
 
 /// Points along each edge that `picks`' tangent chains run on into beyond the picked edges
@@ -2806,14 +2888,14 @@ mod tests {
         let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
         for builds in [false, true] {
             let calls = std::cell::Cell::new(0);
-            let search = largest_that_fits_while(
+            let search = largest_that_fits_within(
                 0.3,
                 None,
                 |r| {
                     calls.set(calls.get() + 1);
                     if builds { Ok(body.clone()) } else { Err(KernelError::TooLarge(format!("refused at {r}"))) }
                 },
-                || calls.get() < 1,
+                1,
             )
             .unwrap();
             assert_eq!(calls.get(), 1);
@@ -2826,9 +2908,82 @@ mod tests {
                 assert_eq!(search.smallest_refused.unwrap().0, 1500.0 * 0.0001);
             }
         }
-        let search = largest_that_fits_while(0.3, None, |_| panic!("no time remains for a candidate"), || false).unwrap();
+        let search = largest_that_fits_within(0.3, None, |_| panic!("no budget remains for a candidate"), 0).unwrap();
         assert_eq!(search.tried, 0);
         assert!(search.found.is_none() && search.smallest_refused.is_none());
+    }
+
+    /// The search's only budget is its count of candidates, so the size it finds does not
+    /// depend on how long each candidate takes (a busy or slow computer). A search of 0.3 mm
+    /// where sizes up to 0.0123 build needs more than a handful of candidates: it finds that
+    /// largest grid size, within the budget, by the same candidates as a search with the budget
+    /// passed explicitly.
+    #[test]
+    fn a_fit_search_finds_the_same_size_on_any_computer() {
+        let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        let run = |search: &dyn Fn(&dyn Fn(f64) -> Result<Body>) -> FitSearch| {
+            let tried = std::cell::RefCell::new(Vec::new());
+            let found = search(&|r| {
+                tried.borrow_mut().push(r);
+                if r < 0.01235 { Ok(body.clone()) } else { Err(KernelError::TooLarge(format!("refused at {r}"))) }
+            });
+            (found.found.map(|f| f.0), found.tried, tried.into_inner())
+        };
+        let production = run(&|blend| largest_that_fits(0.3, None, blend).unwrap());
+        assert_eq!(production.0, Some(123.0 * radius_step(0.3)), "the largest grid size that fits");
+        assert!(production.1 > 5 && production.1 <= FIT_CANDIDATES, "{} candidates", production.1);
+        let budgeted = run(&|blend| largest_that_fits_within(0.3, None, blend, FIT_CANDIDATES).unwrap());
+        assert_eq!(production, budgeted);
+    }
+
+    /// A cancelled evaluation stops the search before its next candidate, with an error that
+    /// says so, instead of returning a smaller size than the full search finds.
+    #[test]
+    fn a_cancelled_fit_search_starts_no_candidate() {
+        struct Stopped;
+        impl crate::watch::Watch for Stopped {
+            fn cancelled(&self) -> bool {
+                true
+            }
+            fn progress(&self, _: &'static str, _: usize, _: usize) {}
+        }
+        let e = crate::watch::watching(std::sync::Arc::new(Stopped), || {
+            largest_that_fits(0.3, None, |_| panic!("a cancelled search builds no candidate"))
+        })
+        .err()
+        .expect("a cancelled search is an error");
+        assert!(e.to_string().contains("cancelled"), "{e}");
+        // Cancelled while its last candidate runs (a budget of two): that candidate's failure is
+        // the cancel, not a refusal of its size, so the first candidate's size is not returned as
+        // the answer.
+        struct Flag(std::sync::atomic::AtomicBool);
+        impl crate::watch::Watch for Flag {
+            fn cancelled(&self) -> bool {
+                self.0.load(std::sync::atomic::Ordering::Relaxed)
+            }
+            fn progress(&self, _: &'static str, _: usize, _: usize) {}
+        }
+        let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        let flag = std::sync::Arc::new(Flag(std::sync::atomic::AtomicBool::new(false)));
+        let calls = std::cell::Cell::new(0);
+        let found = crate::watch::watching(flag.clone(), || {
+            largest_that_fits_within(
+                0.3,
+                None,
+                |_| {
+                    calls.set(calls.get() + 1);
+                    if calls.get() == 1 {
+                        return Ok(body.clone());
+                    }
+                    flag.0.store(true, std::sync::atomic::Ordering::Relaxed);
+                    Err(crate::watch::cancelled_error("boolean"))
+                },
+                2,
+            )
+        });
+        assert_eq!(calls.get(), 2);
+        let e = found.err().expect("cancelled during a candidate is an error, not the first size");
+        assert!(e.to_string().contains("the search for the largest size that fits cancelled"), "{e}");
     }
 
     /// Replay seed 242's selected edges, including tangent propagation as the command does.
@@ -2858,9 +3013,7 @@ mod tests {
         let why = fillet_removing(&body, &picks, 2.5, FilletTurn::Mitre).unwrap_err();
         assert!(matches!(why, KernelError::TooLarge(_)), "{why}");
         let hint = named_fit(&why.to_string());
-        // Test the candidate schedule without depending on the shared machine's load. The
-        // deterministic budget test above checks that a spent budget stops further calls.
-        let search = largest_that_fits_while(2.5, hint, |r| fillet_turning(&body, &picks, r, FilletTurn::Mitre), || true).unwrap();
+        let search = largest_that_fits(2.5, hint, |r| fillet_turning(&body, &picks, r, FilletTurn::Mitre)).unwrap();
         let (radius, rounded) = search.found.expect("a working radius between the failures");
         assert!(radius > 0.0 && radius < 2.5, "{radius}");
         assert!(rounded.validity().is_empty(), "{:?}", rounded.validity());
@@ -2981,6 +3134,22 @@ mod tests {
         );
         assert_eq!(without_fit_note("too large: the largest distance that fits is 1.6 mm"), "too large");
         assert_eq!(without_fit_note("the trim leaks"), "the trim leaks");
+    }
+
+    /// Typed blend fit parsing distinguishes radius, chord width, chamfer distance and two-sided
+    /// scale, and ignores zero or missing fit sizes.
+    #[test]
+    fn a_refusal_parses_typed_blend_fit() {
+        assert_eq!(named_blend_fit("too large, at the edge at (1, 2, 3); the largest radius that fits is 3 mm"), Some(BlendFit::Radius(3.0)));
+        assert_eq!(named_blend_fit(&format!("too large; {}", largest_fit_note("chord width", 1.25))), Some(BlendFit::Chord(1.25)));
+        assert_eq!(named_blend_fit(&format!("too large; {}", largest_fit_note("distance", 2.5))), Some(BlendFit::Distance(2.5)));
+        assert_eq!(named_blend_fit(&format!("too large; {}", scale_fit_note(0.6))), Some(BlendFit::Scale(0.6)));
+        assert_eq!(named_blend_fit("too large; the largest radius that fits is 0 mm"), None);
+        assert_eq!(named_blend_fit("the fillet is larger than the faces beside its edges allow"), None);
+        assert_eq!(BlendFit::Radius(3.0).length_mm(), Some(3.0));
+        assert_eq!(BlendFit::Chord(1.25).length_mm(), Some(1.25));
+        assert_eq!(BlendFit::Distance(2.5).length_mm(), Some(2.5));
+        assert_eq!(BlendFit::Scale(0.6).length_mm(), None);
     }
 
     /// A round (`round`) or an equal-distance chamfer of the edges nearest `pts`.

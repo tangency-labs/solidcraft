@@ -20,6 +20,7 @@
 
 pub mod line_family;
 
+use crate::math::det;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 use crate::curve::curve::Curve;
@@ -58,7 +59,7 @@ pub fn counterclockwise_sweep(center: Point2, start: Point2, end: Point2) -> Opt
     {
         return None;
     }
-    Some((by.atan2(bx) - ay.atan2(ax)).rem_euclid(TAU))
+    Some((det::atan2(by, bx) - det::atan2(ay, ax)).rem_euclid(TAU))
 }
 
 /// The margin (degrees) kept from the circle builder's angle windows ([`CONIC_ANGLE_TOL_DEG`],
@@ -266,7 +267,7 @@ pub(crate) fn cross2(a: Vec2, b: Vec2) -> f64 {
 }
 
 fn unit(angle: f64) -> Vec2 {
-    Vec2::new(angle.cos(), angle.sin())
+    Vec2::new(det::cos(angle), det::sin(angle))
 }
 
 fn finite2(p: Point2) -> bool {
@@ -494,7 +495,7 @@ impl Seg2 {
                 #[allow(clippy::cast_precision_loss)]
                 let step = sweep / n as f64;
                 let half = step * 0.5;
-                let w = half.cos();
+                let w = det::cos(half);
                 (0..n)
                     .map(|i| {
                         #[allow(clippy::cast_precision_loss)]
@@ -551,18 +552,39 @@ impl Seg2 {
                 start,
                 sweep,
             } => {
-                // the chord's term from the arc's ends as `start` and `end` give them, plus the
-                // segment between the arc and its chord, `r^2 (θ - sin θ) / 2` (θ the sweep):
-                // the sums then hold terms of the size of the ends' coordinates squared, not the
-                // `r |c|` of the integral over `c + r u(t)`, whose terms cancel for a nearly
-                // straight arc of a large radius far from the origin
+                // Two readings of the term, each with its proved bound; the tighter is kept.
+                // About the centre: P = c + r u(t), P x P' = r^2 + r (c.x cos t + c.y sin t).
+                // Its terms are of the size `r |c|`: tight for a small arc far from the origin,
+                // but they cancel for a nearly straight arc of a large radius (its centre far
+                // off, the arc near the origin).
+                let end = start + sweep;
+                let (s0, c0, s1, c1) = (
+                    det::sin(start),
+                    det::cos(start),
+                    det::sin(end),
+                    det::cos(end),
+                );
+                let terms = [r * r * sweep, r * c.x * (s1 - s0), -(r * c.y * (c1 - c0))];
+                let size = r * r * sweep.abs() + 2.0 * r * (c.x.abs() + c.y.abs());
+                // the end's angle `start + sweep` is rounded, by up to gamma(1) |start + sweep|;
+                // sin and cos move by no more than their angle, so `r (c.x s1 - c.y c1)` by up to
+                // `r (|c.x| + |c.y|)` times that (from 2^53 a sweep of 1 rounds away entirely)
+                let turn = gamma(1) * r * end.abs();
+                // libm's sin and cos within two ulps; gamma covers the products and the sums
+                let about_centre = (
+                    terms.iter().sum::<f64>() * 0.5,
+                    (gamma(16) * size + turn * (c.x.abs() + c.y.abs())) * 0.5,
+                );
+                // From the chord: the chord's term from the arc's ends as `start` and `end` give
+                // them, plus the segment between the arc and its chord, `r^2 (θ - sin θ) / 2`
+                // (θ the sweep). Its terms are of the size of the ends' coordinates squared:
+                // tight for that nearly straight arc, loose for a small arc far from the origin.
                 let (a, b) = (self.start(), self.end());
                 let (p, q) = (a.x * b.y, a.y * b.x);
                 // each end within gamma(4) (|c| + r) of the exact one in each coordinate (libm's
                 // sin and cos within two ulps, the product and the sum one each); the end's
                 // angle `start + sweep` is rounded too, by up to gamma(1) |start + sweep|
                 let (ax, ay) = (gamma(4) * (c.x.abs() + r), gamma(4) * (c.y.abs() + r));
-                let turn = gamma(1) * r * (start + sweep).abs();
                 let (bx, by) = (ax + turn, ay + turn);
                 // (A + dA) x (B + dB) - A x B, the ends' errors dA, dB
                 let ends = ax * b.y.abs()
@@ -581,13 +603,18 @@ impl Seg2 {
                     * 0.5
                     * (g.abs() + if direct { sweep.abs() + 1.0 } else { 0.0 });
                 let value = (p - q) * 0.5 + segment;
-                Some((
+                let from_chord = (
                     value,
                     gamma(3) * (p.abs() + q.abs()) * 0.5
                         + ends * 0.5
                         + seg_err
                         + gamma(2) * value.abs(),
-                ))
+                );
+                Some(if from_chord.1 < about_centre.1 {
+                    from_chord
+                } else {
+                    about_centre
+                })
             }
             Seg2::Conic { a, apex, b, w } => {
                 // Green of a conic arc = the chord's term + T f(w), T the signed area of the
@@ -625,7 +652,7 @@ impl Seg2 {
 /// whose next term is below `θ³/6` times `2⁻⁵⁹` there.
 fn theta_less_sine(theta: f64) -> (f64, bool) {
     if theta.abs() >= 0.5 {
-        return (theta - theta.sin(), true);
+        return (theta - det::sin(theta), true);
     }
     let t2 = theta * theta;
     // θ³/6 (1 - θ²/20 (1 - θ²/42 (1 - θ²/72 (1 - θ²/110 (1 - θ²/156 (1 - θ²/210))))))
@@ -669,15 +696,15 @@ pub(super) fn conic_factor(w: f64) -> Option<(f64, f64)> {
         return Some((f, 2.0 * w * (tail + gamma(512) * size)));
     }
     let (f, terms) = if w < 1.0 {
-        let phi = w.acos();
-        let s = phi.sin();
+        let phi = det::acos(w);
+        let s = det::sin(phi);
         (
             w * (phi - w * s) / (s * s * s),
             w * (phi + w * s) / (s * s * s),
         )
     } else {
-        let psi = w.acosh();
-        let s = psi.sinh();
+        let psi = det::acosh(w);
+        let s = det::sinh(psi);
         (
             w * (w * s - psi) / (s * s * s),
             w * (w * s + psi) / (s * s * s),
@@ -1130,7 +1157,7 @@ pub fn curve_on_frame(k: &Kernel, frame: &Frame, level: f64, seg: &Seg2) -> Resu
             // The arc's own circle, its angle 0 at the arc's start: two arcs of one circle are
             // two curves, so a boolean keeps the points where they meet, and the trim never
             // crosses the circle's seam nor runs past a whole turn, whatever the start.
-            let (c, s) = (s0.cos(), s0.sin());
+            let (c, s) = (det::cos(s0), det::sin(s0));
             let placement = Axis2Placement::new(at(center), x * c + y * s, y * c - x * s);
             // The closed circle is asked for outright, so the builder's own full-turn window is
             // never what decides it.

@@ -77,6 +77,13 @@ every prompt and answer, including those scrolled out of view, but not thoughts,
 notices. Ctrl+C then copies them in order as plain text, each under who wrote it. Esc or a
 click ends the selection; in the message box Ctrl+A selects only the draft.
 
+From the Assistant header, choose **Export conversation as Markdown…** to save the current
+chat as a `.md` file. The file preserves the original formatting of the prompts and replies
+still in the chat. If a reply is arriving, the export captures the text received when you
+open the save dialog. Select **Include tool details** to add the retained tool calls and results.
+With this option selected, the dialog reminds you to review the file before sharing it. The file
+lists attachments by name and skips the draft, thoughts, plans and approval cards.
+
 - **Docking:** on the left, Assistant is the first panel, before vertical history and the browser.
   The drag highlight shows the actual destination bounds. Drag the panel's header (the dotted grip and the title) to the other half of the
   window and let go. The side it would land on lights up while you drag. You can also pick
@@ -99,6 +106,12 @@ click ends the selection; in the message box Ctrl+A selects only the draft.
   reasoning effort. Changing the model can change or remove the effort choices. A selection is
   shown as applied only after the agent reports it; a rejected change leaves the confirmed
   selection in place and shows an error.
+- **Service tier** shows the speed choices reported by the ACP agent. For endpoints configured
+  with **Use OpenAI Responses API**, choose **Fast** or **Ultrafast**. OpenAI's hosted Chat
+  Completions endpoint also offers **Fast**. The endpoint choice applies from the next turn.
+  Choose **Provider default** to use the endpoint's configured tier. A new chat starts with that
+  default. Availability depends on the model and account, and faster tiers can cost more.
+  [OpenAI Fast mode](https://developers.openai.com/api/docs/guides/fast-mode) · [OpenAI Ultrafast mode](https://developers.openai.com/api/docs/guides/ultrafast-mode)
 - **Older agents and API endpoints** keep their model and mode drop-downs when they report those
   choices (an ACP agent's legacy model/mode lists, or an endpoint's `/models`). SolidCraft remembers
   the last model choice for each agent and puts it back on the next session when still available.
@@ -134,10 +147,13 @@ turn limit. Queue, Send now and Stop keep their existing behavior.
 ## Files and pictures
 
 A message can carry up to eight files, to show the agent what you mean: a concept picture, a
-sketch, a brief, a part to fit around.
+sketch, a brief, a part to fit around. That is for an OpenAI- or Anthropic-compatible endpoint,
+which has only SolidCraft's tools, so the files go in the message as below. A coding agent reads
+files with its own tools: it gets every file and folder by its path instead
+([To a coding agent](#to-a-coding-agent)).
 
-- **+** next to **Send** has **Choose a file…** (a file dialog for the types below) and **Paste a
-  picture** (the picture on the clipboard).
+- **+** next to **Send** has **Choose files…** (a file dialog for the types below, several at
+  once) and **Paste a picture** (the picture on the clipboard).
 - **Drop files on the chat.** Files dropped on the panel (or its folded strip) attach to the
   next message, and the app doesn't open them too. While files are dragged over the chat, it says
   so. The window gives no position while something is dragged, so the drop is the chat's when the
@@ -159,6 +175,16 @@ sketch, a brief, a part to fit around.
   shows a spinner meanwhile, and **Send** waits), and the message tells the agent it was added; a
   failed import says why and the agent is told nothing of it. Taking a part's chip off the message
   leaves the part in the design (Undo removes it).
+- **PDFs** (up to 12 MB) go whole as documents, so the model sees their pages, drawings and
+  scans included. **Any other file** (a ZIP, a DXF) is refused: an endpoint has no tool that opens
+  a file. Drop a DXF on the design instead to bring it in as a sketch.
+- The conversation keeps every picture and PDF of the newest message, and two of each from the
+  messages before it; older ones are swapped for a short note, as every request carries the
+  whole conversation. One request carries at most 18 MB of pictures and PDFs: older ones go first,
+  and a message whose own come to more isn't sent (the chat says how much it holds). An endpoint
+  that doesn't take PDFs, such as some OpenAI-compatible servers, refuses the message.
+- A message with pictures or PDFs that the endpoint refuses before it answers is taken out of the
+  conversation, so the next message doesn't send them again; send it again to retry.
 - Every file is named in the message. In the conversation the attached pictures show under it as
   thumbnails (hold the pointer over one for a bigger preview, click it to open the viewer, where
   the file's name is shown and ‹ › step through the message's pictures, together with the picture
@@ -169,8 +195,31 @@ sketch, a brief, a part to fit around.
 
 Files stay with their message: one queued while the agent works keeps its files, and one sent
 again after a sign-in sends them again. When several queued messages go as one prompt, their
-files go with it, at most eight; the rest are named in the chat and not sent. **New chat**
-clears the files waiting on the chips too.
+files go with it, at most eight (200 to a coding agent); the rest are named in the chat and not
+sent. **New chat** clears the files waiting on the chips too.
+
+### To a coding agent
+
+A coding agent (Claude Code, Codex, Gemini CLI…) reads files with its own tools, so it gets every
+file and folder by its path, up to 200 on one message, whatever their type:
+
+- **+** has **Choose files…** (any type) and **Choose folders…**, several at once; on macOS, whose
+  file dialog chooses both together, one **Choose files or folders…**. Files and folders dropped
+  on the chat attach the same way.
+- SolidCraft reads nothing of them: no picture is scaled down, no text is cut, no CAD file is
+  imported (drop it on the design for that). The message tells the agent each file's name, type,
+  size and path, and each folder's path, so a batch of photos reaches the agent whole however
+  many there are. Nothing in a folder is listed or counted (on a network share that would keep
+  the message waiting); the agent lists it itself.
+- Their chips show the file's type, or a folder; holding the pointer over one shows its path. The
+  chips scroll past about three rows, so the text box and the conversation stay in view.
+- A pasted picture has no path, so it still goes in the message, at most eight.
+- Each path is a line in the message's text, which stops at 100,000 characters. A file or folder
+  whose line falls past that isn't named to the agent and doesn't count as sent: shorten the
+  message, or send the rest in another message.
+- Claude Code reads what you sent by path without asking (*Auto-allowed* in the chat), and the
+  chat declines any other read of its own (see [What it can't do](#what-it-cant-do)). Another
+  coding agent reads with its own tools and asks as its own mode says.
 
 ## Typing while the agent works
 
@@ -254,6 +303,8 @@ doesn't change the last known login state.
 | GitHub Copilot CLI, Qwen Code, goose | listed with their install command when missing |
 
 The panel lists agents that aren't installed with their install command and a **Copy** button.
+To copy an installation command during an active chat, open **Add agent…**, choose
+**Installed agent**, and expand **Not installed**.
 
 For Mistral Vibe, put `vibe-acp` on your PATH and refresh the agent list. Follow Vibe's sign-in
 prompt, run `vibe --setup` in a terminal, or set `MISTRAL_API_KEY` before launching SolidCraft.
@@ -343,7 +394,8 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   Mammouth AI `https://api.mammouth.ai/v1`,
   OpenCode Go `https://opencode.ai/zen/go/v1`, DeepSeek `https://api.deepseek.com`,
   Qwen `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`, Cheaper Inference
-  `https://api.cheaperinference.com/v1`, AI/ML API `https://api.aimlapi.com/v1`, OpenRouter
+  `https://api.cheaperinference.com/v1`, AI/ML API `https://api.aimlapi.com/v1`, LLMTR
+  `https://llmtr.com/v1`, OpenRouter
   `https://openrouter.ai/api/v1`) or a custom URL, the model name, and an optional key.
   For OpenAI models that need function tools with reasoning, turn on **Use OpenAI Responses API**
   in the agent's settings. This routes requests to `/responses` and lets the model continue
@@ -472,6 +524,10 @@ load servers you configured for them:
 - **One undo per message:** everything the agent changes while answering one message becomes
   a single undo step, named after your message. The conversation shows *N changes, one undo
   step* with **Undo these changes** while nothing else has happened since.
+- **Show in model:** when a message adds or edits features, its changes card counts them.
+  In a Model view, choose **Show in model** to highlight the features whose edits still match
+  the Assistant's changes. **Hide highlight** clears the highlight. Closing Assistant,
+  changing the design, switching tabs or undoing also clears it.
 - **Tool cards:** each tool call shows as a card with its state; click it to see what it returned.
 - **Formatted text:** the agent's answers show as Markdown: headings, lists, quotes, tables, code
   blocks (with **Copy**), bold, italic, `code` and links (web links only; each link is a button
@@ -552,9 +608,12 @@ These settings cover SolidCraft's tools. A coding agent's own tools (its shell, 
 follow the agent's own mode, which you pick in the panel's header. When an agent asks before
 using one of the chat's own SolidCraft tools and names it exactly as the Claude adapter does
 (`mcp__solidcraft-app__batch`), SolidCraft answers for you, since its own gate checks the call,
-and notes it in the chat as *Auto-allowed*. Any other question appears in the panel, including
-a SolidCraft tool an agent words differently and a SolidCraft MCP server you added to an agent
-other than Claude Code yourself. With **Allow everything**, or after **Always allow**, those questions are answered the
+and notes it in the chat as *Auto-allowed*. So it does when Claude Code reads something you sent
+by path in this conversation, or writes its plan or reads it back, and it declines any other
+read or write of Claude Code's whatever the mode (see below). Any other question appears in the
+panel, including a SolidCraft tool an agent words differently and a SolidCraft MCP server you
+added to an agent other than Claude Code yourself. With **Allow everything**, or after
+**Always allow**, those questions are answered the
 same way and noted too.
 
 What counts as "a command given a file name": a parameter that holds a file or folder (`file`,
@@ -580,9 +639,29 @@ saves, opens or inserts. A sweep's or pattern's `path` (curve ids) and an occurr
   chat itself.
 - **Its own tools stay off where we can turn them off.** SolidCraft declares no file system and
   no terminal to the agent, runs it in an empty working folder of its own, and asks the Claude
-  Code adapter for a session with none of its own tools but the one that ends plan mode, and with
-  SolidCraft's MCP server as its only one. Your claude.ai connectors, your own MCP servers, and
-  Claude Code's shell, file, web, scheduling and messaging tools aren't there.
+  Code adapter for a session with none of its own tools but the one that ends plan mode, its read
+  tools and the file-writing tools it writes only its plan with (below), and with SolidCraft's
+  MCP server as its only one. Your claude.ai connectors, your own MCP servers, and Claude Code's
+  shell, web, scheduling and messaging tools aren't there.
+- **Claude Code reads only what you sent.** Its read tools (Read, Glob, Grep) are on, but they ask
+  before every read. The chat allows a read inside a file or folder you sent by path in this
+  conversation, and of its own plan (below), and declines any other without asking you, whatever
+  the mode and even after **Always allow**: a file you didn't send, a search whose pattern starts
+  at a root or your home folder or steps up with `..`, or a link in a folder you sent that leads
+  out of it (a path counts once links are followed). To let it read another file, attach it.
+  **New chat** starts with nothing sent.
+- **Claude Code writes only its plan.** In plan mode (the **Plan** choice in the panel's header)
+  Claude Code writes its plan to a file, then asks you to approve it: the plan is shown in that
+  question, so you see what you approve, and again after you ask for a change. That question
+  always waits for you, even with **Allow everything**. Its Write and Edit
+  tools are on for that and ask before every write. The chat allows a Markdown file right in
+  Claude Code's plan folder (`plans` in the chat's working folder, not `~/.claude/plans`) and
+  declines any other write without asking you, even with **Allow everything**. Plans not changed
+  for a week are deleted when the agent next starts.
+- Its read and write tools are on only when the agent's command names the Claude Code adapter
+  (`claude-agent-acp`, or the older `claude-code-acp`); started any other way, through a script
+  of your own say, it can neither read nor write. If it ever reads or writes without asking
+  first, the chat stops the message and says so.
 
 When the panel's agent is stopped, another agent is picked, or SolidCraft quits, the agent and
 every program it started (the CLI it wraps, its MCP server) are stopped.

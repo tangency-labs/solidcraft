@@ -120,20 +120,39 @@ pub struct Material {
     /// Lit on both sides: where the eye sees the face's back, it is lit as its front (an open
     /// sheet's back would otherwise be black). Off for solids, which never show their back.
     pub two_sided: bool,
+    /// The axis a turned face was cut about, as a lathe leaves it: a point on it and its
+    /// direction, in the scene's frame. Brushed metal's grooves run around it (rings on a round
+    /// face, circles on a flat face across it). `None`: the shader picks a world axis.
+    pub turn: Option<[[f32; 3]; 2]>,
 }
+
+/// Texel rows a palette row of materials takes in the material texture ([`Material::texels`]).
+const MATERIAL_TEXEL_ROWS: u32 = 4;
 
 impl Material {
     /// The surface `s` as the shader takes it.
     pub fn of(s: &solidcraft_viewport::surface::OpaqueSurface) -> Material {
         let base = s.base_color().to_f32();
-        Material { base, metallic: s.metallic() as f32, roughness: s.roughness() as f32, ior: s.dielectric_ior() as f32, pbr: true, two_sided: false }
+        Material {
+            base,
+            metallic: s.metallic() as f32,
+            roughness: s.roughness() as f32,
+            ior: s.dielectric_ior() as f32,
+            pbr: true,
+            two_sided: false,
+            turn: None,
+        }
     }
 
-    /// Its two texels in the material texture: base and flag, then the optical parameters.
-    fn texels(&self) -> [[f32; 4]; 2] {
+    /// Its texels in the material texture: base and flag, the optical parameters, then the turn
+    /// axis's point (w 1 when there is one) and direction.
+    fn texels(&self) -> [[f32; 4]; MATERIAL_TEXEL_ROWS as usize] {
+        let [at, along] = self.turn.unwrap_or_default();
         [
             [self.base[0], self.base[1], self.base[2], if self.pbr { 1.0 } else { 0.0 }],
             [self.metallic, self.roughness, self.ior, if self.two_sided { 1.0 } else { 0.0 }],
+            [at[0], at[1], at[2], if self.turn.is_some() { 1.0 } else { 0.0 }],
+            [along[0], along[1], along[2], 0.0],
         ]
     }
 }
@@ -2290,7 +2309,7 @@ struct PaletteGpu {
     palette: Arc<Palette>,
     /// Held for the bind group, which views it.
     _texture: wgpu::Texture,
-    /// The PBR materials ([`Material`]): two texel rows for each palette row that has any.
+    /// The PBR materials ([`Material`]): `MATERIAL_TEXEL_ROWS` texel rows for each palette row that has any.
     materials: wgpu::Texture,
     material_rows: u32,
     bind: wgpu::BindGroup,
@@ -2300,11 +2319,11 @@ struct PaletteGpu {
 /// Bytes of one palette texel.
 const PALETTE_TEXEL: u32 = 8;
 
-/// The material texture for `rows` palette rows of materials (two texel rows each).
+/// The material texture for `rows` palette rows of materials (`MATERIAL_TEXEL_ROWS` texel rows each).
 fn material_texture(device: &wgpu::Device, rows: u32) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some("sc_materials"),
-        size: wgpu::Extent3d { width: PALETTE_WIDTH, height: 2 * rows.max(1), depth_or_array_layers: 1 },
+        size: wgpu::Extent3d { width: PALETTE_WIDTH, height: MATERIAL_TEXEL_ROWS * rows.max(1), depth_or_array_layers: 1 },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -2314,15 +2333,15 @@ fn material_texture(device: &wgpu::Device, rows: u32) -> wgpu::Texture {
     })
 }
 
-/// Palette rows `first..last` of `materials` as the material texture's texels: for each, a row
-/// of base colours and flags, then a row of optical parameters.
+/// Palette rows `first..last` of `materials` as the material texture's texels: for each palette
+/// row, one texel row per entry of [`Material::texels`].
 fn material_bytes(materials: &[Material], first: u32, last: u32) -> Vec<u8> {
     let width = PALETTE_WIDTH as usize;
-    let mut out = Vec::with_capacity((last - first) as usize * 2 * width * 16);
+    let mut out = Vec::with_capacity((last - first) as usize * MATERIAL_TEXEL_ROWS as usize * width * 16);
     for row in first..last {
-        for half in 0..2 {
+        for half in 0..MATERIAL_TEXEL_ROWS as usize {
             for col in 0..width {
-                let texels = materials.get(row as usize * width + col).map_or([[0.0; 4]; 2], Material::texels);
+                let texels = materials.get(row as usize * width + col).map_or(Default::default(), Material::texels);
                 for v in texels[half] {
                     out.extend_from_slice(&v.to_le_bytes());
                 }
@@ -2342,10 +2361,19 @@ fn write_materials(queue: &wgpu::Queue, texture: &wgpu::Texture, materials: &[Ma
     let bytes = material_bytes(materials, first, last);
     *written += bytes.len() as u64;
     queue.write_texture(
-        wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin: wgpu::Origin3d { x: 0, y: 2 * first, z: 0 }, aspect: wgpu::TextureAspect::All },
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d { x: 0, y: MATERIAL_TEXEL_ROWS * first, z: 0 },
+            aspect: wgpu::TextureAspect::All,
+        },
         &bytes,
-        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(PALETTE_WIDTH * 16), rows_per_image: Some(2 * (last - first)) },
-        wgpu::Extent3d { width: PALETTE_WIDTH, height: 2 * (last - first), depth_or_array_layers: 1 },
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(PALETTE_WIDTH * 16),
+            rows_per_image: Some(MATERIAL_TEXEL_ROWS * (last - first)),
+        },
+        wgpu::Extent3d { width: PALETTE_WIDTH, height: MATERIAL_TEXEL_ROWS * (last - first), depth_or_array_layers: 1 },
     );
 }
 
@@ -3204,20 +3232,19 @@ impl Batches {
             std::hash::Hash::hash(&(Arc::as_ptr(&b.plan) as usize), &mut h);
             open = !std::hash::Hasher::finish(&h).is_multiple_of(CHUNK_SPLIT) && chunks.last().is_some_and(|c| c.len() < MAX_CHUNK_BODIES);
         }
-        let key = |c: &[&PlannedBody]| c.iter().map(|b| Arc::as_ptr(&b.plan) as usize).collect::<Vec<usize>>();
         // Looked up, not searched for: a large model has thousands of chunks.
-        let live: std::collections::HashSet<Vec<usize>> = chunks.iter().map(|c| key(c)).collect();
-        self.resident.retain(|k, _| live.contains(k));
-        self.chunk_colors.retain(|k, _| live.contains(k));
+        let chunk_keys: Vec<Vec<usize>> = chunks.iter().map(|c| c.iter().map(|b| Arc::as_ptr(&b.plan) as usize).collect()).collect();
+        let live: std::collections::HashSet<&[usize]> = chunk_keys.iter().map(Vec::as_slice).collect();
+        self.resident.retain(|k, _| live.contains(k.as_slice()));
+        self.chunk_colors.retain(|k, _| live.contains(k.as_slice()));
         let mut out = Vec::with_capacity(chunks.len());
-        for chunk in &chunks {
-            let k = key(chunk);
+        for (chunk, k) in chunks.iter().zip(chunk_keys) {
             if !self.resident.contains_key(&k)
                 && let Some(shared) = donor.as_deref_mut().and_then(|d| d.resident.remove(&k))
             {
-                self.resident.insert(k, shared);
+                self.resident.insert(k.clone(), shared);
             }
-            let mesh = match self.resident.get(&key(chunk)) {
+            let mesh = match self.resident.get(&k) {
                 Some((_, m)) => m.clone(),
                 None => {
                     let plans: Vec<&solidcore_tess::TessPlan> = chunk.iter().map(|b| &*b.plan).collect();
@@ -3226,7 +3253,7 @@ impl Batches {
                             self.uploads.evaluated += plans.iter().map(|p| p.vertex_count() as u64).sum::<u64>();
                             tess.record(encoder, &m);
                             let m = Arc::new(m);
-                            self.resident.insert(key(chunk), (chunk.iter().map(|b| b.plan.clone()).collect(), m.clone()));
+                            self.resident.insert(k.clone(), (chunk.iter().map(|b| b.plan.clone()).collect(), m.clone()));
                             m
                         }
                         Err(e) => {
@@ -3244,9 +3271,9 @@ impl Batches {
                 }
                 std::hash::Hasher::finish(&h)
             };
-            if let Some((_, colors)) = self.chunk_colors.get(&key(chunk)).filter(|(l, _)| *l == looks) {
+            if let Some((_, colors)) = self.chunk_colors.get(&k).filter(|(l, _)| *l == looks) {
                 let (class, closed) = chunk.first().map_or((TriClass::Opaque, true), |b| (b.class, b.closed));
-                out.push(PlannedDraw { mesh, colors: colors.clone(), class, closed, plans: key(chunk) });
+                out.push(PlannedDraw { mesh, colors: colors.clone(), class, closed, plans: k });
                 continue;
             }
             let mut bytes = Vec::with_capacity(mesh.vertex_face.len() * 4);
@@ -3260,8 +3287,8 @@ impl Batches {
             self.uploads.planned += bytes.len() as u64;
             if let Some((colors, _)) = upload_write(device, queue, "sc_planned_colors", &bytes, 4).and_then(|c| c.parts.into_iter().next()) {
                 let (class, closed) = chunk.first().map_or((TriClass::Opaque, true), |b| (b.class, b.closed));
-                self.chunk_colors.insert(key(chunk), (looks, colors.clone()));
-                out.push(PlannedDraw { mesh, colors, class, closed, plans: key(chunk) });
+                self.chunk_colors.insert(k.clone(), (looks, colors.clone()));
+                out.push(PlannedDraw { mesh, colors, class, closed, plans: k });
             }
         }
         out
@@ -3371,7 +3398,10 @@ pub struct Renderer {
     pbr_palette: wgpu::RenderPipeline,
     /// `pbr_palette` for placements of a shared smooth mesh ([`InstanceLook::Pbr`]).
     pbr_instanced: wgpu::RenderPipeline,
+    /// Unbiased translucent overlays (sketch fills and highlights) drawn over opaque faces.
     trans: wgpu::RenderPipeline,
+    /// Faded model faces (non-OIT fallback), pushed back by [`SEE_THROUGH_BIAS`].
+    faded: wgpu::RenderPipeline,
     /// Glass: far sides (front faces culled), then near sides (back faces culled).
     glass_far: wgpu::RenderPipeline,
     glass_near: wgpu::RenderPipeline,
@@ -4050,7 +4080,10 @@ impl Renderer {
             })
         };
         let alpha = Some(wgpu::BlendState::ALPHA_BLENDING);
+        let see_through_depth = || split_push(pushed(wgpu::CompareFunction::LessEqual, false, SEE_THROUGH_BIAS));
         let glass = |label: &str, cull: wgpu::Face| {
+            let (ds, push) = see_through_depth();
+            let push = face_push(push);
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&layout),
@@ -4058,10 +4091,10 @@ impl Renderer {
                     module: &module,
                     entry_point: Some("vs_tri"),
                     buffers: &[Some(tri_layout())],
-                    compilation_options: Default::default(),
+                    compilation_options: push_options(&push),
                 },
                 primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: Some(cull), ..Default::default() },
-                depth_stencil: depth(wgpu::CompareFunction::LessEqual, false),
+                depth_stencil: ds,
                 multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
                 fragment: Some(wgpu::FragmentState {
                     module: &module,
@@ -4076,6 +4109,8 @@ impl Renderer {
         // See-through instanced meshes: blended, depth tested, not written; `cull` for glass.
         let placed_see_through = [Some(shared_layout()), Some(instance_layout())];
         let see_through = |label: &str, source: TriSource, cull: Option<wgpu::Face>| {
+            let (ds, push) = see_through_depth();
+            let push = face_push(push);
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&layout),
@@ -4083,10 +4118,10 @@ impl Renderer {
                     module: &module,
                     entry_point: Some(source.entry()),
                     buffers: &placed_see_through,
-                    compilation_options: Default::default(),
+                    compilation_options: push_options(&push),
                 },
                 primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: cull, ..Default::default() },
-                depth_stencil: depth(wgpu::CompareFunction::LessEqual, false),
+                depth_stencil: ds,
                 multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
                 fragment: Some(wgpu::FragmentState {
                     module: &module,
@@ -4397,6 +4432,7 @@ impl Renderer {
             (
                 pipeline("sc_tris_hl", "vs_tri", "fs_tri", tri_layout(), highlight_depth(t.depth), alpha),
                 pipeline("sc_trans", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
+                pipeline("sc_faded", "vs_tri", "fs_tri", tri_layout(), pushed(wgpu::CompareFunction::LessEqual, false, SEE_THROUGH_BIAS), alpha),
                 glass("sc_glass_far", wgpu::Face::Front),
                 glass("sc_glass_near", wgpu::Face::Back),
                 pipeline("sc_ghost", "vs_tri", "fs_tri", tri_layout(), pushed(wgpu::CompareFunction::LessEqual, false, GHOST_BIAS), alpha),
@@ -4497,6 +4533,7 @@ impl Renderer {
             let (
                 tri_hl,
                 trans,
+                faded,
                 glass_far,
                 glass_near,
                 ghost,
@@ -4637,6 +4674,7 @@ impl Renderer {
                 pbr_palette,
                 pbr_instanced,
                 trans,
+                faded,
                 glass_far,
                 glass_near,
                 ghost,
@@ -4707,12 +4745,15 @@ pub const FACE_STEPS: i32 = 8;
 /// which writes its own depth, adds the same in the shader.
 pub const FACE_SLOPE: f32 = 1.0;
 /// The model's edges' depth, written before its see-through faces are drawn (`line_depth`): pushed
-/// back as [`FACE_BIAS`] pushes an opaque face, so a see-through body's own faces at its edges
-/// still pass and tint them, while a face further behind (faded context, another see-through body)
-/// fails and leaves the edge alone. The slope term is the line's own (flat across its width), so
-/// where a body's face recedes steeply from its edge, the part of it under the line's far half is
-/// behind the line and does not tint it, as an opaque face does not cover its edge.
+/// back as [`FACE_BIAS`] pushes an opaque face, so a see-through face at or behind an edge fails
+/// and leaves the edge crisp, while a see-through face in front of an edge still passes and tints
+/// it.
 const EDGE_DEPTH_BIAS: wgpu::DepthBiasState = FACE_BIAS;
+/// See-through model faces (glass and faded bodies): pushed back by the same slope as
+/// [`FACE_BIAS`], and one [`FACE_STEPS`] further, so an opaque face lying flush on or coplanar
+/// with a see-through face stays in front of it at any viewing angle, while a thin see-through
+/// face in front of an opaque one still shows over it (#23422).
+pub(super) const SEE_THROUGH_BIAS: wgpu::DepthBiasState = wgpu::DepthBiasState { constant: 2 * FACE_STEPS, slope_scale: FACE_SLOPE, clamp: 0.0 };
 /// A blend that leaves the target's colour as it is.
 const KEEP: wgpu::BlendComponent =
     wgpu::BlendComponent { src_factor: wgpu::BlendFactor::Zero, dst_factor: wgpu::BlendFactor::One, operation: wgpu::BlendOperation::Add };
@@ -5932,12 +5973,12 @@ impl Renderer {
         in_moving(pass, &|pass, mv| {
             tris(pass, &res.glass_near, &mv.glass);
             see_through(pass, InstanceLook::Glass, &res.glass_near_instanced, mv);
-            tris(pass, &res.trans, &mv.trans);
-            blocks_of(pass, &res.trans, TriClass::Faded, mv);
+            tris(pass, &res.faded, &mv.trans);
+            blocks_of(pass, &res.faded, TriClass::Faded, mv);
             see_through(pass, InstanceLook::Faded, &res.trans_instanced, mv);
         });
-        tris(pass, &res.trans, &m.trans);
-        block_class(pass, &res.trans, TriClass::Faded);
+        tris(pass, &res.faded, &m.trans);
+        block_class(pass, &res.faded, TriClass::Faded);
         see_through(pass, InstanceLook::Faded, &res.trans_instanced, m);
         Self::draw_over(res, pass, sk, h, pv, m, moving, &tris, &lines);
     }
@@ -7729,7 +7770,7 @@ mod glass_tests {
             let mut b = BlockBuilder::default();
             // In z = 0, its normal away from the eye at +Z.
             b.triangle([[-20.0, -20.0, 0.0], [20.0, -20.0, 0.0], [0.0, 20.0, 0.0]], [[0.0, 0.0, -1.0]; 3], PaletteIndex(0), TriClass::Pbr);
-            let material = Material { base: [0.6, 0.6, 0.6], metallic: 0.0, roughness: 0.6, ior: 1.5, pbr: true, two_sided };
+            let material = Material { base: [0.6, 0.6, 0.6], metallic: 0.0, roughness: 0.6, ior: 1.5, pbr: true, two_sided, turn: None };
             GpuScene {
                 palette: Arc::new(Palette::with_stable(vec![[150, 150, 150, 255]]).with_materials(vec![material])),
                 blocks: vec![SceneBlock { key: 3, bytes: b.freeze() }],
@@ -7777,7 +7818,8 @@ mod glass_tests {
         let mut b = BlockBuilder::default();
         b.triangle([[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], [[0.0, 0.0, 1.0]; 3], PaletteIndex(0), TriClass::Pbr);
         let bytes = b.freeze();
-        let material = |roughness: f32| Material { base: [0.5, 0.3, 0.2], metallic: 1.0, roughness, ior: 1.5, pbr: true, two_sided: false };
+        let material =
+            |roughness: f32| Material { base: [0.5, 0.3, 0.2], metallic: 1.0, roughness, ior: 1.5, pbr: true, two_sided: false, turn: None };
         let scene = |m: Material| GpuScene {
             palette: Arc::new(Palette::with_stable(vec![[180, 120, 70, 255]]).with_materials(vec![m])),
             blocks: vec![SceneBlock { key: 3, bytes: bytes.clone() }],
@@ -7793,7 +7835,7 @@ mod glass_tests {
         assert!(first.geometry > 0 && first.palette > 0, "the first scene uploads its block and tables: {first:?}");
         let edited = take(&mut r, 2, scene(material(0.6)));
         assert_eq!(edited.geometry, 0, "a material edit uploads no geometry: {edited:?}");
-        assert_eq!(edited.palette, u64::from(2 * PALETTE_WIDTH * 16), "one row of materials (two texel rows): {edited:?}");
+        assert_eq!(edited.palette, u64::from(MATERIAL_TEXEL_ROWS * PALETTE_WIDTH * 16), "one row of materials (its texel rows): {edited:?}");
     }
 
     /// Without order-independent transparency, the sorted glass stream is kept while the blocks'
@@ -7858,9 +7900,23 @@ mod glass_tests {
 
     /// [`middle_pixel_cut`] into a target of `format`.
     fn middle_pixel_on(format: wgpu::TextureFormat, scene: GpuScene, sketch: GpuScene, oit: bool, samples: u32, clip: [f32; 4]) -> Option<[u8; 4]> {
+        middle_pixel_on_depth(format, None, scene, sketch, oit, samples, clip)
+    }
+
+    /// [`middle_pixel_on`] with an optional explicit depth format (to test both reversed and
+    /// standard depth buffers).
+    fn middle_pixel_on_depth(
+        format: wgpu::TextureFormat,
+        depth_override: Option<wgpu::TextureFormat>,
+        scene: GpuScene,
+        sketch: GpuScene,
+        oit: bool,
+        samples: u32,
+        clip: [f32; 4],
+    ) -> Option<[u8; 4]> {
         const SIZE: u32 = 64;
         let (_, device, queue) = crate::open_headless(crate::test_env::policy()).ok()?;
-        let depth = crate::depth_format(&device, true);
+        let depth = depth_override.unwrap_or_else(|| crate::depth_format(&device, true));
         let mut r = Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples, tess: false, oit: false, edges: false }, None);
         assert!(r.oit.is_some(), "this device does order-independent transparency");
         if !oit {
@@ -9185,6 +9241,92 @@ mod glass_tests {
             let thin_alone = middle_pixel(scene(5.0, None, 0.75), oit).unwrap();
             let thin = middle_pixel(scene(5.0, Some(true), 0.75), oit).unwrap();
             assert!(!near(thin, thin_alone), "oit {oit}: the faded face behind still shows past a thin line: {thin:?} vs {thin_alone:?}");
+        }
+    }
+
+    /// Regression test for #23422: at an oblique angle, opaque faces pushed back by [`FACE_BIAS`]
+    /// must still beat flush or coplanar see-through model faces (glass or faded), while a thin
+    /// see-through face in front of an opaque face and a sketch overlay coplanar with an opaque
+    /// face still show over it. Tested with both OIT and sorted fallback, on both reversed and
+    /// standard depth buffers.
+    #[test]
+    fn opaque_face_flush_on_see_through_face_stays_in_front_at_oblique_angle() {
+        let white = [250, 250, 250, 255];
+        let green = [32, 128, 64, 191];
+        let n = [0.0, -std::f32::consts::FRAC_1_SQRT_2, std::f32::consts::FRAC_1_SQRT_2];
+        let add_tilted = |sc: &mut GpuScene, half: f32, z_off: f32, col: PaletteIndex, kind: u8| {
+            let pts = [[-half, -half], [half, -half], [half, half], [-half, -half], [half, half], [-half, half]];
+            for [x, y] in pts {
+                let p = [x, y, y + z_off];
+                match kind {
+                    0 => sc.tri(p, n, col),
+                    1 => sc.glass_tri(p, n, col),
+                    _ => sc.trans_tri(p, n, col),
+                }
+            }
+        };
+        let near = |a: [u8; 4], b: [u8; 4]| a.iter().zip(b).all(|(x, y)| x.abs_diff(y) <= 2);
+
+        for (depth_fmt, oit) in
+            [(wgpu::TextureFormat::Depth32Float, true), (wgpu::TextureFormat::Depth32Float, false), (wgpu::TextureFormat::Depth24Plus, false)]
+        {
+            let run_px =
+                |sc: GpuScene, sk: GpuScene| middle_pixel_on_depth(wgpu::TextureFormat::Rgba8Unorm, Some(depth_fmt), sc, sk, oit, 1, [0.0; 4]);
+
+            // Baseline: opaque white tilted quad alone at z = y + 0.01.
+            let mut solo = GpuScene::default();
+            let cw = solo.color(white);
+            add_tilted(&mut solo, 4.0, 0.01, cw, 0);
+            let Some(opaque_alone) = run_px(solo, GpuScene::default()) else {
+                eprintln!("skipping: no GPU adapter");
+                return;
+            };
+            assert!(opaque_alone[0] > 180 && opaque_alone[0].abs_diff(opaque_alone[1]) <= 2, "baseline should be neutral white: {opaque_alone:?}");
+
+            // 1. Thin (0.01 mm) opaque white face lying flush on a tilted glass green face (z = y):
+            // 1 px of slope is 0.3125 mm >> 0.01 mm, so without SEE_THROUGH_BIAS the glass covers it.
+            let mut flush_glass = GpuScene::default();
+            let (cw, cg) = (flush_glass.color(white), flush_glass.color(green));
+            add_tilted(&mut flush_glass, 8.0, 0.0, cg, 1);
+            add_tilted(&mut flush_glass, 4.0, 0.01, cw, 0);
+            let px = run_px(flush_glass, GpuScene::default()).unwrap();
+            assert!(near(px, opaque_alone), "{depth_fmt:?} oit={oit}: flush opaque on glass covered by glass: {px:?} vs {opaque_alone:?}");
+
+            // 2. Exactly coplanar opaque face (z = y, half=4) on glass face (z = y, half=8):
+            // opaque must win without z-fighting despite different triangle extents.
+            let mut coplanar = GpuScene::default();
+            let (cw, cg) = (coplanar.color(white), coplanar.color(green));
+            add_tilted(&mut coplanar, 8.0, 0.0, cg, 1);
+            add_tilted(&mut coplanar, 4.0, 0.0, cw, 0);
+            let px = run_px(coplanar, GpuScene::default()).unwrap();
+            assert!(near(px, opaque_alone), "{depth_fmt:?} oit={oit}: coplanar opaque on glass covered by glass: {px:?} vs {opaque_alone:?}");
+
+            // 3. Reverse: thin (0.01 mm) glass green face IN FRONT OF opaque white face must still
+            // show over it at the same oblique angle.
+            let mut glass_on_opaque = GpuScene::default();
+            let (cw, cg) = (glass_on_opaque.color(white), glass_on_opaque.color(green));
+            add_tilted(&mut glass_on_opaque, 8.0, 0.0, cw, 0);
+            add_tilted(&mut glass_on_opaque, 4.0, 0.01, cg, 1);
+            let px = run_px(glass_on_opaque, GpuScene::default()).unwrap();
+            assert!(px[1] > px[0] + 20, "{depth_fmt:?} oit={oit}: thin glass in front of opaque must tint it green: {px:?}");
+
+            // 4. Flush opaque white face on faded model face (m.trans) must also stay in front.
+            let mut flush_faded = GpuScene::default();
+            let (cw, cg) = (flush_faded.color(white), flush_faded.color(green));
+            add_tilted(&mut flush_faded, 8.0, 0.0, cg, 2);
+            add_tilted(&mut flush_faded, 4.0, 0.01, cw, 0);
+            let px = run_px(flush_faded, GpuScene::default()).unwrap();
+            assert!(near(px, opaque_alone), "{depth_fmt:?} oit={oit}: flush opaque on faded covered: {px:?} vs {opaque_alone:?}");
+
+            // 5. Sketch translucent fill (sk.trans) coplanar with an opaque face stays in front.
+            let mut base = GpuScene::default();
+            let cw = base.color(white);
+            add_tilted(&mut base, 8.0, 0.0, cw, 0);
+            let mut sk = GpuScene::default();
+            let cg = sk.color(green);
+            add_tilted(&mut sk, 4.0, 0.0, cg, 2);
+            let px = run_px(base, sk).unwrap();
+            assert!(px[1] > px[0] + 20, "{depth_fmt:?} oit={oit}: coplanar sketch fill must still tint opaque face: {px:?}");
         }
     }
 

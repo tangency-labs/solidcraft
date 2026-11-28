@@ -1,6 +1,7 @@
 use super::*;
 use crate::eval::{Curve, Frame};
 use crate::geom::vector2d::Point2;
+use crate::math::det;
 use crate::surface::from_parameters::plane_axes_square;
 use core::f64::consts::PI;
 
@@ -49,7 +50,7 @@ fn on_cylinder(k: &Kernel, f: &FaceSurface, r: f64) {
         (0.5 * (lo.x + hi.x), 0.5 * (lo.y + hi.y)),
     ] {
         let p = f.surface.evaluate_point(k, Point2::new(u, v)).unwrap();
-        assert!((p.x.hypot(p.y) - r).abs() <= 1e-14 * 16.0, "{p:?}");
+        assert!((det::hypot(p.x, p.y) - r).abs() <= 1e-14 * 16.0, "{p:?}");
     }
 }
 
@@ -359,7 +360,7 @@ fn a_plane_a_little_off_square_goes_back_square() {
     use crate::geom::vector3d::Vec3;
     use crate::surface::plane::Plane;
     let k = k();
-    let (s, c) = 15f64.to_radians().sin_cos();
+    let (s, c) = det::sin_cos(15f64.to_radians());
     let dom = Extent2d::from_bounds(-3.0, -1.0, 4.0, 2.0);
     let plane = Plane::new(
         Vec3::new(10010.0, 9997.58, 10.0),
@@ -402,7 +403,7 @@ fn a_plane_a_little_off_square_goes_back_square() {
         );
     }
     // a plane already square keeps its axes to the bit
-    let (sn, cs) = 15f64.to_radians().sin_cos();
+    let (sn, cs) = det::sin_cos(15f64.to_radians());
     let square = Plane::new(
         Vec3::new(10010.0, 9997.58, 10.0),
         Vec3::new(cs, sn, 0.0),
@@ -504,15 +505,15 @@ fn a_torus_label_stands_on_a_short_arc_of_its_tube() {
         let homogeneous: Vec<Vec<[f64; 4]>> = (0..3)
             .map(|i| {
                 let u = f64::from(i) * quarter;
-                let wu = if i == 1 { quarter.cos() } else { 1.0 };
-                let radial = (ex * u.cos() + ey * u.sin()) * (1.0 / wu);
+                let wu = if i == 1 { det::cos(quarter) } else { 1.0 };
+                let radial = (ex * det::cos(u) + ey * det::sin(u)) * (1.0 / wu);
                 (0..3)
                     .map(|j| {
                         let v = PI + (f64::from(j) - 1.0) * half;
-                        let wv = if j == 1 { half.cos() } else { 1.0 };
+                        let wv = if j == 1 { det::cos(half) } else { 1.0 };
                         let p = origin
-                            + radial * (major + minor * v.cos() / wv)
-                            + axis * (minor * v.sin() / wv);
+                            + radial * (major + minor * det::cos(v) / wv)
+                            + axis * (minor * det::sin(v) / wv);
                         let w = wu * wv;
                         [p.x * w, p.y * w, p.z * w, w]
                     })
@@ -600,7 +601,7 @@ fn a_label_with_its_origin_elsewhere_on_the_axis_passes_the_kernels_check() {
                 },
                 Record::Cone {
                     frame: at(h),
-                    radius_at_origin: 5.0 + h * 0.25_f64.tan(),
+                    radius_at_origin: 5.0 + h * det::tan(0.25_f64),
                     half_angle: 0.25,
                 },
             ),
