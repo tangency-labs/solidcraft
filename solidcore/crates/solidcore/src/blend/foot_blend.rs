@@ -16,7 +16,11 @@
 //! `e(t) + z_i b_i` dropped onto the support; where it ends on the other branch, finds no
 //! foot or does not converge, it starts again from the previous station's foot before the
 //! station is refused. Between the stations the foot is proved on that branch: a chain of
-//! Krawczyk boxes over the leg, from the root to the toe (`FootBlend::prove_chain`).
+//! Krawczyk boxes over the leg, from the root to the toe (`FootBlend::prove_chain`). The
+//! stations of a section face's net are not searched: each of their feet is solved from the
+//! proved piece that covers it and checked to lie in that piece's box
+//! (`FootBlend::piece_foot`), so a foot that is not found there is a defect, not a leg too
+//! large.
 //!
 //! A station refused is a typed failure ([`crate::error::blend::BlendFailure`]): no toe at
 //! the leg on the face's side, or an arc that would cut into a face, are refusals that name
@@ -169,6 +173,11 @@ enum MissKind {
     },
     /// A point did not drop onto the support, or its normal is not defined there: a defect.
     Stage,
+    /// A foot solved from the piece it is proved over (`FootBlend::piece_foot`) is not the
+    /// proved one: no piece covers the station, Newton ended on the other side or where the
+    /// equations are singular, or its foot lies off the piece's box by more than
+    /// `tolerance`. A defect: the foot is proved to be in that box.
+    NotProved { tolerance: f64 },
 }
 
 /// A station not made: where, on which side, and why; or an arc past its bound there.
@@ -600,6 +609,147 @@ impl FootBlend {
         }))
     }
 
+    /// Support `i`'s foot at the leader's parameter `t` (root `root`, tangent `tangent`) at
+    /// the leg `z`, solved from the piece of `pieces` that covers `t`: the side's pieces as
+    /// its proof left them ([`FootBlend::prove_work`]), on the form `form`. Newton starts at
+    /// the piece's path there, where the proof holds the foot, and the foot it finds is
+    /// checked against the box the proof holds the foot in (the path plus the correction's
+    /// box, enclosed on the form): within the solve's rounding of it, `1e-8 (1 + the root's
+    /// size + z)`. The foot, its parameters and the root's, as [`FootBlend::foot`] gives
+    /// them. A miss is never "no toe": the proof has the foot in that box, so a solve that
+    /// does not converge is [`MissKind::NotConverged`], and no covering piece, the other
+    /// side, a singular point or a foot off the box is [`MissKind::NotProved`].
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations and the enclosure.
+    #[allow(clippy::too_many_arguments)]
+    fn piece_foot(
+        &self,
+        k: &Kernel,
+        i: usize,
+        form: &ProofSupport,
+        pieces: &[SidePiece],
+        root: Point3,
+        tangent: Vec3,
+        t: f64,
+        z: f64,
+        near: Option<&FootStation>,
+    ) -> Result<std::result::Result<(Point3, Point2, Point2), MissKind>> {
+        let Some(side) = self.sides.get(i) else {
+            return Ok(Err(MissKind::Stage));
+        };
+        let surface = &side.surface;
+        let domain = surface.natural_uv_domain_with_nurb(k)?;
+        let near_root = near.and_then(|s| s.root_uv.get(i).copied());
+        let near_foot = near.and_then(|s| s.uv.get(i).copied());
+        let Some(root_uv) = dropped(k, surface, &domain, root, near_root)? else {
+            return Ok(Err(MissKind::Stage));
+        };
+        let Some(n) = normal_at(k, surface, root_uv)? else {
+            return Ok(Err(MissKind::Stage));
+        };
+        let b = n.cross(tangent) * side.side;
+        let Ok(b) = (b - tangent * b.dot(tangent)).unitize() else {
+            return Ok(Err(MissKind::Stage));
+        };
+        let size = 1.0 + root.max_dimension() + z;
+        // to rounding, as a searched foot is solved
+        let tol = 1e-11 * size;
+        let off = MissKind::NotProved {
+            tolerance: 1e-8 * size,
+        };
+        let Some(piece) = pieces.iter().find(|p| t <= p.to).filter(|p| t >= p.from) else {
+            return Ok(Err(off));
+        };
+        // the box the proof holds the foot in at `t`, on the form, and its points
+        let dt = Ivl::from(t) - Ivl::from(0.5 * (piece.from + piece.to));
+        let [m0, m1] = piece.path.mid.map(Ivl::from);
+        let [s0, s1] = piece.path.slope.map(Ivl::from);
+        let [h0, h1] = piece.path.held;
+        let Some(held) = form.partials([m0 + s0 * dt + h0, m1 + s1 * dt + h1], 0)? else {
+            return Ok(Err(off));
+        };
+        let held = held.at(0, 0);
+        let (middle, _) = ivl_mid(held);
+        let Some(start) = dropped(k, surface, &domain, middle, near_foot.or(Some(root_uv)))? else {
+            return Ok(Err(MissKind::Stage));
+        };
+        match newton(k, surface, root, tangent, b, z, start, tol)? {
+            Newton::Found(p, w) if ivl_gap(held, p) <= 1e-8 * size => Ok(Ok((p, w, root_uv))),
+            Newton::Found(..) | Newton::WrongSide | Newton::Singular => Ok(Err(off)),
+            Newton::NotConverged { residual, step, .. } => Ok(Err(MissKind::NotConverged {
+                residual,
+                step,
+                tolerance: tol,
+            })),
+        }
+    }
+
+    /// The station at the leader's parameter `t` with the legs `legs`, each foot solved from
+    /// its side's proved pieces (`proved`: the supports' forms and each side's pieces,
+    /// [`FootBlend::piece_foot`]); a side whose support has no form is not proved and its
+    /// foot is searched as [`FootBlend::try_station`] searches it. The station, or the miss.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations and the enclosures.
+    fn proved_station(
+        &self,
+        k: &Kernel,
+        t: f64,
+        legs: [f64; 2],
+        proved: ProvedFeet<'_>,
+        near: Option<&FootStation>,
+    ) -> Result<std::result::Result<FootStation, Miss>> {
+        let (root, tangent) = self.root_at(k, t)?;
+        let (forms, sides) = proved;
+        let mut feet = [Point3::ZERO; 2];
+        let mut uv = [Point2::new(0.0, 0.0); 2];
+        let mut root_uv = [Point2::new(0.0, 0.0); 2];
+        for (i, &z) in legs.iter().enumerate() {
+            let made = match (forms.get(i).and_then(Option::as_ref), sides.get(i)) {
+                (Some(form), Some(pieces)) => {
+                    self.piece_foot(k, i, form, pieces, root, tangent, t, z, near)?
+                }
+                _ => self.foot(k, i, root, tangent, z, near)?,
+            };
+            match made {
+                Ok((p, w, r)) => {
+                    if let (Some(f), Some(u), Some(q)) =
+                        (feet.get_mut(i), uv.get_mut(i), root_uv.get_mut(i))
+                    {
+                        (*f, *u, *q) = (p, w, r);
+                    }
+                }
+                Err(kind) => return Ok(Err(Miss::Foot { t, side: i, kind })),
+            }
+        }
+        Ok(Ok(FootStation {
+            t,
+            root,
+            tangent,
+            feet,
+            uv,
+            root_uv,
+        }))
+    }
+
+    /// The supports' NURBS forms, each `None` where a support has none: what the feet's
+    /// proof runs on, and with a segment's proved pieces what its net's stations are solved
+    /// from ([`ProvedFeet`]).
+    ///
+    /// # Errors
+    ///
+    /// Those of the forms.
+    fn proof_forms(&self, k: &Kernel) -> Result<[Option<ProofSupport>; 2]> {
+        let [one, two] = &self.sides;
+        Ok([
+            ProofSupport::of(k, &one.surface)?,
+            ProofSupport::of(k, &two.surface)?,
+        ])
+    }
+
     /// The station at the leader's parameter `t` with the legs `legs` (support 1's, support
     /// 2's): each foot on its support, in the plane square to the leader through the root, at
     /// its leg's distance from the root, on the branch that leaves the root along the face
@@ -665,6 +815,17 @@ impl FootBlend {
                             residual: Some(residual),
                             tolerance,
                             step: Some(step),
+                            iterations: u32::try_from(NEWTON_STEPS).ok(),
+                        },
+                    )
+                    .or_at(site(at)),
+                    MissKind::NotProved { tolerance } => Failure::new(
+                        OP,
+                        BlendFailure::StationDidNotConverge {
+                            s: t,
+                            residual: None,
+                            tolerance,
+                            step: None,
                             iterations: u32::try_from(NEWTON_STEPS).ok(),
                         },
                     )
@@ -1753,7 +1914,7 @@ impl FootBlend {
         sagitta: f64,
         tol: f64,
     ) -> Result<FeetProof> {
-        Ok(self.whole_segment(k, legs, sagitta, tol)?.proof)
+        Ok(self.whole_segment(k, legs, sagitta, tol)?.proof.counts)
     }
 
     /// The proved distance of [`Self::section_face`]'s net (with the same arguments) from the
@@ -1793,7 +1954,9 @@ impl FootBlend {
         // the feet proved over the segment first, each side on pieces the segment sets
         // itself: the proof is the definition's, not the net's, and a leg too large is
         // refused here, with a leg that is proved over the segment
-        let proof = self.prove_feet(k, legs, [a, b])?;
+        let proof = self.prove_segment(k, legs, [a, b])?;
+        // the net's stations take their feet from the pieces just proved, not from a search
+        let forms = self.proof_forms(k)?;
         let mut breaks = vec![a];
         breaks.extend(
             self.breaks()?
@@ -1822,7 +1985,8 @@ impl FootBlend {
             let mut roots = Vec::new();
             let mut solved: Vec<FootStation> = Vec::new();
             for &t in &stations {
-                match self.section_rows(k, t, legs, sagitta, solved.last())? {
+                let proved = (&forms, &proof.sides);
+                match self.section_rows(k, t, legs, sagitta, solved.last(), proved)? {
                     Ok((row, s)) => {
                         rows.push(row);
                         roots.push(s.root);
@@ -1857,7 +2021,9 @@ impl FootBlend {
             for (j, pair) in stations.windows(2).enumerate() {
                 let &[lo, hi] = pair else { continue };
                 let t = 0.5 * (lo + hi);
-                let (row, s) = match self.section_rows(k, t, legs, sagitta, solved.get(j))? {
+                let proved = (&forms, &proof.sides);
+                let made = self.section_rows(k, t, legs, sagitta, solved.get(j), proved)?;
+                let (row, s) = match made {
                     Ok(made) => made,
                     Err(miss) => {
                         return Err(self.refusal(k, miss, &[[a, b]], legs)?);
@@ -1974,9 +2140,10 @@ impl FootBlend {
         Ok(breaks)
     }
 
-    /// One station's section as control rows across, and the station: the chord's two feet
-    /// (weights 1), or the arc's five rows of [`BeadArc::rows`] with their weights; or the
-    /// miss: a foot not found. The sagitta is not read against its bound here: a span's is
+    /// One station's section as control rows across, and the station, its feet solved from
+    /// the segment's proved pieces `proved` ([`FootBlend::proved_station`]): the chord's two
+    /// feet (weights 1), or the arc's five rows of [`BeadArc::rows`] with their weights; or
+    /// the miss: a foot not found. The sagitta is not read against its bound here: a span's is
     /// below the bound at every parameter before its stations are made
     /// ([`FootBlend::add_span`]).
     ///
@@ -1988,9 +2155,10 @@ impl FootBlend {
         legs: [f64; 2],
         sagitta: f64,
         near: Option<&FootStation>,
+        proved: ProvedFeet<'_>,
     ) -> Result<std::result::Result<(SectionRow, FootStation), Miss>> {
         use crate::surface::procedural_blend::bead::BeadArc;
-        let s = match self.try_station(k, t, legs, near)? {
+        let s = match self.proved_station(k, t, legs, proved, near)? {
             Ok(s) => s,
             Err(miss) => return Ok(Err(miss)),
         };
@@ -2016,8 +2184,8 @@ struct Segment {
     root: BSplineCurve,
     /// The root's parameters on each support at the segment's start.
     start_uv: [Point2; 2],
-    /// The feet's proof over the segment.
-    proof: FeetProof,
+    /// The feet's proof over the segment, with each side's proved pieces.
+    proof: SegmentProof,
     /// The section face's proved distance from the true section ([`FootBlend::chord_net`]),
     /// where it is certified.
     bound: Option<f64>,
@@ -2246,8 +2414,17 @@ impl FootBlend {
         // the cuts' rungs (one per support) and sections, shared by the faces either side
         let mut rungs: Vec<[BSplineCurve; 2]> = Vec::new();
         let mut sections: Vec<BSplineCurve> = Vec::new();
-        for &t in &cuts {
-            let (r1, r2, section) = self.cut_curves(k, t, legs, sagitta, &within)?;
+        let forms = self.proof_forms(k)?;
+        for (j, &t) in cuts.iter().enumerate() {
+            // a cut's feet from the pieces of the segment that starts there (the last cut's
+            // from the segment that ends there)
+            let Some(net) = nets.get(j).or_else(|| nets.last()) else {
+                return Err(defect(
+                    "a span had no segment, though at least one is built for every span",
+                ));
+            };
+            let proved = (&forms, &net.proof.sides);
+            let (r1, r2, section) = self.cut_curves(k, t, legs, sagitta, &within, proved)?;
             rungs.push([r1, r2]);
             sections.push(section);
         }
@@ -2362,9 +2539,11 @@ impl FootBlend {
         legs: [f64; 2],
         sagitta: f64,
         within: &[[f64; 2]],
+        proved: ProvedFeet<'_>,
     ) -> Result<(BSplineCurve, BSplineCurve, BSplineCurve)> {
         use crate::nurbs::b_spline_curve::{BSplineCurveForm, CanonicalData, KnotType};
-        let ((row, weights), full) = match self.section_rows(k, t, legs, sagitta, None)? {
+        let made = self.section_rows(k, t, legs, sagitta, None, proved)?;
+        let ((row, weights), full) = match made {
             Ok(made) => made,
             Err(miss) => return Err(self.refusal(k, miss, within, legs)?),
         };
@@ -3279,10 +3458,12 @@ mod tests {
     /// A side's proof is not empty. In a square corner between two planes the first side's
     /// feet at a leg of 5 are proved between three of its stations. With the last station's
     /// foot moved onto the other branch (across the edge, on the plane's continuation) they
-    /// are not: a piece stays unproved, a miss, not a pass.
+    /// are not: a piece stays unproved, a miss, not a pass. And a station of the net is
+    /// solved from the proved pieces: it has the feet a search finds, and with a side's
+    /// pieces moved off the foot that side's foot is a defect, never "no toe".
     #[test]
     fn a_foot_on_the_other_branch_is_not_proved() {
-        use super::{leader_of, normal_at, FootBlend, FootStation, SideMiss};
+        use super::{leader_of, normal_at, FootBlend, FootStation, Miss, MissKind, SideMiss};
         use crate::curve::curve::Curve;
         use crate::geom::extent1d::Extent1d;
         use crate::geom::vector3d::{Point3, Vec3};
@@ -3324,13 +3505,39 @@ mod tests {
         }
         let work = blend.side_work(&k, 0, legs, &stations).unwrap().unwrap();
         let proved = blend.prove_work(&k, 0, legs, work).unwrap();
-        assert!(proved.is_ok_and(|p| p.pieces >= 2), "{proved:?}");
+        let pieces = proved.as_ref().map(|p| p.pieces.len());
+        assert!(pieces.is_ok_and(|n| n >= 2), "{proved:?}");
         let last = stations.last_mut().unwrap();
         let [foot, _] = last.feet;
         last.feet = [last.root - (foot - last.root); 2];
         let work = blend.side_work(&k, 0, legs, &stations).unwrap().unwrap();
         let moved = blend.prove_work(&k, 0, legs, work).unwrap();
         assert!(matches!(moved, Err(SideMiss::Unproved { .. })), "{moved:?}");
+        // a station of the net takes its feet from the proved pieces: the feet a search
+        // finds, where the pieces are the proof's
+        let mut proof = blend.prove_segment(&k, legs, [lo, hi]).unwrap();
+        let forms = blend.proof_forms(&k).unwrap();
+        let t = lo + 0.37 * (hi - lo);
+        let searched = blend.try_station(&k, t, legs, None).unwrap().unwrap();
+        let made = blend
+            .proved_station(&k, t, legs, (&forms, &proof.sides), None)
+            .unwrap()
+            .unwrap();
+        for (foot, want) in made.feet.iter().zip(searched.feet) {
+            assert!(foot.distance(want) < 1e-9, "{foot:?} {want:?}");
+        }
+        // with the first side's pieces moved off the foot, its foot is not the proved one: a
+        // defect of that side, not "no toe at the leg"
+        for piece in &mut proof.sides[0] {
+            piece.path.mid = piece.path.mid.map(|x| x + 1.0);
+        }
+        let off = blend
+            .proved_station(&k, t, legs, (&forms, &proof.sides), None)
+            .unwrap();
+        match off {
+            Err(Miss::Foot { side: 0, kind, .. }) => assert_ne!(kind, MissKind::NoToe, "{off:?}"),
+            _ => panic!("{off:?}"),
+        }
     }
 }
 
@@ -4142,14 +4349,38 @@ pub struct FeetProof {
     pub stations: usize,
 }
 
-/// What [`FootBlend::prove_side`] proved of one side over a segment: its pieces, the halvings
-/// they took, and the stations it started from with the middles of the pieces halved.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// A piece of the leader one side's foot is proved over ([`FootBlend::prove_work`]), `from`
+/// to `to`, and the path it is proved about: the foot's place on the support's form for
+/// every parameter of the piece.
+#[derive(Debug, Clone, Copy)]
+struct SidePiece {
+    from: f64,
+    to: f64,
+    path: PiecePath,
+}
+
+/// What [`FootBlend::prove_side`] proved of one side over a segment: its pieces in order
+/// along the leader, the halvings they took, and the stations it started from with the
+/// middles of the pieces halved.
+#[derive(Debug, Clone, Default)]
 struct SideProof {
-    pieces: usize,
+    pieces: Vec<SidePiece>,
     halvings: usize,
     stations: usize,
 }
+
+/// What `FootBlend::prove_segment` proved over a segment: the counts
+/// ([`FootBlend::prove_feet`] gives them), and each side's proved pieces in order along the
+/// leader (none for a side whose support has no form).
+#[derive(Debug, Clone, Default)]
+struct SegmentProof {
+    counts: FeetProof,
+    sides: [Vec<SidePiece>; 2],
+}
+
+/// What a station of a segment's net solves its feet from: the supports' forms
+/// ([`FootBlend::proof_forms`]) and each side's proved pieces ([`SegmentProof`]).
+type ProvedFeet<'a> = (&'a [Option<ProofSupport>; 2], &'a [Vec<SidePiece>; 2]);
 
 /// Why one side's feet are not proved over a segment ([`FootBlend::prove_side`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -4192,6 +4423,16 @@ impl FootBlend {
     /// [`BlendFailure::NotCertified`]. [`BlendFailure::NotCertified`] too where the rise's
     /// sign is not decided over a piece of the joint. Those of the evaluations.
     pub fn prove_feet(&self, k: &Kernel, legs: [f64; 2], segment: [f64; 2]) -> Result<FeetProof> {
+        Ok(self.prove_segment(k, legs, segment)?.counts)
+    }
+
+    /// [`FootBlend::prove_feet`], with each side's proved pieces: a segment's net solves its
+    /// stations' feet from them ([`FootBlend::piece_foot`]).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`FootBlend::prove_feet`].
+    fn prove_segment(&self, k: &Kernel, legs: [f64; 2], segment: [f64; 2]) -> Result<SegmentProof> {
         check_legs(legs)?;
         // both sides' stations first, then their pieces: a station that is not made (a leg
         // too large, with its size; a solve that does not converge) is refused before a
@@ -4203,14 +4444,17 @@ impl FootBlend {
                 Err(miss) => return Err(self.side_refusal(k, i, miss, segment, legs)?),
             }
         }
-        let mut proof = FeetProof::default();
+        let mut proof = SegmentProof::default();
         for (i, work) in works.into_iter().enumerate() {
             match self.prove_work(k, i, legs, work)? {
                 Ok(side) => {
-                    proof.pieces += side.pieces;
-                    proof.halvings += side.halvings;
-                    proof.chains += side.pieces;
-                    proof.stations += side.stations;
+                    proof.counts.pieces += side.pieces.len();
+                    proof.counts.halvings += side.halvings;
+                    proof.counts.chains += side.pieces.len();
+                    proof.counts.stations += side.stations;
+                    if let Some(pieces) = proof.sides.get_mut(i) {
+                        *pieces = side.pieces;
+                    }
                 }
                 Err(miss) => return Err(self.side_refusal(k, i, miss, segment, legs)?),
             }
@@ -4406,11 +4650,15 @@ impl FootBlend {
                 match Self::prove_piece(k, &support, &leader, a.t, b.t, z, fa, fb, &mut guess)? {
                     Some((.., path)) => self
                         .prove_chain(k, &support, &leader, i, &a, &b, z, path)?
-                        .is_some(),
-                    None => false,
+                        .map(|_| path),
+                    None => None,
                 };
-            if proved {
-                proof.pieces += 1;
+            if let Some(path) = proved {
+                proof.pieces.push(SidePiece {
+                    from: a.t.min(b.t),
+                    to: a.t.max(b.t),
+                    path,
+                });
                 continue;
             }
             if depth >= PROOF_HALVINGS {
@@ -5272,6 +5520,16 @@ fn ivl_mid(v: crate::blend::fillet_section::series::V3<Ivl>) -> (Vec3, f64) {
         .sum::<f64>()
         .sqrt();
     (mid, r * (1.0 + 4.0 * f64::EPSILON))
+}
+
+/// The distance of `p` from an enclosure: 0 inside it.
+fn ivl_gap(v: crate::blend::fillet_section::series::V3<Ivl>, p: Point3) -> f64 {
+    [(v.x, p.x), (v.y, p.y), (v.z, p.z)]
+        .iter()
+        .map(|(c, x)| (c.lo - x).max(x - c.hi).max(0.0))
+        .map(|d| d * d)
+        .sum::<f64>()
+        .sqrt()
 }
 
 /// The largest distance of a point from `p` in an enclosure.
