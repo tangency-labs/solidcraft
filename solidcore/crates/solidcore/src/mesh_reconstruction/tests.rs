@@ -1058,8 +1058,8 @@ fn bored_block(crossing: bool) -> TriMesh {
         .map(|i| {
             let angle = f64::from(i) * TAU / 192.;
             let across = big * angle.sin();
-            let opening = (crossing && across.abs() < small)
-                .then(|| (small.powi(2) - across.powi(2)).sqrt());
+            let opening =
+                (crossing && across.abs() < small).then(|| (small.powi(2) - across.powi(2)).sqrt());
             (angle, opening)
         })
         .collect();
@@ -1088,7 +1088,11 @@ fn bored_block(crossing: bool) -> TriMesh {
             patch(&mut mesh, &[outline], on_x_bore);
         }
     }
-    let ring: Vec<_> = angles.iter().skip(1).map(|&(angle, _)| angle * big).collect();
+    let ring: Vec<_> = angles
+        .iter()
+        .skip(1)
+        .map(|&(angle, _)| angle * big)
+        .collect();
     for x in [0., 60.] {
         let hole = ring
             .iter()
@@ -1112,7 +1116,8 @@ fn bored_block(crossing: bool) -> TriMesh {
                 .skip(1)
                 .filter_map(|&(angle, w)| {
                     let turn = (angle - near + PI).rem_euclid(TAU) - PI;
-                    w.filter(|_| turn.abs() < FRAC_PI_2).map(|w| (turn, angle, w))
+                    w.filter(|_| turn.abs() < FRAC_PI_2)
+                        .map(|w| (turn, angle, w))
                 })
                 .collect();
             opening.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -1171,9 +1176,8 @@ fn bored_block(crossing: bool) -> TriMesh {
 fn crossing_cylinders_volume(big: f64, small: f64) -> f64 {
     let steps = 2000;
     let h = FRAC_PI_2 / f64::from(steps);
-    let f = |u: f64| {
-        small.powi(2) * u.cos().powi(2) * (big.powi(2) - (small * u.sin()).powi(2)).sqrt()
-    };
+    let f =
+        |u: f64| small.powi(2) * u.cos().powi(2) * (big.powi(2) - (small * u.sin()).powi(2)).sqrt();
     let sum: f64 = (0..=steps)
         .map(|i| {
             let weight = if i == 0 || i == steps {
