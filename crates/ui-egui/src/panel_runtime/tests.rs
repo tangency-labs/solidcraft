@@ -2971,8 +2971,8 @@ struct RawPanelHost {
     painted_frames: Vec<HostFrame>,
     finished_frames: Vec<HostFrame>,
     clicked_widgets: Vec<egui::Id>,
+    menu_keyboard_intents: Vec<egui::Id>,
     double_clicked_widgets: Vec<egui::Id>,
-    painted_menu: bool,
     late_modal: bool,
     reserve_escape_for_host: bool,
     escape_reservations: usize,
@@ -3006,8 +3006,8 @@ impl RawPanelHost {
             painted_frames: Vec::new(),
             finished_frames: Vec::new(),
             clicked_widgets: Vec::new(),
+            menu_keyboard_intents: Vec::new(),
             double_clicked_widgets: Vec::new(),
-            painted_menu: false,
             late_modal: false,
             reserve_escape_for_host: false,
             escape_reservations: 0,
@@ -3051,6 +3051,7 @@ impl RawPanelHost {
         self.painted_frames.clear();
         self.finished_frames.clear();
         self.clicked_widgets.clear();
+        self.menu_keyboard_intents.clear();
         self.double_clicked_widgets.clear();
         self.modal_observations.clear();
         self.focused_response = None;
@@ -3087,6 +3088,9 @@ impl RawPanelHost {
                 )
                 .unwrap();
             let painted = self.host.frame().unwrap().clone();
+            if let Some(source) = self.host.pending_menu_keyboard_source() {
+                self.menu_keyboard_intents.push(source);
+            }
             for control in &painted.controls {
                 if let Some(response) = ui.ctx().read_response(control.id) {
                     if response.clicked() || response.secondary_clicked() {
@@ -3215,7 +3219,6 @@ impl RawPanelHost {
         if multipass {
             assert!(passes >= 2, "must actually exercise another egui pass");
         }
-        self.painted_menu |= self.host.frame().is_some_and(|frame| frame.menu_bounds.is_some());
         (self.host.frame().cloned(), output)
     }
 
@@ -8753,10 +8756,17 @@ fn late_shared_modal_discards_pointer_and_keyboard_intents_without_latent_action
                 let events =
                     if keyboard { vec![host_key(egui::Key::Enter, true)] } else { vec![egui::Event::PointerMoved(at), button_event(at, false)] };
                 raw.frame(events, true);
-                assert!(
-                    raw.clicked_widgets.contains(&widget.id),
-                    "the earlier real response must queue an intent before the late modal blocks finish"
-                );
+                if keyboard && action == 2 {
+                    assert!(
+                        raw.menu_keyboard_intents.contains(&widget.id),
+                        "the shared menu must queue its selected keyboard action before the late modal blocks finish"
+                    );
+                } else {
+                    assert!(
+                        raw.clicked_widgets.contains(&widget.id),
+                        "the earlier real response must queue an intent before the late modal blocks finish"
+                    );
+                }
                 assert_no_host_mutation(&raw, &before, commits);
                 assert_modal_preserves_painted_host_geometry(&raw);
                 assert!(raw.modal_observations[0].visible);
@@ -9583,7 +9593,6 @@ fn assert_no_popup(frame: &HostFrame) {
 }
 
 fn open_root_popup(raw: &mut RawPanelHost, source: &HostControlTarget, button: egui::PointerButton, multipass: bool) {
-    let previously_painted = raw.painted_menu;
     let at = raw.at(source.clone());
     raw.frame(vec![egui::Event::PointerMoved(at)], false);
     raw.frame(vec![popup_button(at, button, true)], false);
@@ -9591,9 +9600,8 @@ fn open_root_popup(raw: &mut RawPanelHost, source: &HostControlTarget, button: e
     assert_no_popup(&raw.painted_frames[0]);
     assert_no_popup(&raw.finished_frames[0]);
     raw.frame(Vec::new(), false);
-    if !multipass && !previously_painted {
-        assert_no_popup(raw.host.frame().unwrap());
-    }
+    // egui may automatically run the measuring pass during the release frame.
+    // Wait for visible rows without assuming which quiet frame first paints them.
     raw.frame(Vec::new(), false);
     assert!(raw.host.frame().unwrap().menu_bounds.is_some(), "accepted popup is published after it actually paints");
 }
@@ -9877,6 +9885,7 @@ fn late_first_appearance_window_blocks_nested_popup_navigation() {
                     raw.pointer(outside, false, false);
                     raw.frame(Vec::new(), true);
                 }
+                assert!(raw.host.frame().unwrap().menu_bounds.is_none(), "popup cancellation route {cancel} at {scale}x must not retain navigation");
                 assert_no_popup(raw.host.frame().unwrap());
                 assert_eq!(raw.content.commands.calls, 0);
             }

@@ -15,10 +15,13 @@ pub struct MenuOutput {
     pub picked: Option<Item>,
     pub close: bool,
     pub hovered: Option<Item>,
+    pub active_row: Option<Id>,
     pub open: bool,
     pub rect: Option<Rect>,
     pub inside: bool,
     pub depth: usize,
+    /// The root is measuring invisibly; hosts must not expose its geometry yet.
+    pub sizing: bool,
     pub rows: Vec<(Item, Response)>,
 }
 
@@ -27,6 +30,8 @@ struct PopupState {
     pointer_gate: Option<(usize, Rect)>,
     focus_rows: Vec<(Id, usize, usize)>,
     auxiliary_rows: Vec<Id>,
+    visible_rects: Vec<Rect>,
+    source_layer: Option<egui::LayerId>,
     last_focus: Option<Id>,
     path: Vec<usize>,
     open_ids: Vec<String>,
@@ -166,6 +171,8 @@ fn draw_level(
     output: &mut MenuOutput,
     editing: &mut bool,
     scroll_cursor: bool,
+    keyboard: bool,
+    deepest: bool,
 ) -> Seen {
     let t = Tokens::get();
     let mut seen = Seen { sizing: ui.is_sizing_pass(), ..Default::default() };
@@ -180,8 +187,9 @@ fn draw_level(
             Menu::heading(ui, &item.label);
             continue;
         }
-        let mut row = MenuItem::from_item(item, cursor == Some(index) || (open == Some(index) && !leaving));
+        let mut row = MenuItem::from_item(item, (keyboard && cursor == Some(index)) || (open == Some(index) && !leaving));
         row.publish_handle = false;
+        row.suppress_pointer_hot = true;
         let secondary_width = if item.secondary.is_some() { t.control_height } else { 0.0 };
         let number_width = if item.number.is_some() { t.control_height * 3.0 } else { 0.0 };
         let extra = secondary_width + number_width;
@@ -200,7 +208,11 @@ fn draw_level(
                 Sense::hover()
             },
         );
+        row.highlighted |= !keyboard && response.hovered();
         row.paint(ui, rect, &response, extra);
+        if item.enabled && ui.is_enabled() && ((keyboard && deepest && cursor == Some(index)) || (!keyboard && response.hovered())) {
+            output.active_row = Some(response.id);
+        }
         seen.ids.push((response.id, index));
         let first_id = !output.rows.iter().any(|(previous, _)| previous.id == item.id);
         let first_label = !output.rows.iter().any(|(previous, _)| previous.label == item.label);
@@ -258,6 +270,9 @@ fn draw_level(
                 response.clone().backing_on_hover_text(tip);
             }
             if response.hovered() {
+                if !keyboard && secondary.enabled && ui.is_enabled() {
+                    output.active_row = Some(response.id);
+                }
                 output.hovered = Some((**secondary).clone());
             }
             output.rows.push(((**secondary).clone(), response.clone()));
@@ -268,6 +283,9 @@ fn draw_level(
                     Menu::focus_row(&response);
                 }
                 output.inside |= child.inside;
+                if child.active_row.is_some() {
+                    output.active_row = child.active_row;
+                }
                 output.rows.extend(child.rows);
                 if child.hovered.is_some() {
                     output.hovered = child.hovered;
@@ -340,6 +358,73 @@ impl Menu {
                 egui::EventFilter { horizontal_arrows: true, vertical_arrows: true, escape: true, ..Default::default() },
             )
         });
+    }
+    /// Whether the pointer is inside a live, visibly painted shared menu in this viewport.
+    pub fn contains_pointer(ctx: &Context) -> bool {
+        ctx.pointer_hover_pos().is_some_and(|pointer| Self::contains_point(ctx, pointer))
+    }
+    /// Whether a point belongs to a live, visibly painted shared menu in this viewport.
+    pub fn contains_point(ctx: &Context, pointer: Pos2) -> bool {
+        let viewport = ctx.viewport_id();
+        let frame = ctx.cumulative_frame_nr();
+        let registry = Id::unique(("shared_menus", viewport));
+        ctx.data(|data| {
+            data.get_temp::<Vec<(Id, u64, bool)>>(registry).is_some_and(|menus| {
+                menus.iter().any(|(id, seen, open)| {
+                    *open
+                        && seen.saturating_add(1) >= frame
+                        && data
+                            .get_temp::<PopupState>(id.with(("shared_menu_state", viewport)))
+                            .is_some_and(|state| state.open && state.visible_rects.iter().any(|rect| rect.contains(pointer)))
+                })
+            })
+        })
+    }
+    /// Whether the pointer is in a live shared menu descended from this form layer.
+    pub fn contains_pointer_in(ctx: &Context, ancestor: egui::LayerId) -> bool {
+        let Some(pointer) = ctx.pointer_hover_pos() else { return false };
+        let viewport = ctx.viewport_id();
+        let frame = ctx.cumulative_frame_nr();
+        let registry = Id::unique(("shared_menus", viewport));
+        ctx.data(|data| {
+            data.get_temp::<Vec<(Id, u64, bool)>>(registry).is_some_and(|menus| {
+                menus.iter().any(|(id, seen, open)| {
+                    if !*open || seen.saturating_add(1) < frame {
+                        return false;
+                    }
+                    let Some(state) = data.get_temp::<PopupState>(id.with(("shared_menu_state", viewport))) else { return false };
+                    if !state.open || !state.visible_rects.iter().any(|rect| rect.contains(pointer)) {
+                        return false;
+                    }
+                    let mut source = state.source_layer;
+                    for _ in 0..MAX_DEPTH {
+                        let Some(layer) = source else { return false };
+                        if layer == ancestor {
+                            return true;
+                        }
+                        let owner_key = layer.id.with(("shared_menu_owner", viewport));
+                        let Some((owner, owner_layer, seen)) = data.get_temp::<(Id, egui::LayerId, u64)>(owner_key) else { return false };
+                        if owner_layer != layer || seen.saturating_add(1) < frame {
+                            return false;
+                        }
+                        source = data
+                            .get_temp::<PopupState>(owner.with(("shared_menu_state", viewport)))
+                            .filter(|parent| parent.open && parent.frame.saturating_add(1) >= frame)
+                            .and_then(|parent| parent.source_layer);
+                    }
+                    false
+                })
+            })
+        })
+    }
+    /// Canonical active action, independent of stationary pointer hover during key navigation.
+    pub fn row_is_hot(response: &Response) -> bool {
+        let key = Id::unique(("shared_menu_hot_rows", response.ctx.viewport_id()));
+        let frame = response.ctx.cumulative_pass_nr();
+        response
+            .ctx
+            .data(|data| data.get_temp::<Vec<(Id, u64)>>(key))
+            .is_some_and(|rows| rows.iter().any(|(id, seen)| *id == response.id && *seen == frame))
     }
     pub fn any_open(ctx: &Context) -> bool {
         let frame = ctx.cumulative_frame_nr();
@@ -440,6 +525,9 @@ impl Menu {
         let position = Self::marking_list_place(center, height(items), ctx.content_rect());
         let mut output =
             Self::render(ctx, id, MenuAnchor::Point(position), items, just_opened, None, true, egui::Order::Foreground, Some(ring), None);
+        if output.close && output.picked.is_none() {
+            return output;
+        }
         if let Some(item) = picked {
             output.close = !item.keep_open;
             output.open = !output.close;
@@ -633,6 +721,9 @@ impl Menu {
             ctx.data_mut(|data| data.insert_temp(adapter, state));
             return MenuOutput::default();
         }
+        let source = state_id(ctx, id).with("source_layer");
+        let frame = ctx.cumulative_frame_nr();
+        ctx.data_mut(|data| data.insert_temp(source, (response.layer_id, frame)));
         let output = Self::popup(ctx, id, state.anchor, items, state.fresh);
         state.fresh = false;
         state.open = !output.close;
@@ -655,6 +746,9 @@ impl Menu {
     /// does not also pick the first action.
     pub fn items(ui: &mut egui::Ui, id: Id, items: &[Item], just_opened: bool) -> MenuOutput {
         let ctx = ui.ctx().clone();
+        let source = state_id(&ctx, id).with("source_layer");
+        let frame = ctx.cumulative_frame_nr();
+        ctx.data_mut(|data| data.insert_temp(source, (ui.layer_id(), frame)));
         Self::render(&ctx, id, MenuAnchor::Point(ui.cursor().min), items, just_opened, Some(ui), true, egui::Order::Foreground, None, None)
     }
     fn render(
@@ -703,6 +797,10 @@ impl Menu {
             }
         }
         let seeded = state.seeded;
+        state.source_layer = ctx
+            .data(|data| data.get_temp::<(egui::LayerId, u64)>(source_key.with("source_layer")))
+            .filter(|(_, seen)| seen.saturating_add(1) >= frame)
+            .map(|(layer, _)| layer);
         state.frame = frame;
         state.seeded = false;
         state.open = interactive;
@@ -738,6 +836,9 @@ impl Menu {
             *cursor = Some(*index);
         }
         let auxiliary_focus = focused.is_some_and(|id| state.auxiliary_rows.contains(&id));
+        if focused != state.last_focus && focused.is_some_and(|id| state.focus_rows.iter().any(|(row, _, _)| *row == id)) {
+            state.keyboard = true;
+        }
         state.last_focus = focused;
         let mut output = MenuOutput { open: true, depth, ..Default::default() };
         // Inline actions can precede editors in the same form. The focused
@@ -834,6 +935,7 @@ impl Menu {
                 _ => false,
             };
         let mut seen = Vec::new();
+        state.visible_rects.clear();
         let mut previous_anchor = None;
         let mut leftward = false;
         let mut editing = false;
@@ -872,6 +974,8 @@ impl Menu {
                         &mut output,
                         &mut editing,
                         state.scroll_cursor && keyboard_owner,
+                        state.keyboard,
+                        depth + 1 == lists.len(),
                     )
                 })
             };
@@ -897,7 +1001,14 @@ impl Menu {
                         Self::show_frame(ui, Self::frame(), body).inner
                     })
             };
+            if !response.inner.sizing {
+                let layer = response.response.layer_id;
+                let owner_key = layer.id.with(("shared_menu_owner", ctx.viewport_id()));
+                ctx.data_mut(|data| data.insert_temp(owner_key, (id, layer, frame)));
+                state.visible_rects.push(response.response.interact_rect);
+            }
             if depth == 0 {
+                output.sizing = response.inner.sizing;
                 output.rect = Some(response.response.rect);
             }
             if let Some(parent) = previous_anchor {
@@ -952,6 +1063,10 @@ impl Menu {
         // already open menu actually loses focus, rather than forbidding background use.
         let unfocused =
             interactive && !just_opened && ctx.input(|input| input.events.iter().any(|event| matches!(event, egui::Event::WindowFocused(false))));
+        if escape || keyboard_close {
+            // Cancellation wins if activation and dismissal arrive in one input frame.
+            output.picked = None;
+        }
         if !interactive {
             output.picked = None;
             output.hovered = None;
@@ -969,7 +1084,14 @@ impl Menu {
             state.open_ids.push(item.id.clone());
             current = &item.children;
         }
+        let hot_registry = Id::unique(("shared_menu_hot_rows", ctx.viewport_id()));
+        let hot_pass = ctx.cumulative_pass_nr();
         ctx.data_mut(|data| {
+            let hot = data.get_temp_mut_or_default::<Vec<(Id, u64)>>(hot_registry);
+            hot.retain(|(_, seen)| *seen == hot_pass);
+            if interactive && let Some(row) = output.active_row {
+                hot.push((row, hot_pass));
+            }
             data.insert_temp(key, state);
             if output.close && data.get_temp::<(Id, u64)>(keyboard_key).is_some_and(|(active, _)| active == id) {
                 data.remove::<(Id, u64)>(keyboard_key);

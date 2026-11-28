@@ -427,6 +427,8 @@ fn details_summary_owner_anchors_and_count_changes_release_stale_cards() {
     h.frames(3);
     let effect = h.app.session.status_items().into_iter().find(|effect| effect.command == "inspect.section").unwrap();
     let owner = crate::viewport_status::identity(&effect);
+    h.step(&json!({"click":{"handle":format!("viewport_status:{owner}:item")}})).unwrap();
+    h.frames(2);
     h.step(&json!({"click":{"handle":format!("viewport_status:{owner}:key")}})).unwrap();
     h.frames(3);
     let badge = crate::scenario::rect_of("viewport_status:summary").unwrap();

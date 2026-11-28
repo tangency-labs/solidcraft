@@ -378,7 +378,7 @@ fn long_names_stay_inside_the_popup_and_remain_available_on_hover() {
             _ => None,
         })
         .expect("the body label is painted");
-    let popup = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_select_other"))).unwrap();
+    let popup = crate::ui_kit::Menu::level_rect(&h.ctx, egui::Id::unique("sc_select_other"), 0).unwrap();
     let text_rect = egui::Rect::from_min_size(text.pos, text.galley.size());
     assert!(popup.contains_rect(text_rect), "{text_rect:?} spills outside {popup:?}");
     assert!(h.ctx.content_rect().contains_rect(popup));

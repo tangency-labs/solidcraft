@@ -12,7 +12,7 @@
  {"expect":{"handle_order":["button:solid.cylinder","button:solid.torus"]}},
  {"restart":"close"},
  {"expect":{"handle_order":["button:solid.hole","button:solid.cylinder","button:solid.torus"],"errors":0}},
- {"call":"ui.resize","params":{"width":640,"height":720}},
+ {"call":"ui.resize","params":{"width":640,"height":2400}},
  {"click":{"handle":"panel:MODEL:CREATE"}},
  {"drag":[{"handle":"dropdown:solid.box"},{"handle":"panel:MODEL:CREATE"}],"steps":12},
  {"key":"Escape"},

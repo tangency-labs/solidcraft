@@ -2093,7 +2093,8 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         }
         let mut out = {
             let mut more_items = |group: usize| {
-                let (panel, cmds, shown) = panels.panel_index(group).and_then(|index| lists.get(index))?;
+                let original = crate::plugin_slots::original_group_index(group, builtin_groups, plugin_groups.len(), panels.exit);
+                let (panel, cmds, shown) = panels.panel_index(original).and_then(|index| lists.get(index))?;
                 Some(command_menu_items(app, &tab, panel, &menu_commands(cmds, shown)))
             };
             ribbon::show(ui, &row, Rect::from_min_max(pos2(ribbon_left, top), r.max), &mut more_items)
@@ -2575,7 +2576,7 @@ fn record_command_menu_rows(app: &SolveApp, ui: &egui::Ui, rows: &[(ui_kit::Item
         if response.drag_started() {
             response.dnd_set_drag_payload(ui_kit::ReorderPayload { id: command.id.to_string(), from_menu: true });
         }
-        if response.hovered() || response.has_focus() {
+        if ui_kit::Menu::row_is_hot(response) {
             crate::scenario::publish_handle(&format!("dropdown_hot:{}", command.id), response.rect.center());
         }
         if item.selected {
@@ -4765,7 +4766,9 @@ mod dropdown_tests {
         h.frames(4);
         h.step(&json!({"click":{"handle":"panel:SKETCH:CREATE"}})).unwrap();
         h.frames(4);
-        let point = crate::scenario::rect_of("menu:sketch.point").expect("Point is a plain row");
+        let primary = crate::scenario::rect_of("menu:sketch.point").expect("Point is a plain row");
+        let more = crate::scenario::rect_of("dropdown_more:sketch.point").expect("Point reserves its shared secondary action");
+        let point = primary.union(more);
         let slot = crate::scenario::rect_of("menu:Slot").expect("Slot is a family row");
         assert!((point.left() - slot.left()).abs() < 0.5, "left edges differ: Point {point:?}, Slot {slot:?}");
         assert!((point.right() - slot.right()).abs() < 0.5, "right edges differ: Point {point:?}, Slot {slot:?}");
@@ -4895,7 +4898,7 @@ mod dropdown_tests {
             }
             for heading in ["Planes", "Axes", "Points"] {
                 assert_eq!(
-                    output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == heading)),
+                    crate::ui_kit::test_support::text_shapes(&output).any(|text| text.galley.text() == heading.to_uppercase()),
                     grouped,
                     "{heading} in grid={grid}, grouped={grouped}"
                 );
@@ -5507,8 +5510,10 @@ mod dropdown_toggle_tests {
         h.frames(2);
         h.step(&json!({"move": {"handle": "dropdown:solid.shell"}})).unwrap();
         h.frames(40);
-        let shell = h.app.tr_label("Shell").to_string();
-        assert!(h.widget(&format!("{shell}  (Shift+J)")).is_some(), "the tooltip shows the new key");
+        let command = solidcraft_engine::find_command("solid.shell").unwrap();
+        let tip = super::command_items(&h.app, &[command]).remove(0).tip.expect("Shell has a shared command tooltip");
+        assert!(tip.contains("Shift+J"), "the command tooltip names the rebound key");
+        assert!(h.widget(&tip).is_some(), "the actual shared tooltip renders the rebound key and command help");
     }
 }
 
@@ -6235,6 +6240,55 @@ mod app_bar_tests {
         let settings = crate::scenario::rect_of("titlebar:preferences").unwrap();
         let tabs = crate::scenario::rect_of("tab:design:0").unwrap();
         assert!(settings.right() <= tabs.left());
+    }
+
+    #[test]
+    fn sketch_plugin_overflow_keeps_its_commands_before_the_finish_group() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let root = h.dir.join("plugins-slots");
+        let package = root.join("workshop-helper");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join("entry.wasm"), []).unwrap();
+        std::fs::write(
+            package.join("plugin.json"),
+            json!({
+                "id":"workshop-helper","name":"Workshop helper","version":"1.0","capabilities":["commands@0.1"],
+                "runtime":{"module":"entry.wasm","commands":[],"entries":[{
+                    "name":"measure","effect":"read",
+                    "input_schema":{"type":"object","properties":{"length":{"type":"number","default":12}}},
+                    "slots":[{"kind":"ribbon","name":"Sketch"}]
+                }]}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        h.app.session.plugin_state.plugins_dir = Some(root);
+        crate::plugin_slots::invalidate(&mut h.app);
+        crate::plugin_slots::refresh(&mut h.app);
+        crate::plugin_slots::wait_for_discovery(&mut h.app);
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let hidden = [1000, 800, 600, 400].into_iter().any(|width| {
+            h.call("ui.resize", json!({"width":width,"height":2000}));
+            h.frames(3);
+            crate::scenario::rect_of("panel:SKETCH:plugin:workshop-helper").is_none() && crate::scenario::rect_of("toolbar:overflow").is_some()
+        });
+        assert!(hidden, "the plugin group is in overflow while Finish Sketch retains its room");
+        assert!(crate::scenario::rect_of("panel:SKETCH:FINISH SKETCH").is_some());
+        let sketch = h.app.session.active_sketch;
+        let before = h.app.session.doc.to_json();
+        h.step(&json!({"click":{"handle":"toolbar:overflow"}})).unwrap();
+        h.step(&json!({"click":{"handle":"menu:Workshop helper"}})).unwrap();
+        h.frames(3);
+        assert!(crate::scenario::rect_of("menu:workshop-helper.measure").is_some(), "plugin overflow keeps its own definition");
+        assert!(crate::scenario::rect_of("dropdown:sketch.finish").is_none(), "Finish Sketch commands cannot replace plugin entries");
+        h.step(&json!({"click":{"handle":"menu:workshop-helper.measure"}})).unwrap();
+        let dialog = h.app.plugin_menu.dialog().expect("the plugin's own input dialog opens");
+        assert_eq!(dialog.entry, "measure");
+        assert_eq!(dialog.ready(&h.app), Ok(json!({"length":12.0})));
+        assert_eq!(h.app.session.active_sketch, sketch, "the click does not finish the sketch");
+        assert_eq!(h.app.session.doc.to_json(), before);
+        assert!(h.app.session.plugin_state.packages.is_empty(), "opening an entry never executes its wasm");
     }
 
     #[test]

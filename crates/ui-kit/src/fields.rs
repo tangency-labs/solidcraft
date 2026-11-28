@@ -1344,6 +1344,11 @@ pub fn dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str, add: i
     dropdown_menu_with_close_behavior(ui, id, current, egui::PopupCloseBehavior::CloseOnClick, add)
 }
 
+/// Whether the dropdown with this salt currently has its value popup open.
+pub fn dropdown_is_open(ui: &Ui, id: impl egui::AsIdSalt) -> bool {
+    egui::ComboBox::is_open(ui.ctx(), ui.make_persistent_id(egui::IdSalt::new(&id)))
+}
+
 /// A width-bounded toolbar picker. Long selected values and popup rows truncate;
 /// callers can retain their complete labels in hover text.
 pub fn bounded_dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str, width: f32, add: impl FnOnce(&mut Ui)) -> Response {

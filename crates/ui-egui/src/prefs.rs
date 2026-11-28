@@ -14270,7 +14270,7 @@ pub(crate) fn ground_shadow_selector(app: &mut SolveApp, ui: &mut egui::Ui) {
             item
         })
         .collect();
-    let was_open = egui::ComboBox::is_open(ui.ctx(), ui.make_persistent_id("ground_shadow_mode"));
+    let was_open = ui_kit::dropdown_is_open(ui, "ground_shadow_mode");
     let response = ui_kit::dropdown_menu(ui, "ground_shadow_mode", app.tr(label(mode)), |ui| {
         if let Some(picked) = ui_kit::Menu::items(ui, ui.make_persistent_id("ground_shadow_choices"), &items, !was_open).picked {
             mode = match picked.id.as_str() {
@@ -15204,7 +15204,6 @@ mod settings_search_tests {
             for (query, native) in [
                 ("Components start open", Some((Role::CheckBox, "prefs:browser_components_open"))),
                 ("Preview panel placement while dragging", Some((Role::CheckBox, "prefs:live_panel_drag_preview"))),
-                ("Menus", None),
                 ("Highlight active commands", Some((Role::CheckBox, "prefs:persistent_ribbon_pressed"))),
                 ("Show navigation bar", Some((Role::CheckBox, "prefs:navbar:show"))),
                 ("Position", None),

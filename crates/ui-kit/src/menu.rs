@@ -435,6 +435,7 @@ impl Menu {
 /// Shared row states. Swatches are document colour data; chrome always uses Tokens.
 pub struct MenuItem<'a> {
     pub show_label: bool,
+    pub suppress_pointer_hot: bool,
     pub publish_handle: bool,
     pub command_label: bool,
     pub id: &'a str,
@@ -456,6 +457,7 @@ impl<'a> MenuItem<'a> {
     pub fn new(id: &'a str, label: &'a str, icon: impl Into<Icon<'a>>) -> Self {
         Self {
             show_label: true,
+            suppress_pointer_hot: false,
             publish_handle: true,
             command_label: true,
             id,
@@ -479,6 +481,7 @@ impl<'a> MenuItem<'a> {
     pub fn from_item(item: &'a Item, lit: bool) -> Self {
         Self {
             show_label: true,
+            suppress_pointer_hot: false,
             publish_handle: true,
             command_label: false,
             id: &item.id,
@@ -529,7 +532,7 @@ impl<'a> MenuItem<'a> {
     pub fn paint(&self, ui: &Ui, r: Rect, response: &Response, trailing: f32) {
         let t = Tokens::get();
         let enabled = self.enabled && ui.is_enabled();
-        let hot = enabled && (self.highlighted || response.hovered() || response.has_focus());
+        let hot = enabled && (self.highlighted || (!self.suppress_pointer_hot && (response.hovered() || response.has_focus())));
         let ink = if self.danger {
             t.form_error
         } else if hot {
@@ -1157,6 +1160,75 @@ mod tests {
             });
             output.textures_delta.clear();
         }
+    }
+
+    #[test]
+    fn shared_menu_keyboard_activity_ignores_stationary_hover_and_tracks_visible_bounds() {
+        let ctx = crate::test_support::context();
+        let id = egui::Id::unique("menu-hot-row");
+        let items = [Item::action("a", "A", ""), Item::action("b", "B", "")];
+        let frame = |events| {
+            let mut result = MenuOutput::default();
+            let mut hot = Vec::new();
+            let mut contains = false;
+            let mut output = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+                result = Menu::popup(ui.ctx(), id, MenuAnchor::Point(pos2(20.0, 20.0)), &items, false);
+                hot = result.rows.iter().filter(|(_, response)| Menu::row_is_hot(response)).map(|(item, _)| item.id.clone()).collect();
+                contains = Menu::contains_pointer(ui.ctx());
+                if result.sizing {
+                    assert!(!contains, "invisible measuring bounds cannot keep a parent form open");
+                }
+            });
+            output.textures_delta.clear();
+            (result, hot, contains)
+        };
+        frame(vec![egui::Event::PointerMoved(pos2(50.0, 40.0))]);
+        let (painted, _, contains) = frame(vec![]);
+        assert!(contains);
+        let at = painted.rows[0].1.rect.center();
+        frame(vec![egui::Event::PointerMoved(at)]);
+        frame(key(egui::Key::ArrowDown));
+        let (moved, hot, _) = frame(key(egui::Key::ArrowDown));
+        assert_eq!(hot, vec!["b".to_owned()]);
+        assert_eq!(moved.active_row, Some(moved.rows[1].1.id));
+        frame(vec![egui::Event::PointerMoved(pos2(1000.0, 1000.0))]);
+        assert!(!frame(vec![]).2, "only actual visible menu bounds contain the pointer");
+    }
+
+    #[test]
+    fn shared_menu_pointer_membership_is_scoped_to_its_source_layer() {
+        let ctx = crate::test_support::context();
+        let items = [Item::action("pick", "Pick", "")];
+        let mut output = ctx.run_ui(egui::RawInput { events: vec![egui::Event::PointerMoved(pos2(40.0, 10.0))], ..Default::default() }, |ui| {
+            let source = ui.layer_id();
+            Menu::items(ui, egui::Id::unique("embedded-membership"), &items, false);
+            assert!(Menu::contains_pointer(ui.ctx()));
+            assert!(Menu::contains_pointer_in(ui.ctx(), source));
+            assert!(!Menu::contains_pointer_in(ui.ctx(), egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("unrelated-form"))));
+        });
+        output.textures_delta.clear();
+    }
+
+    #[test]
+    fn menu_escape_cancels_an_activation_from_the_same_input_frame() {
+        let ctx = crate::test_support::context();
+        let id = egui::Id::unique("menu-simultaneous-cancel");
+        let items = [Item::action("remove", "Remove", "delete")];
+        let frame = |events| {
+            let mut result = MenuOutput::default();
+            let mut output = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+                result = Menu::popup(ui.ctx(), id, MenuAnchor::Point(pos2(20.0, 20.0)), &items, false);
+            });
+            output.textures_delta.clear();
+            result
+        };
+        frame(vec![]);
+        frame(vec![]);
+        Menu::set_cursor(&ctx, id, 0, Some(0));
+        let events = key(egui::Key::Enter).into_iter().chain(key(egui::Key::Escape)).collect();
+        let cancelled = frame(events);
+        assert!(cancelled.close && !cancelled.open);
+        assert!(cancelled.picked.is_none(), "the caller must not dispatch Remove after Escape cancelled its menu");
     }
 
     #[test]

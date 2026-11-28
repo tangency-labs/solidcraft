@@ -450,24 +450,27 @@ fn navigation_board_popup_width_includes_its_border_and_padding() {
     for tokens in [solidcraft_theme::Tokens::light(), solidcraft_theme::Tokens::dark()] {
         let _theme = solidcraft_theme::scoped_tokens(tokens);
         for width in [NAV_POPUP_WIDTH, NAV_CONTEXT_WIDTH, NAV_MORE_WIDTH] {
+            let bounds = Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(width, 300.0));
             let mut outer = Rect::NOTHING;
             let mut row = Rect::NOTHING;
-            crate::ui_kit::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
-                outer = ui
-                    .scope(|ui| {
-                        Menu::show(ui, width, |ui| {
-                            row = Menu::items(ui, egui::Id::unique("navigation_width_fixture"), &[Item::action("fit", "Fit", "fit")], false).rows[0]
-                                .1
-                                .rect;
-                        })
-                    })
-                    .response
-                    .rect;
-            });
-            assert_eq!(outer.width(), width);
+            for _ in 0..3 {
+                crate::ui_kit::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
+                    let output = Menu::popup_with_bounds(
+                        ui.ctx(),
+                        egui::Id::unique(("navigation_width_fixture", width.to_bits())),
+                        MenuAnchor::Point(bounds.min),
+                        &[Item::action("fit", "Fit", "fit")],
+                        false,
+                        bounds,
+                    );
+                    outer = output.rect.unwrap();
+                    row = output.rows[0].1.rect;
+                });
+            }
+            assert!(bounds.contains_rect(outer), "actual popup stays within its navigation capacity");
             assert_eq!(row.height(), tokens.control_height + tokens.space_2);
             assert_eq!(row.left() - outer.left(), f32::from(Menu::frame().inner_margin.left) + Menu::frame().stroke.width);
-            assert_eq!(outer.right() - row.right(), f32::from(Menu::frame().inner_margin.left) + Menu::frame().stroke.width);
+            assert_eq!(outer.right() - row.right(), f32::from(Menu::frame().inner_margin.right) + Menu::frame().stroke.width);
         }
     }
 }

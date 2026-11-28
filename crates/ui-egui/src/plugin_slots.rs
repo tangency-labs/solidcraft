@@ -481,19 +481,21 @@ impl RibbonGroup {
 }
 
 /// The finish group remains last; the app still addresses its original built-in group indices.
-pub(crate) fn restore_group_indices(out: &mut crate::ribbon::Out, builtin: usize, plugins: usize, exit: bool) {
+pub(crate) fn original_group_index(group: usize, builtin: usize, plugins: usize, exit: bool) -> usize {
     if !exit || builtin == 0 || plugins == 0 {
-        return;
+        return group;
     }
-    let original = |group: usize| {
-        if group == builtin + plugins - 1 {
-            builtin - 1
-        } else if group >= builtin - 1 {
-            group + 1
-        } else {
-            group
-        }
-    };
+    if group == builtin.saturating_add(plugins).saturating_sub(1) {
+        builtin - 1
+    } else if group >= builtin - 1 {
+        group.saturating_add(1)
+    } else {
+        group
+    }
+}
+
+pub(crate) fn restore_group_indices(out: &mut crate::ribbon::Out, builtin: usize, plugins: usize, exit: bool) {
+    let original = |group| original_group_index(group, builtin, plugins, exit);
     for button in &mut out.buttons {
         button.group = original(button.group);
     }

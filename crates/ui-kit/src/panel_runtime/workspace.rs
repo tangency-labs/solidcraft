@@ -257,6 +257,7 @@ enum HostCommand {
 
 #[derive(Default)]
 struct MenuPick {
+    source: Option<egui::Id>,
     keyboard_source: Option<egui::Id>,
     close: bool,
 }
@@ -821,6 +822,11 @@ impl WorkspacePanelHost {
     }
     pub fn has_pending(&self) -> bool {
         self.pending.is_some()
+    }
+    /// The shared menu's proven keyboard activation, before deferred admission.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn pending_menu_keyboard_source(&self) -> Option<egui::Id> {
+        self.pending.as_ref().and_then(|pending| pending.menu_pick.keyboard_source)
     }
     pub fn prepared_geometry(&self) -> Option<(LogicalRect, LogicalRect, Vec<LogicalRect>)> {
         Some((self.last_domain?, self.last_capacity?, self.last_chrome.clone()))
@@ -1636,6 +1642,7 @@ impl WorkspacePanelHost {
         let mut overlays = std::mem::take(&mut self.overlays);
         let mut accepted = Vec::new();
         let mut dismiss_popup_peek = false;
+        let mut close_picked_menu = false;
         // Only this frame's shared menu pick can use focus as keyboard proof.
         // Mouse commands retain their click and pointer-layer admission.
         let keyboard_menu_action = |source| menu_pick.keyboard_source == Some(source) && owns_focused_action(ui.ctx(), source);
@@ -1683,10 +1690,11 @@ impl WorkspacePanelHost {
                 other => (other, None),
             };
             dismiss_popup_peek |= source.is_some_and(|source| self.popup_action_dismisses_peek(runtime, &frame, ui.ctx(), source));
+            close_picked_menu |= menu_pick.close && source.is_some() && source == menu_pick.source;
             accepted.push(command);
         }
         // Peek admission above still needs the identity of the picked menu.
-        if menu_pick.close {
+        if close_picked_menu {
             self.clear_menu();
         }
         if dismiss_popup_peek
@@ -3597,16 +3605,18 @@ impl WorkspacePanelHost {
             entry.is_some(),
             egui_rect(frame.layout.capacity),
         );
-        // Area's first pass only measures disabled rows. Publish popup input
+        // Area's first pass only measures rows. Publish popup input
         // and occlusion after the menu becomes visible, as with host chrome.
-        frame.menu_bounds = if output.rows.iter().any(|(_, response)| response.enabled()) { output.rect.map(logical_rect) } else { None };
+        frame.menu_bounds = if output.sizing { None } else { output.rect.map(logical_rect) };
         self.menu_items.clear();
         for (item, response) in &output.rows {
-            if !response.enabled() {
+            if output.sizing {
                 continue;
             }
             if let Some((_, target, _)) = bindings.iter().find(|(id, _, _)| *id == item.id) {
-                self.menu_items.push(response.id);
+                if response.enabled() {
+                    self.menu_items.push(response.id);
+                }
                 if let HostControlTarget::Shared { instance, action: HostSharedAction::Collapse } = target {
                     let expanded = layout.containing(instance).is_ok_and(|section| !section.collapsed);
                     ui.ctx().accesskit_node_builder(response.id, |node| node.set_expanded(expanded));
@@ -3614,10 +3624,13 @@ impl WorkspacePanelHost {
                 record_control(frame, response, target.clone(), &item.label, item.enabled, output.rect.unwrap_or(response.rect));
             }
         }
-        if keyboard_entry && let Some((_, response)) = output.rows.iter().find(|(item, response)| item.enabled && response.enabled()) {
+        if !output.sizing
+            && keyboard_entry
+            && let Some((_, response)) = output.rows.iter().find(|(item, response)| item.enabled && response.enabled())
+        {
             ui_kit::Menu::focus_row(response);
             ui.ctx().request_repaint();
-        } else if keyboard_entry && output.open && ui.is_enabled() && output.rows.iter().any(|(item, _)| item.enabled) {
+        } else if keyboard_entry && output.sizing && output.open && ui.is_enabled() && output.rows.iter().any(|(item, _)| item.enabled) {
             // A new popup Area first measures its rows with disabled input.
             // Keep the source until the visible pass can actually take focus.
             self.menu_entry = entry;
@@ -3626,6 +3639,7 @@ impl WorkspacePanelHost {
         if let Some(picked) = output.picked {
             if allow_actions && let Some((_, _, mut command)) = bindings.into_iter().find(|(id, _, _)| *id == picked.id) {
                 if let Some((_, response)) = output.rows.iter().find(|(item, _)| item.id == picked.id) {
+                    menu_pick.source = Some(response.id);
                     if keyboard_requested && owns_focused_action(ui.ctx(), response.id) {
                         menu_pick.keyboard_source = Some(response.id);
                     }
