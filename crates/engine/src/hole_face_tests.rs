@@ -646,7 +646,7 @@ fn a_hole_on_a_sketch_alone_drills_regular_hub_circle_at_pattern_centre() {
     assert_plate_with_through_holes(&mut s, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, "regular hub + bolts");
 }
 
-/// Issue #301: an authored regular (non-construction) ellipse whose centre is named as the
+/// an authored regular (non-construction) ellipse whose centre is named as the
 /// circular pattern's centre (`"e1.center"`) must still drill, alongside all `N` patterned sites,
 /// across undo/redo and JSON save/reopen.
 #[test]
@@ -681,7 +681,7 @@ fn a_hole_on_a_sketch_alone_drills_regular_ellipse_at_pattern_centre() {
     assert_plate_with_through_holes(&mut reopened, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, "regular ellipse after reopen");
 }
 
-/// Issue #301: an authored regular ellipse at `[cx, cy]` combined with a circular pattern whose
+/// an authored regular ellipse at `[cx, cy]` combined with a circular pattern whose
 /// `center` is given as coordinates `[cx, cy]` drills all `N + 1` holes without double-drilling.
 #[test]
 fn a_hole_on_a_sketch_alone_drills_regular_ellipse_at_coordinate_pattern_centre() {
@@ -705,7 +705,7 @@ fn a_hole_on_a_sketch_alone_drills_regular_ellipse_at_coordinate_pattern_centre(
     assert_plate_with_through_holes(&mut s, [60.0, 40.0, 10.0], [30.0, 20.0, 5.0], diameter, &holes, "regular ellipse + coordinate pattern centre");
 }
 
-/// Issue #301: a construction ellipse (via `construction: true` or `sketch.construction`) centred
+/// a construction ellipse (via `construction: true` or `sketch.construction`) centred
 /// on the circular pattern's centre (whether named `"e1.center"` or given as `[cx, cy]`) drills
 /// only the `N` outer holes and leaves the centre solid, symmetric with construction bolt circles.
 #[test]
@@ -840,7 +840,7 @@ fn a_hole_on_a_sketch_alone_on_circular_cylinder_face_skips_projected_and_patter
     }
 }
 
-/// Issue #301: on a circular flange face, an authored regular ellipse centred on the
+/// on a circular flange face, an authored regular ellipse centred on the
 /// auto-projected rim centre (`"c1.center"`) with an outer bolt pattern around `"c1.center"` drills
 /// `N + 1` holes, whereas a construction ellipse at `"c1.center"` drills only the `N` outer holes.
 #[test]
@@ -873,7 +873,7 @@ fn a_hole_on_a_sketch_alone_on_circular_cylinder_face_drills_regular_ellipse_at_
     }
 }
 
-/// Issue #397: an authored regular ellipse concentric with an arc (`sketch.arc.center_point`
+/// an authored regular ellipse concentric with an arc (`sketch.arc.center_point`
 /// with `center: "e1.center"`, construction or regular) still drills its centre hole when
 /// `solid.hole` runs with `sketch` alone — matching `sketch.circle.center` parity, across
 /// `edit.undo`/`edit.redo` and JSON save/reopen.
@@ -927,7 +927,7 @@ fn a_hole_on_a_sketch_alone_drills_regular_ellipse_concentric_with_arc() {
     }
 }
 
-/// Issue #397: an authored regular ellipse concentric with an arc (`center: "e1.center"`) and a
+/// an authored regular ellipse concentric with an arc (`center: "e1.center"`) and a
 /// circular pattern centred on `"e1.center"` or `[cx, cy]` drills all `N + 1` holes (all `N`
 /// patterned holes plus the hub hole), across undo/redo and JSON save/reopen.
 #[test]
@@ -974,7 +974,7 @@ fn a_hole_on_a_sketch_alone_drills_regular_ellipse_concentric_with_arc_at_patter
     }
 }
 
-/// Issue #397 negative control: a construction ellipse (via `construction: true` or
+/// Negative control: a construction ellipse (via `construction: true` or
 /// `sketch.construction`) concentric with an arc (`center: "e1.center"`) and a circular pattern
 /// around `"e1.center"` still skips the hub and drills only the `N` patterned holes.
 #[test]
