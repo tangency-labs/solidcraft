@@ -619,8 +619,9 @@ pub struct ParamListKeys {
     /// Only the favourites. When true, `filter` isn't read. Default: false.
     #[serde(default, deserialize_with = "list_favorites")]
     pub favorites: Option<bool>,
-    /// Which parameters, ignoring case: `all`, `user`, `sketch` (dimensions), `feature` (inputs),
-    /// `model` (every one but the user's) or `favorites`. Anything else lists all. Default: all.
+    /// Which parameters, ignoring case: `all`, `user`, `sketch` (dimensions), `driven` (read-only
+    /// driven sketch dimensions), `feature` (inputs), `model` (every one but the user's) or
+    /// `favorites`. Anything else lists all. Default: all.
     #[serde(default, deserialize_with = "list_filter")]
     pub filter: Option<String>,
 }
@@ -677,12 +678,12 @@ pub struct ParameterRow {
     /// Why it can't be worked out, when it can't.
     pub error: Option<String>,
     pub comment: String,
-    /// `user`, `sketch` (a dimension) or `feature` (a feature's named input).
+    /// `user`, `sketch` (a dimension), `driven` (a read-only driven sketch dimension) or `feature` (a feature's named input).
     pub source: String,
-    /// For a feature input: the feature.
+    /// For a feature input or driven dimension: the feature or sketch name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub feature: Option<String>,
-    /// For a feature input: the input's label.
+    /// For a feature input or driven dimension: the input's label.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input: Option<String>,
     pub favorite: bool,
@@ -693,6 +694,9 @@ pub struct ParameterRow {
     /// A text parameter's text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// True for read-only evaluated parameters (such as driven sketch dimensions).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub read_only: bool,
 }
 
 impl From<ParamRow> for ParameterRow {
@@ -712,6 +716,7 @@ impl From<ParamRow> for ParameterRow {
             uses: r.uses,
             used_by: r.used_by,
             text: r.text,
+            read_only: r.read_only,
         }
     }
 }

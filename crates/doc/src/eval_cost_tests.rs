@@ -2891,7 +2891,10 @@ fn a_grouped_modelled_thread_cuts_and_checks_each_target_once() {
             .record()
             .faces
             .iter()
-            .filter(|f| f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
+            .filter(|f| {
+                matches!(f.surface, Surface::Sweep { .. })
+                    || (f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
+            })
             .count();
         if continuous_flanks {
             assert_eq!(flanks, 8, "two whole flank faces on each of the four shafts");
