@@ -131,7 +131,7 @@ reviews:
     - path: "crates/solidcore/tests/kernel_cases/**"
       instructions: |
         A kernel case's outcome changes in the case itself: its JSON expectation (and its
-        `gallery_note` if needed), its line in `known_failing.json` and its render beside it, never
+        `gallery_note` if needed), its file in `kernel_cases_known_failing/` and its render beside it, never
         a doc (the site's case gallery is generated from them). An expectation is graded on closed
         forms or invariants of the geometry, not on another kernel's measured result; a refusal is
         graded on the size it names.
