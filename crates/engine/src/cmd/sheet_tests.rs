@@ -7566,6 +7566,72 @@ fn walls_at_90_and_60_degrees_close_their_corner_either_way_round() {
     }
 }
 
+/// #23534: a 48 × 81 base standing at y = 92 (T = R = g = 2.5, K 0.325), a floor `floor` deep
+/// on its bottom edge, a web 15 high on its left edge (on its right edge, `right`), and, unless
+/// `wall` is false, a wall 33.5 high on the web's free edge, parallel to the base: all at 90°,
+/// outside, flipped, their heights to the outer face. The part's volume, its faces, edges and
+/// vertices, and the length of its last bend.
+fn floor_web_and_wall(floor: f64, right: bool, wall: bool) -> (f64, [u64; 3], f64) {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"active": true, "bend_radius": "2.5 mm", "k_factor": 0.325, "name": "Blech", "thickness": "2.5 mm"}));
+    run(&mut s, "sketch.create", json!({"name": "S", "offset": -92, "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}));
+    run(&mut s, "sketch.line", json!({"points": [[-0.5, 5], [47.5, 5], [47.5, 86], [-0.5, 86]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"name": "Base", "rule": "Blech", "sketch": "S"}));
+    // The right side mirrors the left about x = 23.5, the base's middle.
+    let x = |x: f64| if right { 47.0 - x } else { x };
+    let flange = |at: [f64; 3], height: f64| json!({"angle": "90 deg", "edges": [at], "flip": true, "height": height, "height_from": "outer", "position": "outside", "type": "edge"});
+    run(&mut s, "sheet.flange", flange([23.75, 92.0, 5.0], floor));
+    run(&mut s, "sheet.flange", flange([x(-0.5), 92.0, 45.75], 15.0));
+    if wall {
+        run(&mut s, "sheet.flange", flange([x(-5.5), 77.0, 45.75], 33.5));
+    }
+    let what = format!("floor {floor}, right {right}, wall {wall}");
+    assert!(no_errors_or_warnings(&s), "{what}: {:?}", s.model.results);
+    let m = run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(m["bodies"].as_array().map(Vec::len), Some(1), "{what}: {m}");
+    assert_eq!(flat(&mut s)["outline"].as_array().map(Vec::len), Some(1), "{what}");
+    let count = |k: &str| m["total"][k].as_u64().unwrap_or(u64::MAX);
+    let last_bend = bend_lengths(&mut s).last().copied().unwrap_or(f64::NAN);
+    (m["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN), [count("faces"), count("edges"), count("vertices")], last_bend)
+}
+
+/// #23534: a wall on the free edge of a web whose corner with a floor is mitred builds, however
+/// deep the floor. The floor and the web close their corner with a rip that runs up the web's
+/// whole side; the wall, set out by the thickness to its outer sharp, used to add a strip to the
+/// web past that rip's end, which the rip's cut never reached. The strip lay under the wall's
+/// bend, on the bend's end face, and the sew refused the two ("sew: ambiguous edge contact"). A
+/// floor 14.9 deep (shorter than the web) left the web set back past the rip and built. The web
+/// on the right edge has the rip at the other end of its free edge.
+///
+/// By hand: the corner's rip keeps each of the two walls (g/2)·√2 = 1.767767 off its mitre line,
+/// whose corner lies T = 2.5 past the base's edge (the outer sharps), so the web runs on
+/// T − (g/2)·√2 = 0.732233 below the base's bottom edge, and the wall's bend along its free edge
+/// is L = 81.732233 long. The wall adds its bend, a ring sector L·(π/2)·(R + T/2)·T, and its leg,
+/// 33.5 − (R + T) = 28.5 out from the bend, L·28.5·T: 85.976216·L = 7027.028087, whatever the
+/// floor reaches under it. The part has the same faces, edges and vertices with either floor,
+/// with the wall and without it, on either side.
+#[test]
+fn a_wall_on_a_web_mitred_to_a_floor_builds_whatever_the_floor_reaches_under_it() {
+    let (t, r, g) = (2.5, 2.5, 2.5);
+    let l = 81.0 + t - (g / 2.0) * 2.0_f64.sqrt();
+    let want = l * t * (FRAC_PI_2 * (r + t / 2.0) + (33.5 - (r + t)));
+    assert!((want - 7027.028087).abs() < 1e-5, "{want}");
+    for right in [false, true] {
+        let (deep, deep_counts, deep_bend) = floor_web_and_wall(92.0, right, true);
+        let (deep_without, deep_without_counts, _) = floor_web_and_wall(92.0, right, false);
+        let (shallow, shallow_counts, shallow_bend) = floor_web_and_wall(14.9, right, true);
+        let (shallow_without, shallow_without_counts, _) = floor_web_and_wall(14.9, right, false);
+        assert!((deep_bend - l).abs() < 1e-6 && (shallow_bend - l).abs() < 1e-6, "right {right}: {deep_bend} {shallow_bend} vs {l}");
+        // The measure follows the bends by facets.
+        let (added, added_shallow) = (deep - deep_without, shallow - shallow_without);
+        assert!(rel(added, want) < 1e-4, "right {right}: {added} vs {want}");
+        assert!(rel(added, added_shallow) < 1e-9, "right {right}: {added} vs {added_shallow}");
+        assert_eq!(deep_counts, shallow_counts, "right {right}");
+        assert_eq!(deep_without_counts, shallow_without_counts, "right {right}");
+    }
+}
+
 /// The bends' lengths in the flat pattern, in the order the bends were made.
 fn bend_lengths(s: &mut Session) -> Vec<f64> {
     flat(s)["bends"].as_array().cloned().unwrap_or_default().iter().map(|b| b["length"].as_f64().unwrap_or(f64::NAN)).collect()

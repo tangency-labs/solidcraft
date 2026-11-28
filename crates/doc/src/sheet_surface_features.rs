@@ -1232,6 +1232,37 @@ impl SurfaceSheet {
             let mut anchor = (if junction.0 { x0 + out * by } else { p }, if junction.1 { x1 + out * by } else { q });
             let mut strip = (if junction.0 { x0 } else { a + d * r0.unwrap_or(0.0) }, if junction.1 { x1 } else { b + d * r1.unwrap_or(0.0) });
             let mut square_end = junction;
+            // An edge moved out to its sharp, at an end where a straight rip of the panel ends (a
+            // mitred corner whose rip runs up the panel's side to this edge): the rip's lap takes
+            // the side back from the rip's edge, so the strip and the bend start on the lap's
+            // inner line, as they do on a side set back past a shorter rip. Started on the rip's
+            // edge, the strip would add metal past the rip's end, which no cut takes, under the
+            // bend's end (#23534).
+            let past_rip = |at: Vec2, into: Vec2| -> f64 {
+                let mut most: f64 = 0.0;
+                for joint in &self.sheet.joints {
+                    let JointKind::Rip(rip) = &joint.kind else { continue };
+                    for (on, on_a) in [(&joint.a, true), (&joint.b, false)] {
+                        let Some(band) = lap_band(rip, on_a, t).filter(|band| on.panel == edge.panel && band.cut.is_finite() && band.cut > ON_LAP)
+                        else {
+                            continue;
+                        };
+                        let ends = [band.start, band.start + band.way * band.length];
+                        if !(ends.iter().any(|e| e.dist(at) <= ON_LAP) && band.into.dot(into) > 0.0) {
+                            continue;
+                        }
+                        if let Some(x) = cross_lines((at, d), (band.inner(0.0), band.way)) {
+                            most = most.max((x - at).dot(into));
+                        }
+                    }
+                }
+                most
+            };
+            if by > 1e-9 {
+                let (s0, s1) = (if junction.0 { 0.0 } else { past_rip(a, d) }, if junction.1 { 0.0 } else { past_rip(b, -d) });
+                anchor = (anchor.0 + d * s0, anchor.1 - d * s1);
+                strip = (strip.0 + d * s0, strip.1 - d * s1);
+            }
             // A flange turning away from an existing bend at an end of this edge cannot close a
             // corner with it and must not run into its bend zone (#23366): stop this run at the
             // existing bend's tangent line on the panel, clear of its zone across the whole width
