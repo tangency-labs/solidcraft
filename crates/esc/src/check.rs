@@ -80,6 +80,9 @@ pub fn check(project: &mut Project, path: &Path) -> Result<Rc<Checked>, String> 
         return Ok(Rc::new(Checked::default()));
     }
     project.load(&path)?;
+    if !project.import_components.contains_key(&identity(&path)) {
+        import_components(project, &path);
+    }
     let mut pending = vec![Step::Load(path.clone())];
     while let Some(step) = pending.pop() {
         match step {
@@ -109,23 +112,47 @@ fn imports_of(file: &Loaded) -> Vec<PathBuf> {
     doc.entries.iter().filter_map(|e| imported_file(&file.path, e)).collect()
 }
 
-/// Does importing `from` lead back to `goal`?
-fn reaches(project: &mut Project, from: &Path, goal: &Path) -> bool {
-    let goal = identity(goal);
+// Kosaraju's algorithm keeps long import chains off the call stack.
+fn import_components(project: &mut Project, root: &Path) {
+    enum Step {
+        Load(PathBuf, PathBuf),
+        Finish(PathBuf),
+    }
+    let mut reverse = HashMap::<PathBuf, Vec<PathBuf>>::new();
     let mut seen = HashSet::new();
-    let mut pending = vec![from.to_path_buf()];
-    while let Some(path) = pending.pop() {
-        let key = identity(&path);
-        if key == goal {
-            return true;
-        }
-        if seen.insert(key)
-            && let Ok(file) = project.load(&path)
-        {
-            pending.extend(imports_of(&file));
+    let mut finished = Vec::new();
+    let mut pending = vec![Step::Load(root.to_path_buf(), identity(root))];
+    while let Some(step) = pending.pop() {
+        match step {
+            Step::Load(path, key) => {
+                if !seen.insert(key.clone()) {
+                    continue;
+                }
+                pending.push(Step::Finish(key.clone()));
+                if let Ok(file) = project.load(&path) {
+                    for imported in imports_of(&file).into_iter().rev() {
+                        let target = identity(&imported);
+                        reverse.entry(target.clone()).or_default().push(key.clone());
+                        pending.push(Step::Load(imported, target));
+                    }
+                }
+            }
+            Step::Finish(key) => finished.push(key),
         }
     }
-    false
+    let mut unassigned = seen;
+    for root in finished.into_iter().rev() {
+        if !unassigned.contains(&root) {
+            continue;
+        }
+        let mut pending = vec![root.clone()];
+        while let Some(key) = pending.pop() {
+            if unassigned.remove(&key) {
+                project.import_components.insert(key.clone(), root.clone());
+                pending.extend(reverse.remove(&key).into_iter().flatten());
+            }
+        }
+    }
 }
 
 fn check_loaded(project: &mut Project, file: &Rc<Loaded>) -> Checked {
@@ -762,8 +789,8 @@ impl Checker<'_> {
             self.error(Code::FileNotFound, range, format!("there is no file `{written}.esc` here"));
             return;
         }
-        let own = self.file.path.clone();
-        if reaches(self.project, &path, &own) {
+        let own = self.project.import_components.get(&identity(&self.file.path));
+        if own.is_some() && own == self.project.import_components.get(&identity(&path)) {
             self.error(Code::ImportCycle, range, format!("importing `{written}` makes a cycle: it imports this file, directly or through others"));
             return;
         }

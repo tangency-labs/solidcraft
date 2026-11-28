@@ -121,6 +121,29 @@ fn import_chains_are_checked_without_recursive_calls() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+#[test]
+fn cycle_diagnostics_cover_each_cyclic_import_and_refresh_after_edits() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-esc-components-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, imports) in [("a", vec!["b", "c"]), ("b", vec!["a"]), ("c", vec!["b", "leaf"]), ("leaf", vec![]), ("root", vec!["a", "leaf"])] {
+        let mut text = "esc 1\nassembly\n".to_owned();
+        for imported in imports {
+            text.push_str(&format!("\n{imported} = import(\"{imported}\")\n"));
+        }
+        std::fs::write(dir.join(format!("{name}.esc")), text).unwrap();
+    }
+    let mut project = Project::default();
+    for (name, cycles) in [("a", 2), ("b", 1), ("c", 1), ("leaf", 0), ("root", 0)] {
+        let checked = check(&mut project, &dir.join(format!("{name}.esc"))).unwrap();
+        assert_eq!(checked.diagnostics.iter().filter(|d| d.code == Code::ImportCycle).count(), cycles, "{name}: {:?}", checked.diagnostics);
+    }
+    project.replace(&dir.join("c.esc"), "esc 1\nassembly\n\nleaf = import(\"leaf\")\n".to_owned());
+    let checked = check(&mut project, &dir.join("a.esc")).unwrap();
+    assert_eq!(checked.diagnostics.iter().filter(|d| d.code == Code::ImportCycle).count(), 1);
+    assert_eq!(check(&mut project, &dir.join("c.esc")).unwrap().diagnostics, []);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[cfg(unix)]
 #[test]
 fn the_loader_rejects_a_fifo_without_waiting_for_a_writer() {

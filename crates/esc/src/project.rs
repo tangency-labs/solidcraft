@@ -28,6 +28,7 @@ pub struct Project {
     files: HashMap<PathBuf, Result<Rc<Loaded>, String>>,
     pub(crate) checks: HashMap<PathBuf, Rc<Checked>>,
     pub(crate) in_progress: HashSet<PathBuf>,
+    pub(crate) import_components: HashMap<PathBuf, PathBuf>,
 }
 
 impl Project {
@@ -41,6 +42,7 @@ impl Project {
         let path = normalize(path);
         self.files.insert(path.clone(), Ok(Rc::new(loaded(path, text))));
         self.checks.clear();
+        self.import_components.clear();
     }
 }
 
