@@ -313,6 +313,7 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
     let width = window_width(ctx, &e.expr, !rows.is_empty(), arrows);
     let guess = egui::vec2(width + t.space_6 * 2.0, t.control_height * 2.0 + t.space_6 * 3.0);
     let anchor = place(app, ctx, &e.param, at, last.map_or(guess, |r| r.size()));
+    super::note_shown(ctx);
     // A click on the window (an arrow) takes the keyboard from its field, as any click away does;
     // the field takes it back instead of closing.
     let on_window = ctx.input(|i| {
@@ -321,6 +322,7 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
     let mut answer: Option<bool> = None;
     let mut escaped = false;
     let mut by = 0.0;
+    let mut grabbed = false;
     Container::new(ctx, Surface::Canvas).area(area).fixed_pos(anchor).order(egui::Order::Foreground).show(ctx, |ui| {
         Container::popup_frame(ui.style()).fill(t.dialog_body).inner_margin(t.space_6).show(ui, |ui| {
             crate::ui_kit::scope(ui, |ui| {
@@ -335,6 +337,16 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                 let side = t.control_height;
                 let cancel = Rect::from_min_size(egui::pos2(title.right() - side, title.top()), egui::vec2(side, side));
                 let ok = cancel.translate(egui::vec2(-(side + t.space_2), 0.0));
+                // Short of the check and the cross, which keep their clicks.
+                let (dragged, held) = super::grip(ui, title.with_max_x(ok.left() - t.space_2));
+                if dragged != egui::Vec2::ZERO {
+                    ANCHOR.with(|a| {
+                        if let Some(open) = a.borrow_mut().as_mut() {
+                            open.2 += dragged;
+                        }
+                    });
+                }
+                grabbed = held;
                 if button(ui, ok, "dimwin:ok", solidcraft_ui_text::tr("ui.heading_ok"), "finish") {
                     answer = Some(true);
                 }
@@ -429,7 +441,7 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                     Some(true)
                 } else if in_row && !left_click_outside {
                     None
-                } else if e.fresh > 0 || on_window || by != 0.0 || (lost_or_outside_press && press_on_reference) {
+                } else if e.fresh > 0 || on_window || grabbed || by != 0.0 || (lost_or_outside_press && press_on_reference) {
                     if !r.has_focus() {
                         r.request_focus();
                     }

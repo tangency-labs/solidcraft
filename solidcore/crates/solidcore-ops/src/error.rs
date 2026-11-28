@@ -16,8 +16,8 @@ pub const INVALID_INPUT: i32 = solidcore::error::SM_ERR_INVALID_INPUT;
 pub enum Error {
     /// The kernel's own status (1001 `SM_ERR`, 1007 `SM_ERR_INVALID_INPUT`, …).
     Status(i32),
-    /// Input the kernel refuses, in its words (its `SolidError::InvalidInput`): the routine that
-    /// refused it and what was wrong, as the kernel states them. Displays as
+    /// Input the kernel refuses, in its words (`SolidError::InvalidInput` or a typed
+    /// refusal retained here): the routine and what was wrong, as the kernel states them. Displays as
     /// `"{operation}: {reason}"`.
     Refused {
         /// The kernel routine that refused the input.
@@ -1303,6 +1303,7 @@ pub(crate) fn status(e: SolidError) -> Error {
 /// [`status`]'s typing of the kernel error `e`.
 fn typed(e: SolidError) -> Error {
     use solidcore::error::intersect::IntersectFailure;
+    use solidcore::error::mass::MassFailure;
     use solidcore::error::{SM_ERR, SM_ERR_NOT_CONVERGING};
     match e {
         SolidError::InvalidInput { operation, reason } => Error::Refused { operation, reason },
@@ -1331,6 +1332,14 @@ fn typed(e: SolidError) -> Error {
             reason,
         },
         SolidError::PreparationRequired { .. } => Error::Exception,
+        // Duplicate cleanup's uncertified orientation must retain its actual reason.
+        // Other mass-property failures keep their existing mapping below.
+        e if matches!(e.mass_failure(), Some(MassFailure::MeshVolumeSignUncertain)) => {
+            Error::Refused {
+                operation: e.operation(),
+                reason: MassFailure::MESH_VOLUME_SIGN_UNCERTAIN_REASON,
+            }
+        }
         // compute_point_parameters' ambiguous point solve, by its type: the status stays `SM_ERR`
         // (the table in `error/intersect.rs`), the count travels with it
         e if matches!(

@@ -1689,7 +1689,7 @@ fn join_that_meets_no_body_keeps_the_piece_and_says_so() {
             &json!({"sketch": "Sketch1", "profiles": [{"point": [50, 10]}], "distance": 10, "operation": "join", "name": "Extrude2"}),
         )
         .unwrap();
-    assert!(join["warning"].as_str().is_some_and(|w| w.contains(apart)), "{join}");
+    assert!(join["warning"].as_str().is_some_and(|w| w.contains(apart) && w.contains("(New Body makes it a body of its own)")), "{join}");
     assert_eq!(s.model.results.last().and_then(|r| r.warning.as_deref()), join["warning"].as_str());
     assert_eq!(s.model.state().bodies.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), ["Body1"]);
     assert!((volume(&s, "Body1") - 8000.0).abs() < 1e-6, "{}", volume(&s, "Body1"));
@@ -2588,4 +2588,32 @@ fn a_hole_in_a_notched_cross_cut_large_half_torus_is_cut() {
     let want = half_torus - cross - holes - notch;
     let got = volume(&s, "Part");
     assert!((got - want).abs() < 5e-5, "volume {got}, want {want} (notch {notch}, cross {cross}, holes {holes})");
+}
+
+/// #23062: the upper half of a torus (centre circle Ø1000, tube Ø1) with both edges of its flat
+/// face rounded with 0.05, and a Ø0.1 notch 0.25 deep centred on the flat face's outer rim at +Y.
+/// The cut was refused by the check's test 11 ("Bad SpeedPt") on a UV trim of the outer round:
+/// the round's two parameters have very different lengths on the surface, and the trim, read in
+/// raw (u, v), slowed to 3.5e-4 against a tolerance of 4.4e-4; on the surface its slowest speed
+/// is 0.97. The notch is cut into one valid body. Its volume against the analytic one is
+/// solidcore's kernel case `booleans/23062-notch-through-thin-round-on-large-half-torus`.
+#[test]
+fn a_notch_through_a_thin_round_on_a_large_half_torus_is_cut() {
+    let s = replay(
+        &json!({"commands": [
+            {"command": "solid.torus", "params": {"center": [0.0, 0.0, 0.0], "major": 500.0, "minor": 0.5, "operation": "new", "body_name": "Part"}},
+            {"command": "solid.box", "params": {"length": 1003.0, "width": 1003.0, "height": 1.5, "corner": [-501.5, -501.5, -1.5], "operation": "cut", "targets": ["Part"]}},
+            {"command": "solid.fillet", "params": {"edges": [[0.0, -499.5, 0.0], [0.0, -500.5, 0.0]], "radius": 0.05}},
+            {"command": "solid.cylinder", "params": {"radius": 0.05, "height": 0.25, "base": [0.0, 500.5, 0.0], "axis": "Z", "operation": "cut", "targets": ["Part"]}}
+        ]})
+        .to_string(),
+    );
+    let bodies = &s.model.state().bodies;
+    assert_eq!(bodies.len(), 1);
+    let body = &bodies[0].body;
+    assert!(body.validity().is_empty() && body.shell_count() == 1, "{:?}, {} shells", body.validity(), body.shell_count());
+    use solidcraft_kernel::PointClass::{Inside, Outside};
+    let class = |x: f64, y: f64, z: f64| body.classify_point(solidcore_record::Vec3::new(x, y, z)).unwrap();
+    assert_eq!(class(0.0, 500.46, 0.05), Outside, "the notch");
+    assert_eq!(class(0.0, 500.38, 0.05), Inside, "beside the notch");
 }

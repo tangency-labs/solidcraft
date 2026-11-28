@@ -390,13 +390,14 @@ pub static COMMANDS: &[CommandSpec] = &[
             "single_face_selection?: bool (default false; true requires exactly one entry in faces and keeps single-face replacement when editing); ",
             "shared options apply to every face, automatic size fits each independently; ",
             "cosmetic replies include threads for faces and retain thread as the first; ",
-            "form?: metric|unified|trapezoidal|acme|buttress|buttress_asme|bspp|rp|bspt|npt (default: the one `designation` names, else metric; square is refused: no current standard defines it); ",
+            "form?: metric|unified|trapezoidal|acme|buttress|buttress_asme|bspp|rp|bspt|npt|custom (default: the one `designation` names, else metric; square is refused: no current standard defines it); ",
             "designation?: the size, as its standard writes it: metric \"M8\", \"M8x1\", \"M16xPh3P1.5\" (ISO 68-1, ISO 261, ISO 965-1), optionally then an ISO 965-1 tolerance class after a hyphen, \"M8-6g\", \"M8x1-6H\", \"M10x1.25-5g6g\" (e, f, g or h on a shaft, G or H in a hole; kept in the callout, refused on the wrong side, changes no geometry); ",
             "unified \"1/4-20 UNC-2A\", \"#10-32 UNF\" (ASME B1.1, 60 degrees; <size>-<TPI> UNC|UNF|UNEF|UN, optional -1A/-2A/-3A external or -1B/-2B/-3B internal, class retained; size #0..#12 or fractional/decimal inches, major from size, pitch exactly 25.4/TPI; automatic unified uses nearest catalogued UNC, default automatic remains metric); ",
             "trapezoidal \"Tr20x4\", \"Tr40x14(P7)\" (ISO 2904, ISO 2903); ",
             "buttress \"S20x4\", \"S40x14(P7)\" (DIN 513, 3°/30°); ",
             "acme \"1/2-10 ACME\" (ASME B1.5); ",
             "buttress_asme \"2.5-8 BUTT\" (ASME B1.9, 7°/45°, basic profile; no size table); ",
+            "custom \"C10x1.5x90\" (not a standard: C<major diameter>x<pitch>x<included angle> in mm and degrees, the ISO 68-1 basic profile at that angle, 20° to 90°; no size table; no chamfered tip); ",
             "bspp \"G 1/2\" (ISO 228-1, 55° parallel); ",
             "rp \"Rp 1/2\" (ISO 7-1's parallel internal thread, 55°, an R screws into it; internal only); ",
             "bspt \"R 1/2\" external, \"Rc 1/2\" internal (ISO 7-1, 55°, taper 1 in 16); ",
@@ -459,6 +460,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "angle: expr; ",
             "direction_only?: bool (default false: turn about the axis as a line; true: project the axis direction onto base and turn about the line through pivot, or the base origin); ",
             "pivot?: point ref (only with direction_only; vertex, sketch point, construction point); ",
+            "through_axis?: bool (default false: the base turns about the axis where it is; true: the base is first brought onto the axis, so the plane goes through it even when it is off the base; not with direction_only); ",
             "name?",
         )),
     CommandSpec::new("solid.split_face", "Split Face", crate::checked!("solid.split_face", split_face)).begins_edit()
@@ -814,11 +816,12 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
                 given_points = Some(points.clone());
                 indices
             }
-            ProfileSel::Curves { loops } => {
+            ProfileSel::Curves { loops, .. } => {
                 // The command's ordinary curve lists are sets, including repeated
                 // caller IDs. Saved graph-span multisets retain their legacy meaning.
                 // Reserved offset roles never use this ordinary normalization.
                 let mut normalized = loops.clone();
+                let mut dynamic_loops = Vec::with_capacity(normalized.len());
                 let reserved = ss
                     .sketch
                     .offsets
@@ -828,13 +831,23 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
                     .collect::<std::collections::BTreeSet<_>>();
                 for curves in &mut normalized {
                     let dynamic = curves.iter().any(|curve| reserved.contains(curve.as_str()));
+                    dynamic_loops.push(dynamic);
                     if !dynamic {
                         let mut seen = std::collections::BTreeSet::new();
                         curves.retain(|curve| seen.insert(curve.clone()));
                     }
                 }
-                let selection = ProfileSel::Curves { loops: normalized };
-                solidcraft_doc::profile_selection_indices(ss, &selection)?;
+                let count = normalized.len();
+                let mut selection = ProfileSel::Curves { loops: normalized, sides: Vec::new() };
+                let found = solidcraft_doc::profile_selection_indices(ss, &selection)?;
+                // The side of each curve the named profiles lie on, so the pick still names them
+                // when a change makes a twin bounded by the same curves (#23291). Offset roles are
+                // renamed by their offset, so loops with them keep their curves alone.
+                if found.len() == count
+                    && let ProfileSel::Curves { sides, .. } = &mut selection
+                {
+                    *sides = solidcraft_doc::picked_sides(ss, &found, &dynamic_loops);
+                }
                 *sel = selection;
                 continue;
             }
@@ -882,7 +895,7 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
                             .ok_or_else(|| EngineError::Other(format!("offset association `{id}` changed during profile capture")))
                     })
                     .collect::<Result<Vec<_>>>()?;
-                ProfileSel::Curves { loops }
+                ProfileSel::Curves { loops, sides: Vec::new() }
             }
             captured => captured,
         };
@@ -1062,7 +1075,7 @@ pub(crate) fn profiles(p: &Value, cmd: &str) -> Result<ProfileSel> {
                 }
                 loops.push(ids);
             }
-            Ok(ProfileSel::Curves { loops })
+            Ok(ProfileSel::Curves { loops, sides: Vec::new() })
         }
         _ => Err(bad(cmd, "`profiles` must be \"all\" or a list")),
     }
@@ -1598,17 +1611,7 @@ pub(super) fn default_extrude_profiles(s: &Session, sketch: u64) -> ProfileSel {
     if ps.iter().all(|p| p.region.holes.is_empty()) && !gaps.iter().any(|g| *g) {
         return ProfileSel::All;
     }
-    // Each profile has the profiles directly inside it as holes, so the number of holes around a
-    // point of a profile's material is its nesting depth.
-    let material: Vec<_> = ps
-        .iter()
-        .zip(&gaps)
-        .filter(|(p, gap)| {
-            let probe = p.region.interior_point();
-            !**gap && ps.iter().filter(|other| other.region.holes.iter().any(|hole| hole.contains(probe))).count() % 2 == 0
-        })
-        .map(|(p, _)| p)
-        .collect();
+    let material = material_profiles(&ps, &gaps);
     let all = solidcraft_sketch::without_text_counters(&ss.sketch, ps.clone());
     if material.iter().map(|p| &p.outer_curves).eq(all.iter().map(|p| &p.outer_curves)) {
         return ProfileSel::All;
@@ -1620,12 +1623,29 @@ pub(super) fn default_extrude_profiles(s: &Session, sketch: u64) -> ProfileSel {
         let indices = ps.iter().enumerate().filter(|(_, p)| material.iter().any(|m| std::ptr::eq(*m, *p))).map(|(i, _)| i).collect();
         ProfileSel::Indices { indices }
     } else {
-        ProfileSel::Curves { loops: material.iter().map(|p| p.outer_curves.clone()).collect() }
+        ProfileSel::Curves { loops: material.iter().map(|p| p.outer_curves.clone()).collect(), sides: Vec::new() }
     };
     match solidcraft_doc::profile_selection_indices(ss, &sel) {
         Ok(found) if found.len() == material.len() && material.iter().all(|p| !p.outer_curves.is_empty()) => sel,
         _ => ProfileSel::All,
     }
+}
+
+/// The material among a sketch's profiles, by even-odd nesting: a loop inside an outline is its
+/// hole, a loop inside that hole material again. Each profile has the profiles directly inside it
+/// as holes, so the number of holes around a point of a profile's material is its nesting depth.
+/// A profile marked in `gaps` ([`solidcraft_sketch::enclosed_gaps`]) is never material; one past
+/// the end of `gaps` is not a gap.
+pub(super) fn material_profiles<'a>(ps: &'a [solidcraft_sketch::Profile], gaps: &[bool]) -> Vec<&'a solidcraft_sketch::Profile> {
+    ps.iter()
+        .enumerate()
+        .filter(|(i, p)| {
+            let probe = p.region.interior_point();
+            !gaps.get(*i).copied().unwrap_or(false)
+                && ps.iter().filter(|other| other.region.holes.iter().any(|hole| hole.contains(probe))).count() % 2 == 0
+        })
+        .map(|(_, p)| p)
+        .collect()
 }
 
 /// The matrix taking a point of the active component's frame into the frame `b`'s geometry is
@@ -4666,6 +4686,13 @@ fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
         Some(t) => Some(Box::new(super::construct::geo(s, Some(t), cmd, "pivot")?)),
         None => None,
     };
+    if p.get("through_axis").is_some_and(|v| !v.is_boolean() && !v.is_null()) {
+        return Err(bad(cmd, "`through_axis` must be true or false"));
+    }
+    let through_axis = crate::params::bool_(p, "through_axis").unwrap_or(false);
+    if through_axis && direction_only {
+        return Err(bad(cmd, "`through_axis` and `direction_only` exclude each other: pick one"));
+    }
     let at_angle = |base: solidcraft_doc::PlaneRef| solidcraft_doc::PlaneRef::AtAngle {
         base: Box::new(base),
         axis_origin: axis_origin.clone(),
@@ -4674,6 +4701,7 @@ fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
         line: line.clone(),
         direction_only,
         pivot: pivot.clone(),
+        through_axis,
     };
     // No reference plane, with a body edge as the axis: a flat face that meets the edge, so the
     // plane goes through the edge and the angle is measured from that face (#20233).
@@ -5524,13 +5552,13 @@ fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
     let Some(ss) = st.sketch(sketch) else { return Vec::new() };
     let mut ends: Vec<usize> = Vec::new();
     // An arc's centre (a filleted corner's, say) is geometry of the arc, not a hole site, unless a
-    // circle is centred there too.
-    let circle_centres: Vec<usize> = ss
+    // circle or ellipse is centred there too.
+    let closed_centres: Vec<usize> = ss
         .sketch
         .curves
         .iter()
         .filter_map(|c| match &c.kind {
-            solidcraft_sketch::CurveKind::Circle { c, .. } => Some(*c),
+            solidcraft_sketch::CurveKind::Circle { c, .. } | solidcraft_sketch::CurveKind::Ellipse { c, .. } => Some(*c),
             _ => None,
         })
         .collect();
@@ -5539,7 +5567,7 @@ fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
             solidcraft_sketch::CurveKind::Circle { .. } => {}
             solidcraft_sketch::CurveKind::Arc { c, a, b } => {
                 ends.extend([*a, *b]);
-                if !circle_centres.contains(c) {
+                if !closed_centres.contains(c) {
                     ends.push(*c);
                 }
             }
@@ -5581,6 +5609,75 @@ fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
             && construction_rectangle_centre(*l)
         {
             ends.push(*p);
+        }
+    }
+    // A circular pattern's centre (whether made for the pattern, a lone guide point, or a
+    // construction or projected circle's or ellipse's centre) is rotation reference geometry, not
+    // a hole site, unless an authored regular circle or ellipse is centred there or the point is
+    // itself patterned as a standalone point.
+    let mut circular_centres: Vec<usize> = ss
+        .sketch
+        .patterns
+        .iter()
+        .filter_map(|pat| match &pat.kind {
+            solidcraft_sketch::SketchPatternKind::Circular { center, .. } => ss.sketch.resolve_point(center),
+            solidcraft_sketch::SketchPatternKind::Rectangular { .. } => None,
+        })
+        .chain(ss.sketch.constraints.iter().filter_map(|con| match &con.kind {
+            solidcraft_sketch::ConstraintKind::PatternPoint { center: Some(c), .. } => Some(*c),
+            _ => None,
+        }))
+        .collect();
+    circular_centres.sort_unstable();
+    circular_centres.dedup();
+    let regular_closed_at = |pt: usize| {
+        ss.sketch.curves.iter().any(|cu| {
+            !cu.construction
+                && cu.link.is_none()
+                && matches!(
+                    &cu.kind,
+                    solidcraft_sketch::CurveKind::Circle { c: cc, .. } | solidcraft_sketch::CurveKind::Ellipse { c: cc, .. } if *cc == pt
+                )
+        })
+    };
+    let construction_closed_at = |pt: usize| {
+        ss.sketch.curves.iter().any(|cu| {
+            cu.construction
+                && matches!(
+                    &cu.kind,
+                    solidcraft_sketch::CurveKind::Circle { c: cc, .. } | solidcraft_sketch::CurveKind::Ellipse { c: cc, .. } if *cc == pt
+                )
+        })
+    };
+    let patterned_point =
+        |c: usize| {
+            ss.sketch.patterns.iter().any(|pat| {
+                let seeds: Vec<usize> =
+                    pat.entities.iter().filter(|id| ss.sketch.curve_index(id).is_none()).filter_map(|id| ss.sketch.resolve_point(id)).collect();
+                seeds.contains(&c)
+                    || pat.instances.iter().flat_map(|inst| &inst.points).any(|(seed, copy)| {
+                        ss.sketch.resolve_point(copy) == Some(c) && ss.sketch.resolve_point(seed).is_some_and(|s| seeds.contains(&s))
+                    })
+            }) || ss.sketch.constraints.iter().any(|con| {
+                matches!(&con.kind, solidcraft_sketch::ConstraintKind::PatternPoint { p, q, .. }
+                if (*p == c || *q == c) && !ss.sketch.curves.iter().any(|cu| cu.kind.uses(*p)))
+            })
+        };
+    for c in circular_centres {
+        if !ends.contains(&c) && !regular_closed_at(c) && !patterned_point(c) {
+            ends.push(c);
+        }
+        if let Some(pc) = ss.sketch.point(c) {
+            for (i, p) in ss.sketch.points.iter().enumerate() {
+                if solidcraft_kernel::curves::ordered_nearby_points(&[p.pos], &[pc], 1e-6, 16).unwrap_or(false)
+                    && (p.link.is_some() || construction_closed_at(i))
+                    && !ends.contains(&i)
+                    && !regular_closed_at(i)
+                    && !patterned_point(i)
+                {
+                    ends.push(i);
+                }
+            }
         }
     }
     // A point marked construction (#18448) is reference geometry too.
@@ -6015,7 +6112,9 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
         Some(f) => ThreadForm::from_name(f).ok_or_else(|| {
             bad(
                 cmd,
-                format!("unknown thread form `{f}` (metric, unified, trapezoidal, acme, buttress, buttress_asme, bspp, rp, bspt, npt or square)"),
+                format!(
+                    "unknown thread form `{f}` (metric, unified, trapezoidal, acme, buttress, buttress_asme, bspp, rp, bspt, npt, custom or square)"
+                ),
             )
         })?,
         None => designation.as_deref().and_then(ThreadForm::of_designation).unwrap_or_default(),
@@ -6051,6 +6150,9 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
         Some("chamfer") => return Err(bad(cmd, "tip `chamfer` is now `both` (every free end) or `start` (the end the thread starts from)")),
         Some(t) => return Err(bad(cmd, format!("unknown tip `{t}` (none, start or both)"))),
     };
+    if tip != ThreadTip::None && form == ThreadForm::Custom {
+        return Err(bad(cmd, solidcraft_doc::thread_forms::CUSTOM_TIP));
+    }
     let angled = |key: &str, kind: Kind| -> Result<Option<Expr>> {
         let e = expr(p, key);
         if let Some(e) = &e {
