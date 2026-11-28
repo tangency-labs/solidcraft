@@ -41,6 +41,7 @@ mod dome;
 mod draft_corners;
 pub mod drawing_centre_mark;
 mod emboss;
+pub mod exact;
 mod face_flux;
 #[cfg(test)]
 mod face_source_tests;
