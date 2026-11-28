@@ -63,6 +63,7 @@ pub mod exact;
 pub mod offset;
 pub mod record;
 
+use crate::math::det;
 use std::cell::Cell;
 use std::sync::Arc;
 
@@ -2051,7 +2052,7 @@ fn set_entry(d: &mut [Vec<Vec3>], i: usize, j: usize, v: Vec3) {
 fn pow_index(x: f64, n: usize) -> f64 {
     #[allow(clippy::cast_precision_loss)]
     let e = n as f64;
-    x.powf(e)
+    det::powf(x, e)
 }
 
 // Rounding in the chord's crease test (PROVEN). `u` is `UNIT` (2^-53), `γ_n` is
@@ -2579,7 +2580,7 @@ mod tests {
 
     #[test]
     fn the_crease_threshold_is_a_lower_bound_on_the_g1_sine() {
-        let library = (crate::geom::tol::ANG_TOL_DEG * (std::f64::consts::PI / 180.0)).sin();
+        let library = det::sin(crate::geom::tol::ANG_TOL_DEG * (std::f64::consts::PI / 180.0));
         let lower = sin_turn_lower();
         assert!(lower < library, "{lower} {library}");
         assert!(lower > library * (1.0 - 1e-10), "{lower} {library}");
@@ -2596,9 +2597,9 @@ mod tests {
         // normals (0, 0, 1) before and (x, 0, 1) after: the largest x whose uncounted
         // bound was at most the library sine of the G1 angle skipped the split; the counted
         // bound must list it
-        let library = (crate::geom::tol::ANG_TOL_DEG * (std::f64::consts::PI / 180.0)).sin();
+        let library = det::sin(crate::geom::tol::ANG_TOL_DEG * (std::f64::consts::PI / 180.0));
         let a = Vec3::new(0.0, 0.0, 1.0);
-        let mut x = (crate::geom::tol::ANG_TOL_DEG * (std::f64::consts::PI / 180.0)).tan();
+        let mut x = det::tan(crate::geom::tol::ANG_TOL_DEG * (std::f64::consts::PI / 180.0));
         for _ in 0..200 {
             x = down(x);
         }

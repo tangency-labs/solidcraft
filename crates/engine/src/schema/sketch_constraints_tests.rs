@@ -20,7 +20,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<AutoConstrainParams>(), &AUTO_KEYS);
     assert_keys(input_schema_for::<AutoConstrainDatumParams>(), &AUTO_KEYS);
     assert_keys(input_schema_for::<FinishAutoConstrainParams>(), &AUTO_KEYS);
-    assert_keys(input_schema_for::<ToggleDrivenParams>(), &["constraint", "driven", "sketch"]);
+    assert_keys(input_schema_for::<ToggleDrivenParams>(), &["constraint", "driven", "name", "sketch"]);
     // Snap Inference works in the sketch being edited: it reads no `sketch`.
     assert_keys(input_schema_for::<GlyphsParams>(), &["sketch"]);
     assert_keys(input_schema_for::<SnapParams>(), &["at", "from", "radius"]);

@@ -182,12 +182,18 @@ pub(crate) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
     let edge_idx = if edges.is_empty() {
         Vec::new()
     } else {
-        let mut w = None;
         let all: Vec<usize> = (0..edges.len()).collect();
         let placed = crate::eval::bodies_placed_before(doc, f);
-        let at = crate::eval::blend_edges_on(&mb, f, edges, &all, placed, &mut w)?;
-        notes.extend(w);
-        kernel::blend_edges(&mb.body, &at)?
+        let sole_solid = st.bodies.iter().filter(|b| !b.body.is_mesh()).count() == 1;
+        let res = crate::eval::blend_edges_on(doc, &mb, f, edges, &all, placed, sole_solid)?;
+        notes.extend(res.warning);
+        if res.suppressed_count > 0 {
+            let list = res.suppressed_makers.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", ");
+            let verb = if res.suppressed_makers.len() == 1 { "is" } else { "are" };
+            notes.push(format!("{} edge reference(s) skipped: {list} {verb} suppressed", res.suppressed_count));
+        }
+        let at: Vec<Vec3> = res.points.into_iter().map(|(_, p)| p).collect();
+        if at.is_empty() { Vec::new() } else { kernel::blend_edges(&mb.body, &at)? }
     };
     // Faces by the exact face nearest each pick, within the reach any face pick has.
     let face_points: Vec<Vec3> = faces.iter().map(|p| p.0).collect();

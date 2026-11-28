@@ -25,7 +25,10 @@ use crate::geom::tol::USE_DEFAULT;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::Transform;
-use crate::sweep::api_brep::{create_linear_sweep, create_rotational_sweep};
+use crate::sweep::api_brep::{
+    create_linear_sweep, create_rotational_sweep, create_rotational_sweep_at_scale,
+};
+use crate::sweep::rotational_sweep_geometry::{cover_axis_chords, omitted_corner_band};
 use crate::topology::brep::p1 as brep_p1;
 use crate::topology::brep::p2::ArenaNotifyState;
 use crate::topology::brep::p3::new_brep;
@@ -198,6 +201,28 @@ enum Ends {
     ClosedSheet,
 }
 
+/// The stitch leaves the tolerance of an omitted corner about a zone short of the
+/// quarter-chord. Grow vertices inside the arc's own band ([`omitted_corner_band`]
+/// of `(start - centre).length()`) to twice the chord, times the gap gain
+/// ([`cover_axis_chords`]). Straight walls are not moved. A plain revolve does not.
+fn cover_omitted_corner_chords(k: &Kernel, b: &mut Brep, segments: &[Segment]) -> Result<()> {
+    for g in segments {
+        let Segment::Arc {
+            start,
+            centre,
+            axis,
+            angle,
+            ..
+        } = *g
+        else {
+            continue;
+        };
+        let band = omitted_corner_band((start - centre).length());
+        cover_axis_chords(k, b, centre, axis, angle, band)?;
+    }
+    Ok(())
+}
+
 /// The walls of `profile` along `segments`, already proved to make one path (closed for
 /// the closed ends), with `ends`.
 fn walls_along(
@@ -222,11 +247,20 @@ fn walls_along(
         let refs: Vec<Option<&Curve>> = section.iter().map(Some).collect();
         let mut piece = match *g {
             Segment::Arc {
+                start,
                 centre,
                 axis,
                 angle,
-                ..
-            } => create_rotational_sweep(k, &refs, centre, axis, angle * 180.0 / PI, false)?,
+            } => {
+                let degrees = angle * 180.0 / PI;
+                // Only a closed path omits a corner within the arc's own band.
+                if matches!(ends, Ends::Closed | Ends::ClosedSheet) {
+                    let scale = (start - centre).length();
+                    create_rotational_sweep_at_scale(k, &refs, centre, axis, degrees, false, scale)?
+                } else {
+                    create_rotational_sweep(k, &refs, centre, axis, degrees, false)?
+                }
+            }
             Segment::Line { start, end } => {
                 let Some(direction) = unit(end - start) else {
                     return Err(SolidError::invalid_input(OP, "a line without a length"));
@@ -269,6 +303,9 @@ fn walls_along(
         Ends::Open | Ends::ClosedSheet => {
             stitch_and_orient_open(k, &mut b, &StitchAndOrientOptions::default(), None)?;
         }
+    }
+    if matches!(ends, Ends::Closed | Ends::ClosedSheet) {
+        cover_omitted_corner_chords(k, &mut b, segments)?;
     }
     b.refresh_cached_topology();
     let mut half = 0.5 * total;

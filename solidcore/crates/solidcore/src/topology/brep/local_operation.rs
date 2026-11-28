@@ -8,6 +8,7 @@
 //! |---------------------|---------------------------|
 //! | [`local_operation`] | `SmBrep::LocalOperation`  |
 //! | [`local_operation_simple`] | (not upstream) `SmBrep::LocalOperation` with its own notification identities |
+//! | [`transformed_face_surface`] | (not upstream) one face's support under a rigid motion |
 //!
 //! Deviations: the offset executive's local-operation geometry creator
 //! (`SmLocalOperationGeometryCreation`) is the face and surface lists the executive
@@ -40,7 +41,13 @@
 //! supplied draft definition and source attributes are preserved, the face's on the drafted
 //! wall and each capped end's rim's on the wall's new rim there (`rims_by_end`), as the local
 //! operation carries an edge's attributes to the edge that replaces it.
+//! (not upstream, #22804) Before the extended offset runs, a kept torus face beside a moved
+//! face whose tube direction is closed (`360°`) yet whose boundary leaves a gap around the
+//! tube gets its torus re-parameterised with its tube seam in the middle of that gap
+//! (`clear_torus_tube_seams`), so extending the torus past its trimmed rims never crosses
+//! the tube's periodic seam.
 
+use crate::math::det;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::offset::OffsetFailure;
@@ -743,6 +750,7 @@ fn local_operation_on(
             }
         }
     }
+    clear_torus_tube_seams(k, b, &all_faces, &moving)?;
     let mut continued = continued_planes(k, b, &all_faces, &moving)?;
     for &face in &all_faces {
         let index = faces.iter().position(|&f| f == face);
@@ -1019,7 +1027,7 @@ impl Meridian {
             (d - axis * d.dot(axis)).length() <= tolerance
         };
         let line = |a: f64, b: f64, c: f64| {
-            let length = a.hypot(b);
+            let length = det::hypot(a, b);
             (length > 0.0 && length.is_finite() && c.is_finite()).then(|| Self {
                 n: (a / length, b / length),
                 c: c / length,
@@ -1042,7 +1050,7 @@ impl Meridian {
             } => {
                 let sigma = along(placement.z_axis())?;
                 on_axis(placement.origin()).then_some(())?;
-                let slope = sigma * semi_angle_deg.to_radians().tan();
+                let slope = sigma * det::tan(semi_angle_deg.to_radians());
                 line(
                     1.0,
                     -slope,
@@ -1220,6 +1228,204 @@ fn closing_band(
         }
     }
     Ok(first.map(|(_, face, beside, largest)| (face, beside, largest)))
+}
+
+/// (not upstream, #22804) Moves the tube seam (`v` seam) of every kept closed-tube torus
+/// face that borders a moved face into the middle of the widest gap its boundary leaves
+/// around the tube.
+///
+/// A torus primitive is doubly periodic (`[0°, 360°] × [0°, 360°]`), with its tube seam
+/// along the outer equator `v = 0° / 360°`. Cutting a half-torus at `z = 0` leaves that
+/// closed torus on the face with its outer rim lying right on `v = 0°` and its boundary
+/// covering only `v ∈ [0°, 180°]`. Moving the flat cut face outward (`z = 0 → z = -d`)
+/// extends the torus into `v < 0°`, across the `v = 0° / 360°` periodic seam: the meridian
+/// seam edge's extended minor circle has its seam at `v = 0°`, so no single parameter
+/// interval of that circle gives the extended arc (`trim_extended_edge_ends`), leaving the
+/// meridian seam unextended and failing `step_gaps` with `LoopGapUncertified`.
+///
+/// Re-parameterising the same analytic torus over `[u_min, u_max] × [v_seam, v_seam + 360°]`
+/// with `v_seam` in the middle of the unused complement arc (for a half-torus `z ≥ 0`,
+/// `v_seam = 270°` at the bottom of the tube) moves no point of the surface, preserves its
+/// orientation and topology, keeps the tube seam strictly off the face, and gives equal
+/// clearance on both rims for any outward move up to the tube's full room.
+fn clear_torus_tube_seams(
+    k: &Kernel,
+    b: &mut Brep,
+    all_faces: &[FaceId],
+    moving: &[FaceId],
+) -> Result<()> {
+    use crate::geom::extent2d::Extent2d;
+    use crate::geom::vector2d::Point2;
+    use crate::math::EFF_ZERO_DEG;
+    use crate::surface::torus::{Torus, TorusOptions};
+    use crate::topology::edge;
+    use crate::topology::face::p1 as face1;
+
+    for &face in all_faces {
+        if moving.contains(&face) {
+            continue;
+        }
+        let mut touches_moving = false;
+        for e in face4::edges(b, face, None, false, None)? {
+            if edge::faces(b, e, None)?
+                .iter()
+                .any(|&n| n != face && moving.contains(&n))
+            {
+                touches_moving = true;
+                break;
+            }
+        }
+        if !touches_moving {
+            continue;
+        }
+        let Some(surface) = face_ops::surface(b, face)? else {
+            continue;
+        };
+        if surface.procedural_definition().is_some() {
+            continue;
+        }
+        let SurfaceKind::Torus(torus) = surface.kind() else {
+            continue;
+        };
+        if !torus.base().have_polar_conversion() {
+            continue;
+        }
+        let anal = torus.base().step_uv_domain();
+        let v_ivl = anal.v_interval();
+        if (v_ivl.length() - 360.0).abs() > EFF_ZERO_DEG {
+            continue;
+        }
+        let position = *torus.base().position();
+        let major = torus.major_radius();
+        let minor = torus.minor_radius();
+        let swap_uv = torus.base().swap_uv();
+        let inside_out = torus.inside_out();
+        let u_ivl = anal.u_interval();
+        let cur_seam = v_ivl.min().rem_euclid(360.0);
+
+        let uv_box =
+            face1::calculate_uv_domain_from_uv_trim_curves(k, b, face, true, false, false)?.domain;
+        let Some(surface) = face_ops::surface(b, face)? else {
+            continue;
+        };
+        let nurb_dom = surface.natural_uv_domain_with_nurb(k)?;
+        let SurfaceKind::Torus(torus) = surface.kind() else {
+            continue;
+        };
+        let (gen_face, gen_surf, mid_other) = if swap_uv {
+            (
+                uv_box.u_interval(),
+                nurb_dom.u_interval(),
+                nurb_dom.v_interval().mid(),
+            )
+        } else {
+            (
+                uv_box.v_interval(),
+                nurb_dom.v_interval(),
+                nurb_dom.u_interval().mid(),
+            )
+        };
+        let surf_len = gen_surf.length();
+        let face_len = gen_face.length();
+        if !(surf_len.is_finite()
+            && face_len.is_finite()
+            && face_len > EFF_ZERO * (1.0 + surf_len)
+            && face_len < surf_len * (1.0 - 1.0 / 360.0))
+        {
+            continue;
+        }
+        let pt = |g: f64| {
+            if swap_uv {
+                Point2::new(g, mid_other)
+            } else {
+                Point2::new(mid_other, g)
+            }
+        };
+        let a_lo = torus
+            .convert_uv_from_nurbs_to_step(k, pt(gen_face.min()))?
+            .y;
+        let a_mid = torus
+            .convert_uv_from_nurbs_to_step(k, pt(gen_face.mid()))?
+            .y;
+        let a_hi = torus
+            .convert_uv_from_nurbs_to_step(k, pt(gen_face.max()))?
+            .y;
+        if !(a_lo.is_finite() && a_mid.is_finite() && a_hi.is_finite()) {
+            continue;
+        }
+        let (d_lo, d_hi) = if inside_out {
+            (
+                (a_lo - a_mid).rem_euclid(360.0),
+                (a_mid - a_hi).rem_euclid(360.0),
+            )
+        } else {
+            (
+                (a_mid - a_lo).rem_euclid(360.0),
+                (a_hi - a_mid).rem_euclid(360.0),
+            )
+        };
+        let span = d_lo + d_hi;
+        let gap = 360.0 - span;
+        if !(d_lo > 0.0 && d_hi > 0.0 && gap > 1.0) {
+            continue;
+        }
+        let v_hi = if inside_out {
+            a_mid + d_lo
+        } else {
+            a_mid + d_hi
+        };
+        let v_seam = (v_hi + 0.5 * gap).rem_euclid(360.0);
+        let diff = (v_seam - cur_seam).rem_euclid(360.0);
+        if diff.min(360.0 - diff) <= 0.36 {
+            continue;
+        }
+
+        let new_step_domain =
+            Extent2d::from_bounds(u_ivl.min(), v_seam, u_ivl.max(), v_seam + 360.0);
+        let new_torus = Surface::from(Torus::create_canonical(
+            k,
+            &position,
+            major,
+            minor,
+            TorusOptions {
+                swap_uv,
+                inside_out,
+                circle_nurb: None,
+            },
+            Some(&new_step_domain),
+        )?);
+
+        let editing = b.editing_enabled();
+        b.set_editing_enabled(true);
+        let replaced = (|| -> Result<()> {
+            let mut state = p2::ArenaNotifyState::new(b);
+            let mut env = state.env(None);
+            let face_ref = b
+                .face(face)?
+                .surface
+                .as_ref()
+                .and_then(Surface::owner)
+                .unwrap_or_else(|| (env.key_of)(EntityRef::Face(face)));
+            p2::replace_surface(
+                k,
+                b,
+                &mut env,
+                face,
+                new_torus,
+                face_ref,
+                p2::OldSurface::Delete,
+                true,
+            )?;
+            let uv_domain =
+                face1::calculate_uv_domain_from_uv_trim_curves(k, b, face, false, false, false)?
+                    .domain;
+            face_ops::set_uv_domain(b, face, &uv_domain)?;
+            Ok(())
+        })();
+        b.set_editing_enabled(editing);
+        replaced?;
+    }
+    Ok(())
 }
 
 /// (not upstream) The planes faces that keep their surfaces continue as: a face whose
@@ -1702,6 +1908,144 @@ fn keeps_seams(k: &Kernel, b: &mut Brep, face: FaceId, surface: &Surface) -> Res
     Ok(true)
 }
 
+/// A checked rigid motion of a face. Keep the original axis and displacement for
+/// exact tangency decisions, which rounding a transformed frame could change.
+#[derive(Debug)]
+pub struct FaceMotion {
+    axis: Vec3,
+    translate: Vec3,
+    angle: f64,
+    placement: Axis2Placement,
+}
+
+impl FaceMotion {
+    /// Rotate about `axis` through `origin` by `angle` radians, then translate.
+    ///
+    /// # Errors
+    /// A non-finite argument, a zero rotation axis, or an overflowing placement.
+    pub fn new(translate: Vec3, origin: Vec3, axis: Vec3, angle: f64) -> Result<Self> {
+        let invalid = |reason| SolidError::invalid_input("FaceMotion::new", reason);
+        let finite = |p: Vec3| p.to_array().into_iter().all(f64::is_finite);
+        if !(finite(origin) && finite(translate) && angle.is_finite()) {
+            return Err(invalid("non-finite pivot, translation or angle"));
+        }
+        let (_, unit) = axis
+            .length_and_unit()
+            .ok_or_else(|| invalid("non-finite or zero rotation axis"))?;
+        let mut placement = Axis2Placement::IDENTITY;
+        if angle != 0.0 {
+            placement.rotate_about_axis_at_point(angle, origin, unit);
+        }
+        placement.translate(translate);
+        if !finite(placement.origin()) {
+            return Err(invalid("the pivoted motion overflows its placement"));
+        }
+        Ok(Self {
+            axis,
+            translate,
+            angle,
+            placement,
+        })
+    }
+}
+
+/// The selected face's support under `motion`. Returns `None` for an invariant
+/// support; otherwise the replacement is an independent copy, including its definition.
+///
+/// # Errors
+///
+/// A missing face or surface, a motion the surface transform cannot represent,
+/// or the copy or transform's own error.
+pub fn transformed_face_surface(
+    k: &Kernel,
+    b: &Brep,
+    face: FaceId,
+    motion: &FaceMotion,
+) -> Result<Option<Surface>> {
+    const TRANSFORM: &str = "topology::brep::local_operation::transformed_face_surface";
+    let invalid = |reason| SolidError::invalid_input(TRANSFORM, reason);
+    let (translate, axis, angle) = (motion.translate, motion.axis, motion.angle);
+    let own = face_ops::surface(b, face)?
+        .ok_or_else(|| SolidError::topology(TRANSFORM, TopologyFailure::FaceWithoutSurface))?;
+    if angle == 0.0 && translate == Vec3::ZERO {
+        return Ok(None);
+    }
+
+    // Test a translation on the original support: adding it to a distant origin
+    // can round a tangent vector out of its plane, or erase a real normal move.
+    let invariant = match own.kind() {
+        SurfaceKind::Plane(p) => {
+            let p = p.position();
+            let (x, y) = (p.x_axis(), p.y_axis());
+            if spans(p) == Some(true)
+                && (angle == 0.0
+                    || [x, y]
+                        .into_iter()
+                        .all(|v| exact::dot(v, axis).is_some_and(|d| exact::is_zero(&d))))
+            {
+                exact::det3(x, y, translate).map(|d| exact::is_zero(&d))
+            } else {
+                None
+            }
+        }
+        SurfaceKind::Cone(c) if angle == 0.0 && c.cylinder => {
+            let p = &c.rev.position;
+            exact::dot(p.x_axis(), translate)
+                .zip(exact::dot(p.y_axis(), translate))
+                .map(|(x, y)| exact::is_zero(&x) && exact::is_zero(&y))
+        }
+        SurfaceKind::Cone(_) | SurfaceKind::Sphere(_) | SurfaceKind::Torus(_) if angle == 0.0 => {
+            Some(false)
+        }
+        SurfaceKind::BSpline(net) if angle == 0.0 && own.procedural_definition().is_none() => {
+            net_slides_in_plane(net, translate)
+        }
+        _ => None,
+    };
+    if invariant == Some(true) {
+        return Ok(None);
+    }
+    // The surface transform itself skips placements within EFF_ZERO of identity.
+    // That is not a proof of an invariant support. Do not retrim on an unmoved
+    // copy (or silently accept a genuinely normal displacement) in that case.
+    if motion.placement.is_identity(EFF_ZERO) {
+        return Err(invalid(
+            "the face's rigid motion is below the surface transform's resolution",
+        ));
+    }
+    let mut moved = own.copy(k)?;
+    moved.transform(k, &motion.placement, None)?;
+    if is_own_surface(own, &moved) {
+        if invariant == Some(false) {
+            return Err(invalid(
+                "the displacement is not resolved on the face's support",
+            ));
+        }
+        return Ok(None);
+    }
+    Ok(Some(moved))
+}
+
+/// A bare net whose control points all lie in a plane parallel to `delta` slides
+/// in that plane. A chord not parallel to `delta` nominates the second direction;
+/// rounding that chord cannot produce a false positive: [`net_plane_coordinate`]
+/// tests every homogeneous point against the two *stored* directions exactly.
+fn net_slides_in_plane(net: &BSplineSurface, delta: Vec3) -> Option<bool> {
+    let mut pts = net.gw_nurb()?.rows().flatten().map(|c| {
+        let h = Vec3::new(c.x, c.y, c.z);
+        if c.w == NOW {
+            h
+        } else {
+            h / c.w
+        }
+    });
+    let origin = pts.next()?;
+    let chord = pts.map(|p| p - origin).find(|&v| {
+        exact::cross(delta, v).is_some_and(|cross| cross.iter().any(|c| !exact::is_zero(c)))
+    })?;
+    net_plane_coordinate(net, delta, chord).map(|_| true)
+}
+
 /// Whether `given` is the surface `own` lies on, exactly: both of one analytic kind
 /// ([`AnalyticSupport`]) with equal radii and semi-angle, and the same placement where it
 /// matters, each comparison made without rounding (error-free products and sums,
@@ -1894,25 +2238,10 @@ fn own_plane_moved_origin(p: &Axis2Placement, q: &Axis2Placement) -> Option<Vec3
         .then_some(origin)
 }
 
-/// The translation along `q`'s rounded normal that moves `net`'s plane onto `q`'s plane.
-/// Exact determinants of `q`'s stored axes prove the homogeneous control points have
-/// the same plane coordinate per positive finite weight. The displacement uses the
-/// matching determinant ratio; its doubles are estimates ([`exact::to_f64`]). The sense
-/// is `own`'s evaluated normal against `q`'s rounded normal, finite and positive.
-fn net_moved_translation(
-    net: &BSplineSurface,
-    k: &Kernel,
-    own: &Surface,
-    q: &Axis2Placement,
-) -> Option<Vec3> {
-    let (x, y, m, g) = (q.x_axis(), q.y_axis(), q.z_axis(), q.origin());
-    // a degenerate given frame has no normal to be parallel to (`z_axis` is (0, 0, 1) for
-    // parallel or zero axes)
-    if !spans(q)? {
-        return None;
-    }
-    // det(x, y, H_i)*w0 = det(x, y, H_0)*wi, not H_i dot m: unitizing the
-    // cross product rounds m, so its exact perpendicular plane can differ from q's.
+/// The common coordinate `det(x, y, H_i)/w_i` of all the net's control points,
+/// as its first point's weight and determinant. Exact even for a rational net:
+/// compare the cross products of the two fractions, not rounded Euclidean points.
+fn net_plane_coordinate(net: &BSplineSurface, x: Vec3, y: Vec3) -> Option<(f64, Vec<f64>)> {
     let nurb = net.gw_nurb()?;
     let weight = |c: &CPoint| if c.w == NOW { 1.0 } else { c.w };
     let first = nurb.rows().flatten().next()?;
@@ -1934,6 +2263,29 @@ fn net_moved_translation(
             return None;
         }
     }
+    Some((w0, a0))
+}
+
+/// The translation along `q`'s rounded normal that moves `net`'s plane onto `q`'s plane.
+/// Exact determinants of `q`'s stored axes prove the homogeneous control points have
+/// the same plane coordinate per positive finite weight. The displacement uses the
+/// matching determinant ratio; its doubles are estimates ([`exact::to_f64`]). The sense
+/// is `own`'s evaluated normal against `q`'s rounded normal, finite and positive.
+fn net_moved_translation(
+    net: &BSplineSurface,
+    k: &Kernel,
+    own: &Surface,
+    q: &Axis2Placement,
+) -> Option<Vec3> {
+    let (x, y, m, g) = (q.x_axis(), q.y_axis(), q.z_axis(), q.origin());
+    // a degenerate given frame has no normal to be parallel to (`z_axis` is (0, 0, 1) for
+    // parallel or zero axes)
+    if !spans(q)? {
+        return None;
+    }
+    // det(x, y, H_i)*w0 = det(x, y, H_0)*wi, not H_i dot m: unitizing the
+    // cross product rounds m, so its exact perpendicular plane can differ from q's.
+    let (w0, a0) = net_plane_coordinate(net, x, y)?;
     // a net whose normal cannot be evaluated is not shown this construction
     let domain = own.natural_uv_domain_with_nurb(k).ok()?;
     let own_normal = own
@@ -2261,7 +2613,7 @@ mod tests {
                 Point3::new(0.0, 0.0, neutral),
                 Vec3::Z,
                 Vec3::Z,
-                0.1_f64.atan(),
+                det::atan(0.1_f64),
             )
             .unwrap();
             let cone = draft_surface(&k, &b, f, &draft).unwrap().unwrap();
@@ -2379,7 +2731,7 @@ mod tests {
                 )
             })
             .unwrap();
-        let draft = Draft::new(origin, Vec3::Z, Vec3::Z, 0.1_f64.atan()).unwrap();
+        let draft = Draft::new(origin, Vec3::Z, Vec3::Z, det::atan(0.1_f64)).unwrap();
         let cone = draft_surface(&k, &b, f, &draft).unwrap().unwrap();
         assert_eq!(
             contract_complete_cone(&mut k, &mut b, &[f], &[cone]).unwrap(),
@@ -2396,12 +2748,12 @@ mod tests {
     #[test]
     fn parallel_plane_origin_uses_determinants_before_rounding_the_origin_difference() {
         let k = Kernel::default();
-        let t = 2.0_f64.powi(-25) + 2.0_f64.powi(-77);
+        let t = det::powi(2.0_f64, -25) + det::powi(2.0_f64, -77);
         let x = Vec3::new(1.0, t, 0.0);
         let y = Vec3::Z;
         let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let scale = crate::math::Vec2::new(1.0, 1.0);
-        let origin = x * 2.0_f64.powi(-53);
+        let origin = x * det::powi(2.0_f64, -53);
         let own = Surface::from(Plane::new(origin, x, y, scale, &domain));
         let coincident = Surface::from(Plane::new(x, x, y, scale, &domain));
         // Both origins lie exactly in the stored axis span, but rounding x-origin
@@ -2437,7 +2789,7 @@ mod tests {
     #[test]
     fn parallel_net_moves_every_control_point_using_the_given_stored_plane_axes() {
         let k = Kernel::default();
-        let t = 2.0_f64.powi(-25) + 2.0_f64.powi(-77);
+        let t = det::powi(2.0_f64, -25) + det::powi(2.0_f64, -77);
         let x = Vec3::new(1.0, t, 0.0);
         let y = Vec3::Z;
         let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
@@ -2492,7 +2844,7 @@ mod tests {
     #[test]
     fn perpendicularity_to_the_rounded_normal_does_not_prove_parallel_planes() {
         let k = Kernel::default();
-        let t = 2.0_f64.powi(-25) + 2.0_f64.powi(-77);
+        let t = det::powi(2.0_f64, -25) + det::powi(2.0_f64, -77);
         let x = Vec3::new(1.0, t, 0.0);
         let y = Vec3::Z;
         let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
@@ -2509,7 +2861,7 @@ mod tests {
             .is_none());
         // Scaling amplifies the mismatch in the control coordinates. It remains
         // exactly perpendicular to m, but not in the given plane's stored span.
-        let a = a * 2.0_f64.powi(80);
+        let a = a * det::powi(2.0_f64, 80);
         assert!(exact::is_zero(&exact::dot(m, a).unwrap()));
         assert!(!exact::is_zero(&exact::det3(x, y, a).unwrap()));
         let own_net = Surface::from(
@@ -2939,7 +3291,12 @@ mod tests {
             .unwrap()
             .unwrap()
             .clone();
-        given_its_own(k, b, s, 4.0 / 3.0 * std::f64::consts::PI * 1.5_f64.powi(3));
+        given_its_own(
+            k,
+            b,
+            s,
+            4.0 / 3.0 * std::f64::consts::PI * det::powi(1.5_f64, 3),
+        );
     }
 
     #[test]
@@ -2948,7 +3305,7 @@ mod tests {
         let mut k = Kernel::default();
         let b = ap::create_torus(&mut k, Point3::ZERO, 3.0, 1.0).unwrap();
         let s = Surface::from(ap::create_torus_surface(&k, Point3::ZERO, 3.0, 1.0).unwrap());
-        given_its_own(k, b, s, 2.0 * std::f64::consts::PI.powi(2) * 3.0);
+        given_its_own(k, b, s, 2.0 * det::powi(std::f64::consts::PI, 2) * 3.0);
     }
 
     /// A whole torus's one face, meeting only itself across its seams, given the coaxial
@@ -2970,7 +3327,7 @@ mod tests {
         .unwrap();
         let (v, manifold) = volume_and_manifold(&k, &mut b);
         assert!(manifold);
-        let want = 2.0 * std::f64::consts::PI.powi(2) * 3.0 * 1.5 * 1.5;
+        let want = 2.0 * det::powi(std::f64::consts::PI, 2) * 3.0 * 1.5 * 1.5;
         assert!((v - want).abs() <= 1e-6 * want, "{v} vs {want}");
         assert_eq!(
             (b.faces().len(), b.edges().len(), b.vertices().len()),
@@ -3430,7 +3787,7 @@ mod tests {
             ("turned piece", |k| {
                 use crate::geom::axis2_placement::Axis2Placement;
                 let (b, piece) = split_block_piece(k);
-                let (c, sn) = (0.02_f64.cos(), 0.02_f64.sin());
+                let (c, sn) = (det::cos(0.02_f64), det::sin(0.02_f64));
                 let pivot = Point3::new(30.0, 0.0, 20.0);
                 let turned = Point3::new(
                     c * pivot.x + sn * pivot.z,
@@ -4072,7 +4429,7 @@ mod tests {
 
     /// `∫ √(R² − u²) du` from 0 to `u`.
     fn quarter_disc_area(radius: f64, u: f64) -> f64 {
-        0.5 * (u * (radius * radius - u * u).sqrt() + radius * radius * (u / radius).asin())
+        0.5 * (u * (radius * radius - u * u).sqrt() + radius * radius * det::asin(u / radius))
     }
 
     /// The fix sets the tangent-edge cases run with: none (the kernel's default) and every
@@ -4298,5 +4655,65 @@ mod tests {
             matches!(why, Some(OffsetFailure::Unsound { .. })),
             "{why:?}"
         );
+    }
+
+    /// #22804: moving the flat face of a half-torus outward (across the torus's `v = 0°`
+    /// tube seam) and inward builds a clean 2-face manifold solid at the exact Pappus
+    /// volume, for both upper (`z ≥ 0`) and lower (`z ≤ 0`) half-tori.
+    #[test]
+    fn a_half_toruss_flat_face_moves_outward_across_the_tube_seam() {
+        use crate::boolean::api_brep::boolean_difference;
+        use crate::offset::offset_faces::OffsetFacesExecutive;
+        use crate::primitive::api_primitives::create_torus;
+        use crate::topology::brep::validation::{check_brep, CheckLevel};
+
+        let (major, minor) = (15.0_f64, 4.0_f64);
+        let pi = crate::math::PI;
+        let expected_volume = |d: f64| -> f64 {
+            let half = pi * pi * major * minor * minor;
+            let slice = 2.0
+                * pi
+                * major
+                * (d * (minor * minor - d * d).sqrt() + minor * minor * det::asin(d / minor));
+            half + slice
+        };
+
+        for (cut_z, distance) in [(-5.0, 2.0), (-5.0, -2.0), (0.0, 2.0)] {
+            let mut k = Kernel::default();
+            let torus = create_torus(&mut k, Point3::ZERO, major, minor).unwrap();
+            let box_cut =
+                create_box(&mut k, Point3::new(-20.0, -20.0, cut_z), 40.0, 40.0, 5.0).unwrap();
+            let mut b = boolean_difference(&mut k, torus, box_cut).unwrap();
+            let flat = bp1::faces(&b, None)
+                .unwrap()
+                .into_iter()
+                .find(|&f| {
+                    matches!(
+                        b.face(f).unwrap().surface.as_ref().unwrap().kind(),
+                        SurfaceKind::Plane(_)
+                    )
+                })
+                .unwrap();
+
+            OffsetFacesExecutive::new()
+                .offset_faces(&mut k, &mut b, &[flat], distance)
+                .unwrap_or_else(|e| panic!("cut_z={cut_z}, distance={distance}: {e:?}"));
+
+            assert_eq!(bp1::faces(&b, None).unwrap().len(), 2);
+            let (v, manifold) = volume_and_manifold(&k, &mut b);
+            let want = expected_volume(distance);
+            assert!(
+                manifold && (v - want).abs() < 1e-3,
+                "cut_z={cut_z}, distance={distance}: manifold={manifold}, {v} vs {want}"
+            );
+            b.use_arena_naming().unwrap();
+            let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+                .unwrap()
+                .lines();
+            assert!(
+                lines.is_empty(),
+                "cut_z={cut_z}, distance={distance}: {lines:?}"
+            );
+        }
     }
 }

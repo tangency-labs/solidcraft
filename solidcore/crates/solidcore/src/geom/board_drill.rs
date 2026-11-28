@@ -6,6 +6,7 @@
 //! when the distance between the two segments is at most that radius.
 
 use crate::geom::vector2d::Vec2;
+use crate::math::det;
 
 /// The direction from `from` to `to`, in radians anticlockwise from +X, in `-π..=π`; `0` when
 /// the points coincide or a coordinate is not finite.
@@ -15,7 +16,7 @@ pub fn direction_angle(from: [f64; 2], to: [f64; 2]) -> f64 {
     if !(dx.is_finite() && dy.is_finite()) || (dx == 0.0 && dy == 0.0) {
         return 0.0;
     }
-    dy.atan2(dx)
+    det::atan2(dy, dx)
 }
 
 /// Whether a drilled hole touches or crosses any of the closed `loops`, each a list of corners
@@ -45,7 +46,7 @@ pub fn hole_reaches_loops(
         angle + std::f64::consts::FRAC_PI_2
     };
     let c = Vec2::from_array(center);
-    let axis = Vec2::new(along.cos(), along.sin()) * half;
+    let axis = Vec2::new(det::cos(along), det::sin(along)) * half;
     let (p, q) = (c - axis, c + axis);
     let reach = half + radius;
     loops.iter().any(|corners| {
@@ -115,7 +116,7 @@ fn wall_gap(center: [f64; 2], size: [f64; 2], angle: f64, point: [f64; 2]) -> Op
         angle + std::f64::consts::FRAC_PI_2
     };
     let c = Vec2::from_array(center);
-    let axis = Vec2::new(along.cos(), along.sin()) * half;
+    let axis = Vec2::new(det::cos(along), det::sin(along)) * half;
     let distance = point_segment_distance(Vec2::from_array(point), c - axis, c + axis);
     Some(((distance - radius).abs(), radius))
 }
@@ -269,8 +270,8 @@ mod tests {
         // A 1 mm half-hole cut as chords of 0.02 mm sag: a 30° chord's middle is 0.017 inside.
         let (a, b) = (15_f64.to_radians(), 45_f64.to_radians());
         let (p, q) = (
-            [0.5 * a.cos(), 0.5 * a.sin()],
-            [0.5 * b.cos(), 0.5 * b.sin()],
+            [0.5 * det::cos(a), 0.5 * det::sin(a)],
+            [0.5 * det::cos(b), 0.5 * det::sin(b)],
         );
         let chord = [p, [(p[0] + q[0]) * 0.5, (p[1] + q[1]) * 0.5], q];
         assert!(side_on_hole_wall([0.0, 0.0], [1.0, 1.0], 0.0, &chord, 0.02));

@@ -138,10 +138,14 @@ The kernel certifies the net against S, `|B − S| ≤ ε` at every parameter, i
 arithmetic (`ProceduralSweep::certify`; the derivation is in `procedural_sweep.rs`'s module
 docs). The record stores ε as the kernel held it (`bound`: its certified bound plus the rounding
 of any motion of the net since, which the kernel adds when it moves a wall). A reader never takes
-it as proof: the kernel certifies ε again when it builds the face, as it re-certifies a blend's net
-before the face is an operand, and keeps the larger of the two, so a file cannot hand the kernel a
-tighter bound than it proves, and a reopened wall works to the very bound it had. A face's and its edges' tolerances are the record's, as for every kind, and are what the
-kernel had.
+it as proof. solidcore reads a `sweep` face back on its net, with the definition kept as the
+wall's label (`ProceduralSweep::is_label`): no evaluation reads a label, so the kernel works on the
+net exactly as it did on the plain spline the record used to hold, carries the label with the net
+through copies, pieces, moves and reparametrisations, and writes it back. A label's bound is
+never read as one, so it is not proved again. Reading a wall back as its live definition (S
+answering tighter tolerances) is a step of its own, measured on its own: it changes how later
+operations evaluate the wall. A face's and its edges' tolerances are the record's, as for every
+kind, and are what the kernel had.
 
 A caller that asks for a tolerance at or above ε reads the net; a tighter one reads S
 (`NetScope`, the procedural blends' contract). Intersections, booleans and tessellation run on
@@ -193,8 +197,9 @@ The second row is the adapter's job, and its pull request shows it (kernel-layer
    tessellation, `crates/geom`, the cadir writer): the net always stored, read as a `blend`
    face's is. Nothing produces it yet, so no result moves.
 3. solidcore writes `sweep` for a screw-swept wall it built (the faces that carry a
-   `ProceduralSweep` with a screw motion) and gives the definition back on import, with the
-   design-format pending file. Results are the same numbers; the gate is that they don't move.
+   `ProceduralSweep` with a screw motion) and gives the definition back on import as the wall's
+   label, with the design-format pending file. Results are the same numbers; the gate is that
+   they don't move.
 4. Net-less faces: the writer leaves out a net the definition rebuilds exactly, the reader
    rebuilds it. Measured: M20 full length and M30x1.5 × 100 mm, time and file size, volumes
    equal to 10⁻⁹.

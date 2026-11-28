@@ -175,11 +175,12 @@ struct DocView {
 
 impl DocSlot {
     fn new(session: Session) -> DocSlot {
+        let cam = Camera { frame: session.doc.view_frame, ..Camera::default() };
         DocSlot {
             session,
             autosave: None,
             big_operation: false,
-            cam: Camera::default(),
+            cam,
             pending_feature_edit: None,
             pre_sketch_cam: None,
             sketch_last_views: Default::default(),
@@ -612,6 +613,11 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
     app.session.set_command_check(out.session.command_check());
     app.session.set_single_surface_analysis(app.preferences.single_surface_analysis);
     crate::print_face_ui::sync(&mut app.session, &app.preferences);
+    // So do the plugin approvals, the plugins turned off and the plugin limits (#23499). The
+    // incoming design's copy dates from when it was last shown, and after a control request the
+    // app saves the shown design's approvals when they differ from the preferences. No files are
+    // read here: a window popped out from another tab brings that design in for every frame.
+    crate::plugins::apply_policy(&mut app.session, &app.preferences);
     // The incoming design's plugin panels: the Model tab reads the installed plugins once, not on
     // every frame, so it no longer syncs them when the design comes to the front (#21594).
     solidcraft_engine::plugin::sync_panels(&mut app.session);
@@ -2120,7 +2126,7 @@ pub fn adopt(app: &mut SolveApp, mut session: Session) -> bool {
         crate::render_workspace::reset_document(app);
         crate::drawing_workspace::reset_document(app);
         app.session.invalidate_view(rev);
-        app.cam = Camera::default();
+        app.cam = Camera { frame: app.session.doc.view_frame, ..Camera::default() };
         app.fit_view();
         // The linked designs that changed while it was closed are read again (#9739): last, as a
         // read is taken up only by the design revision it started from.
@@ -4866,6 +4872,37 @@ mod tests {
         h.frames(2);
         double_click_tab(&mut h, 0);
         assert!(!renaming_tab(&h.app) && crate::scenario::rect_of("tab:rename").is_none());
+    }
+
+    /// A double-click on a view's sub-tab shows the view and opens its name in the sub-tab, as on
+    /// the design's own tab: typing replaces it and Enter keeps it. With the preference off, the
+    /// two clicks only show the view.
+    #[test]
+    fn double_clicking_a_view_sub_tab_renames_the_view() {
+        for renames in [true, false] {
+            let mut h = design_open();
+            h.app.preferences.design_views_as_tabs = true;
+            h.call("ui.prefs", json!({"tab_double_click_renames": renames}));
+            let call = |h: &mut crate::scenario::Harness, command: &str, params: Value| {
+                h.call("engine.execute", json!({"command": command, "params": params}))
+            };
+            let view = call(&mut h, "tab.view.open", json!({"kind": "animation"}))["result"]["id"].as_u64().unwrap();
+            assert_eq!(call(&mut h, "tab.view.activate", json!({"index": 0}))["ok"], true, "the Model view is shown");
+            h.frames(2);
+            h.step(&json!({"click": {"handle": "tab:view:1"}, "double": true})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.docs.views.active().id, view, "renames: {renames}: the view is shown");
+            assert_eq!(h.app.docs.view_rename.as_ref().map(|r| r.view), renames.then_some(view), "renames: {renames}");
+            assert_eq!(crate::scenario::rect_of("tab:rename").is_some(), renames, "renames: {renames}: the field is in the sub-tab");
+            if renames {
+                h.step(&json!({"text": "Opening motion"})).unwrap();
+                h.step(&json!({"key": "Enter"})).unwrap();
+                h.frames(2);
+            }
+            let name = h.app.docs.views.get(view).map(|view| view.name.clone());
+            assert_eq!(name.as_deref(), Some(if renames { "Opening motion" } else { "Animation 1" }), "renames: {renames}");
+            assert!(h.app.docs.view_rename.is_none(), "renames: {renames}: the field closed");
+        }
     }
 
     /// #5868: a tab's tooltip says where its design is saved (home as `~`), or that it isn't

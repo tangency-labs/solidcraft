@@ -9,6 +9,9 @@ struct Triangle {
     coat: vec4<f32>, // weight, perceptual roughness, IOR, shadow transmission flag
     interior: vec4<f32>, // scattering/mm, HG g, flags (stage=1, scalar face=2), immediate parent triangle+1
     glass: vec4<f32>, // optional roughness, Abbe number, film thickness/nm, film IOR
+    // Not stored: the normal of the paint flake under a resolved hit (zero elsewhere),
+    // and in w the share of the flakes' coverage that aging left visible.
+    flake: vec4<f32>,
 };
 struct Node { lo: vec3<f32>, first: u32, hi: vec3<f32>, count: u32 };
 struct AreaLight { center: vec4<f32>, u: vec4<f32>, v: vec4<f32>, radiance: vec4<f32> };
@@ -34,6 +37,7 @@ struct Params {
     volume_max: vec4<f32>, // camera-relative bounds maximum, HG mean cosine
     volume_albedo: vec4<f32>, // RGB single-scattering albedo, active glass model flag
     aging: array<AgingLayer,8>,
+    flakes: array<FlakeRecord,64>,
     directional_lights: array<DirectionalLight,8>,
     punctual_lights: array<PunctualLight,8>,
     studio_weights: vec4<f32>,
@@ -85,7 +89,7 @@ fn triangle(index: u32) -> Triangle {
     let material = (geometry[2]&0x3fffffffu)+geometry[word+3u]*select(20u,24u,has_model);
     var glass=vec4<f32>(0.0);
     if has_model {glass=vector_at(material+20u);}
-    return Triangle(vector_at(a),vector_at(b),vector_at(c),vector_at(a+4u),vector_at(b+4u),vector_at(c+4u),vector_at(material),vector_at(material+4u),vector_at(material+8u),vector_at(material+12u),vector_at(material+16u),glass);
+    return Triangle(vector_at(a),vector_at(b),vector_at(c),vector_at(a+4u),vector_at(b+4u),vector_at(c+4u),vector_at(material),vector_at(material+4u),vector_at(material+8u),vector_at(material+12u),vector_at(material+16u),glass,vec4<f32>(0.0,0.0,0.0,1.0));
 }
 
 // Exact s/p power reflectance and transmitted cosine; -1 denotes TIR.
@@ -178,23 +182,40 @@ fn distribution(nh: f32, a2: f32) -> f32 {
     let d = (1.0 - nh*nh) + nh*nh*a2;
     return a2 / (PI*d*d);
 }
-fn brdf(t: Triangle, n: vec3<f32>, v: vec3<f32>, l: vec3<f32>) -> vec3<f32> {
-    let nv = clamp(dot(n,v), -1.0, 1.0);
-    let nl = clamp(dot(n,l), -1.0, 1.0);
-    if nv <= 0.0 || nl <= 0.0 { return vec3<f32>(0.0); }
-    let h = unit(v+l);
+// The diffuse and specular lobes under the coat, from the cosines about their normal.
+fn base_lobes(t: Triangle, nv: f32, nl: f32, nh: f32, vh: f32) -> vec3<f32> {
     let a = t.parameters.y*t.parameters.y;
     let a2 = a*a;
-    let d = distribution(clamp(dot(n,h), 0.0, 1.0), a2);
+    let d = distribution(nh, a2);
     let gv = 2.0 / (nv + sqrt(a2 + (1.0-a2)*nv*nv));
     let gl = 2.0 / (nl + sqrt(a2 + (1.0-a2)*nl*nl));
     let ratio = (t.parameters.z - 1.0) / (t.parameters.z + 1.0);
     let f0 = mix(vec3<f32>(ratio*ratio), t.base.xyz, t.parameters.x);
     let diffuse = t.base.xyz * ((1.0-t.parameters.x)/PI);
-    var base = base_fresnel(f0,dot(v,h),t.parameters.x,t.parameters.z) * (d*0.25*gv*gl)
+    var base = base_fresnel(f0,vh,t.parameters.x,t.parameters.z) * (d*0.25*gv*gl)
         + (vec3<f32>(1.0)-base_fresnel(f0,nv,t.parameters.x,t.parameters.z)) * (vec3<f32>(1.0)-base_fresnel(f0,nl,t.parameters.x,t.parameters.z)) * diffuse;
     if u.light_count.z > 0.0 && t.parameters.x > 0.0 && t.parameters.y > 0.35 {
         base += metal_multiple_scattering(t.base.xyz,t.parameters.x,t.parameters.y,nv,nl);
+    }
+    return base;
+}
+fn brdf(t: Triangle, n: vec3<f32>, v: vec3<f32>, l: vec3<f32>) -> vec3<f32> {
+    let nv = clamp(dot(n,v), -1.0, 1.0);
+    let nl = clamp(dot(n,l), -1.0, 1.0);
+    if nv <= 0.0 || nl <= 0.0 { return vec3<f32>(0.0); }
+    let h = unit(v+l);
+    var base = base_lobes(t,nv,nl,clamp(dot(n,h), 0.0, 1.0),dot(v,h));
+    if on_a_flake(t) {
+        // The base lobes turn about the flake; one seen or lit from behind returns
+        // nothing. The reciprocal foreshortening factors keep a tilted flake within
+        // what its own cosines admit.
+        let m = t.flake.xyz;
+        let mv = min(dot(m,v),1.0);
+        let ml = min(dot(m,l),1.0);
+        base = vec3<f32>(0.0);
+        if mv > 0.0 && ml > 0.0 {
+            base = base_lobes(t,mv,ml,clamp(dot(m,h),0.0,1.0),dot(v,h))*(min(1.0,mv/nv)*min(1.0,ml/nl));
+        }
     }
     if t.coat.x <= 0.0 || t.coat.z == 1.0 { return base; }
     let coat_a = t.coat.y*t.coat.y;
@@ -964,7 +985,19 @@ fn surface_pdf(t: Triangle, n: vec3<f32>, v: vec3<f32>, l: vec3<f32>) -> f32 {
     if nl<=0.0 || nv<=0.0 { return 0.0; }
     let nh = clamp(dot(n,unit(v+l)),0.0,1.0);
     let diffuse = diffuse_probability(t);
-    let base = diffuse*nl/PI+(1.0-diffuse)*visible_ggx_reflection_pdf(nh,nv,t.parameters.y);
+    var base = diffuse*nl/PI+(1.0-diffuse)*visible_ggx_reflection_pdf(nh,nv,t.parameters.y);
+    if on_a_flake(t) {
+        // The base lobes are drawn about the flake; a half vector below the flake's
+        // plane is never drawn.
+        let m = t.flake.xyz;
+        let mv = min(dot(m,v),1.0);
+        let mh = min(dot(m,unit(v+l)),1.0);
+        base = 0.0;
+        if mv > 0.0 {
+            let lobe = select(0.0,visible_ggx_reflection_pdf(mh,mv,t.parameters.y),mh > 0.0);
+            base = diffuse*max(dot(m,l),0.0)/PI+(1.0-diffuse)*lobe;
+        }
+    }
     if t.coat.x<=0.0 { return base; }
     let coat_pdf = visible_ggx_reflection_pdf(nh,nv,t.coat.y);
     return (1.0-t.coat.x*0.5)*base+t.coat.x*0.5*coat_pdf;
@@ -1601,13 +1634,15 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
         let gradients=texture_gradients(map_record,geometric,d,hit.distance,texture_path_length,bounce);
         let mapped_surface=texture_surface(map_record,captured.base.xyz,captured.parameters.x,captured.parameters.y,shading_position,gradients,(u32(captured.interior.z)&2u)!=0u);
         // Retain immutable geometry and medium data across optical map evaluation.
-        let textured=Triangle(captured.p0,captured.p1,captured.p2,captured.n0,captured.n1,captured.n2,vec4<f32>(mapped_surface.color,captured.base.w),vec4<f32>(mapped_surface.metallic,mapped_surface.roughness,captured.parameters.zw),captured.optics,captured.coat,captured.interior,captured.glass);
-        let t=aged_surface(textured,shading_position,outward);
+        let textured=Triangle(captured.p0,captured.p1,captured.p2,captured.n0,captured.n1,captured.n2,vec4<f32>(mapped_surface.color,captured.base.w),vec4<f32>(mapped_surface.metallic,mapped_surface.roughness,captured.parameters.zw),captured.optics,captured.coat,captured.interior,captured.glass,captured.flake);
+        let aged=aged_surface(textured,shading_position,outward);
         let interpolated=unit(captured.n0.xyz*hit.bary.x+captured.n1.xyz*hit.bary.y+captured.n2.xyz*hit.bary.z);
         let winding_normal=select(interpolated,-interpolated,dot(interpolated,geometric)<0.0);
         let original_normal=select(geometric,winding_normal,dot(winding_normal,v)>0.0);
         let mapped_normal=texture_normal(map_record,mapped_surface.normal,original_normal,geometric);
         let n=select(original_normal,mapped_normal,dot(mapped_normal,v)>0.0);
+        // The flake is found last, from the final shading normal, as on the CPU.
+        let t=on_flake(aged,shading_position,n);
         radiance = add_light(radiance,throughput,direct_light(t,shading_position,physical,o,n,geometric,v,u.sampling.y-bounce-1u,&rng),1.0,bounce);
         radiance = add_light(radiance,throughput,photon_gather(t,shading_position,n,geometric,v,u.sampling.y-bounce-1u),1.0,bounce);
         d = sample_surface(t,n,v,&rng);
@@ -1733,6 +1768,38 @@ fn reference() {
     accumulation[0] = vec4<f32>(brdf(triangle(0u),u.up.xyz,u.back.xyz,u.right.xyz),1.0);
 }
 
+// Test entries for paint flakes: environment.xyz is the flake normal under the point.
+fn flaked_reference_triangle() -> Triangle {
+    var t=triangle(0u);
+    t.flake=vec4<f32>(u.environment.xyz,1.0);
+    return t;
+}
+@compute @workgroup_size(1)
+fn flake_brdf_reference() {
+    accumulation[0] = vec4<f32>(brdf(flaked_reference_triangle(),u.up.xyz,u.back.xyz,u.right.xyz),1.0);
+}
+@compute @workgroup_size(1)
+fn flake_pdf_reference() {
+    accumulation[0] = vec4<f32>(surface_pdf(flaked_reference_triangle(),u.up.xyz,u.back.xyz,u.right.xyz),0.0,0.0,1.0);
+}
+@compute @workgroup_size(1)
+fn flake_sample_reference() {
+    let d = sample_surface_values(flaked_reference_triangle(),u.up.xyz,u.back.xyz,u.lighting.xyz);
+    accumulation[0] = vec4<f32>(d+vec3<f32>(2.0),1.0);
+}
+// The flake under the camera-relative point right.xyz with the shading normal up.xyz.
+@compute @workgroup_size(1)
+fn flake_lookup_reference() {
+    let t=on_flake(triangle(0u),u.right.xyz,u.up.xyz);
+    // Offset so the read-back's nonnegative check admits every normal; zero stays off-flake.
+    accumulation[0] = vec4<f32>(t.flake.xyz+select(vec3<f32>(0.0),vec3<f32>(2.0),on_a_flake(t)),t.parameters.x);
+}
+@compute @workgroup_size(1)
+fn flake_finish_reference() {
+    let t=on_flake(triangle(0u),u.right.xyz,u.up.xyz);
+    accumulation[0] = vec4<f32>(t.base.xyz,t.parameters.y);
+}
+
 @compute @workgroup_size(1)
 fn dielectric_reference() {
     let f = dielectric(u.up.x,u.up.y,u.up.z);
@@ -1785,13 +1852,19 @@ fn sample_surface_values(t: Triangle, n: vec3<f32>, v: vec3<f32>, variates: vec3
     let component = variates.x;
     let x = variates.y; let phi = 2.0*PI*variates.z;
     let coat_probability = t.coat.x*0.5;
+    let coat = component >= 1.0-coat_probability;
+    // On a flake the base lobes turn about the flake's normal; the coat keeps n. A
+    // flake seen from behind has no base lobe mass: the zero direction ends the path.
+    let flaked = on_a_flake(t) && !coat;
+    let about = select(n,t.flake.xyz,flaked);
+    if flaked && dot(about,v) <= 0.0 { return vec3<f32>(0.0); }
     if component < (1.0-coat_probability)*diffuse_probability(t) {
         let radius = sqrt(x);
-        return from_local(vec3<f32>(radius*cos(phi),radius*sin(phi),sqrt(1.0-x)),n);
+        return from_local(vec3<f32>(radius*cos(phi),radius*sin(phi),sqrt(1.0-x)),about);
     }
-    let roughness = select(t.parameters.y,t.coat.y,component >= 1.0-coat_probability);
+    let roughness = select(t.parameters.y,t.coat.y,coat);
     let alpha = roughness*roughness;
-    let h = glass_visible_normal(n,v,alpha,variates.yz);
+    let h = glass_visible_normal(about,v,alpha,variates.yz);
     return reflect(-v,h);
 }
 

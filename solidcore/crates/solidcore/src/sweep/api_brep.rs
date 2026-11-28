@@ -243,13 +243,51 @@ pub fn create_rotational_sweep(
     angle_deg: f64,
     cap_ends: bool,
 ) -> Result<Brep> {
+    rotational_sweep(k, curves_to_sweep, base_pt, axis, angle_deg, cap_ends, None)
+}
+
+/// [`create_rotational_sweep`] for one arc of a closed path of lines and arcs
+///. `feature_scale` is that arc's radius. A plain revolve does not call this.
+///
+/// # Errors
+///
+/// Those of [`create_rotational_sweep`].
+pub(crate) fn create_rotational_sweep_at_scale(
+    k: &mut Kernel,
+    curves_to_sweep: &[Option<&Curve>],
+    base_pt: Point3,
+    axis: Vec3,
+    angle_deg: f64,
+    cap_ends: bool,
+    feature_scale: f64,
+) -> Result<Brep> {
+    rotational_sweep(
+        k,
+        curves_to_sweep,
+        base_pt,
+        axis,
+        angle_deg,
+        cap_ends,
+        Some(feature_scale),
+    )
+}
+
+fn rotational_sweep(
+    k: &mut Kernel,
+    curves_to_sweep: &[Option<&Curve>],
+    base_pt: Point3,
+    axis: Vec3,
+    angle_deg: f64,
+    cap_ends: bool,
+    feature_scale: Option<f64>,
+) -> Result<Brep> {
     crate::profile::profile_scope!(k, "sweep::rotational");
     // Sweep copies of the inputs: CreateRotationalSweep consumes the curves.
     let curve_copies = copy_curves_for_consuming_sweep(k, curves_to_sweep)?;
 
     let mut curve_copies: Vec<Option<Curve>> = curve_copies.into_iter().map(Some).collect();
-    build(k, |pc, model| {
-        pc.create_partial_rotational_sweep(
+    build(k, |pc, model| match feature_scale {
+        Some(scale) => pc.create_partial_rotational_sweep_at_scale(
             model,
             PrimitiveModel::MAIN,
             &mut curve_copies,
@@ -257,7 +295,17 @@ pub fn create_rotational_sweep(
             axis,
             angle_deg,
             repeated(1, cap_ends),
-        )
+            scale,
+        ),
+        None => pc.create_partial_rotational_sweep(
+            model,
+            PrimitiveModel::MAIN,
+            &mut curve_copies,
+            base_pt,
+            axis,
+            angle_deg,
+            repeated(1, cap_ends),
+        ),
     })
 }
 
@@ -1170,6 +1218,7 @@ mod tests {
     use super::*;
     use crate::curve::hermite_curve::HermiteCurve;
     use crate::geom::axis2_placement::Axis2Placement;
+    use crate::math::det;
     use crate::primitive::api_curves;
 
     fn circle() -> Curve {
@@ -1615,7 +1664,7 @@ mod tests {
                 .iter()
                 .map(|&v| crate::topology::vertex::point(&b, v).unwrap())
                 .filter(|p| p.z > 10.0)
-                .map(|p| p.x.hypot(p.y))
+                .map(|p| det::hypot(p.x, p.y))
                 .fold(0.0, f64::max);
             // the rim vertex's distance from the axis
             let rim = crate::topology::brep::p1::vertices(&b, None)
@@ -1623,7 +1672,7 @@ mod tests {
                 .iter()
                 .map(|&v| crate::topology::vertex::point(&b, v).unwrap())
                 .filter(|p| p.z <= 10.0)
-                .map(|p| p.x.hypot(p.y))
+                .map(|p| det::hypot(p.x, p.y))
                 .fold(0.0, f64::max);
             // the fork's c4209ab test: of the NURB's rows at the ends of v, the one at the
             // top (z 20), its points' farthest from its first
@@ -1710,12 +1759,12 @@ mod tests {
         let n = surface.natural_uv_domain_if_built();
         for (u, v) in [(0.0, 0.0), (0.0, 1.0), (1.0, 0.0), (1.0, 1.0)] {
             let p = surface.evaluate_point(&k, n.evaluate(u, v)).unwrap();
-            assert!(p.x.hypot(p.y) <= 1e-12, "pole {p:?} off the axis");
+            assert!(det::hypot(p.x, p.y) <= 1e-12, "pole {p:?} off the axis");
         }
         // the two vertices are the poles
         for v in crate::topology::brep::p1::vertices(&b, None).unwrap() {
             let p = crate::topology::vertex::point(&b, v).unwrap();
-            assert!(p.x.hypot(p.y) <= 1e-12, "vertex {p:?} off the axis");
+            assert!(det::hypot(p.x, p.y) <= 1e-12, "vertex {p:?} off the axis");
             assert!(
                 (p.z.abs() - 5.0).abs() <= 1e-12,
                 "vertex {p:?} not at a pole"

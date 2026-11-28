@@ -19,6 +19,16 @@ macro_rules! layout_preferences {
             /// Each tree row's eye between its fold arrow and its radio, as before #8718, instead of in a
             /// column at the rows' right end. Off by default.
             browser_eye_left: bool = false, PAGE_LAYOUT;
+            /// Making a component active folds every other placement's row in the Browser and opens the
+            /// rows down to the active one, so only the component being worked on is open. Off by
+            /// default: activating leaves the rows as they are.
+            browser_fold_other_components: bool = false, PAGE_LAYOUT;
+            /// The Browser draws no Construction folder (except while searching): the History lists the
+            /// construction planes, axes and points, so they are not shown twice. Off by default.
+            browser_hide_construction_folder: bool = false, PAGE_LAYOUT;
+            /// The Browser draws no Sketches folder (except while searching): the History lists the
+            /// sketches, so they are not shown twice. Off by default: every component has its folder.
+            browser_hide_sketches_folder: bool = false, PAGE_LAYOUT;
             /// Folders in the Browser start closed, and placements too whatever "Components start open"
             /// says, and they open only on request (#8768): with their arrow, Expand All or Find in
             /// Browser, which opens just the rows down to its body and closes again the ones the last find
@@ -158,8 +168,9 @@ macro_rules! layout_preferences {
             /// A thin bar along the window's bottom edge: what is being edited, the open sketch's state
             /// and the design's units (#7243). Off by default.
             status_bar: bool = false, PAGE_LAYOUT;
-            /// A double-click on a design tab renames the design in the tab; off, it maximizes the window
-            /// as the rest of the title bar does, as before.
+            /// A double-click on a design tab renames the design in the tab, and one on a view's sub-tab
+            /// renames the view; off, a double-click on a tab maximizes the window as the rest of the
+            /// title bar does, and one on a sub-tab only shows the view, as before.
             tab_double_click_renames: bool = true, PAGE_LAYOUT;
             /// Two-dimensional (2D) Timeline with multi-track component layout,
             /// two-tier header, movable corridor brackets, and feature grouping.

@@ -359,6 +359,14 @@ pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
     }
 }
 
+/// Rotate one face's support about `axis` through `origin` by `angle` radians, then translate
+/// it. The neighbouring faces extend or trim to meet it.
+pub fn transform_face(b: &Body, at: Vec3, translate: Vec3, origin: Vec3, axis: Vec3, angle: f64) -> Result<Body> {
+    match which(OpKind::TransformFace) {
+        Which::Solidcore => Solidcore.transform_face(b, at, translate, origin, axis, angle),
+    }
+}
+
 /// Tilt the faces near `faces` by `angle` about their line on the neutral plane, so that they
 /// lean in (positive angle) going along `pull`.
 pub fn draft(b: &Body, faces: &[Vec3], neutral: &Plane, pull: Vec3, angle: f64) -> Result<Body> {

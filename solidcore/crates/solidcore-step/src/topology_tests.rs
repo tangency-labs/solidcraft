@@ -5704,6 +5704,22 @@ fn whole_turn_cone_faces_close_on_their_seam_beside_a_quarter_line() {
 }
 
 #[test]
+fn a_solid_is_read_finer_while_its_shortest_edge_is_under_twice_the_stated_tolerance() {
+    // A cube 10 x 20 x 30: its shortest edge is 10 mm, so a stated tolerance of 5 mm or less
+    // keeps its two vertices' tolerance balls apart and it is read as stated, also when twice
+    // the stated tolerance lands a rounding above the edge's length. Over 5 mm the balls
+    // overlap (#3212), and it is read at a quarter of the edge, also while the edge is still
+    // longer than the stated tolerance itself.
+    let brep = one_solid(&cube(BoxStyle::default())).brep;
+    assert_eq!(feature_tolerance(&brep, 1.0), None);
+    assert_eq!(feature_tolerance(&brep, 5.0), None);
+    assert_eq!(feature_tolerance(&brep, 5.0 * (1.0 + 1e-12)), None);
+    assert_eq!(feature_tolerance(&brep, 5.1), Some(2.5));
+    assert_eq!(feature_tolerance(&brep, 7.0), Some(2.5));
+    assert_eq!(feature_tolerance(&brep, 20.0), Some(2.5));
+}
+
+#[test]
 fn a_finer_read_holds_only_while_no_edge_gap_reaches_the_shortest_edge() {
     // A cube 10 x 20 x 30: its shortest edge is 10 mm. Read finer, an edge that lies off its
     // faces keeps its gap as its tolerance; once a gap is as long as the shortest edge, the finer

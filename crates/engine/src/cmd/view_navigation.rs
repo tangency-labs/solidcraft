@@ -1274,7 +1274,8 @@ mod tests {
             ] {
                 let mut s = Session::default();
                 let before = s.doc.to_json();
-                let cam = Camera { up, yaw, pitch, roll, target: Vec3::new(10.0, 20.0, 30.0), distance: 123.0, fov: 0.6 };
+                // Test change: Camera gained `frame` (the design's own orientation, #6455); None is the camera as before.
+                let cam = Camera { up, yaw, pitch, roll, target: Vec3::new(10.0, 20.0, 30.0), distance: 123.0, fov: 0.6, frame: None };
                 let (right, screen_up, back) = cam.basis();
                 for fit in [false, true] {
                     let result = s.execute("view.navigate", &json!({"camera":cam,"action":"turn_around","fit":fit})).unwrap();

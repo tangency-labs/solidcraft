@@ -97,14 +97,19 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         _ => return None,
     };
     Some(match &d.kind {
-        Kind::Extrude { start, all, taper, direction, .. } => {
+        Kind::Extrude { start, all, taper, taper2, direction, thin, offset_start, symmetric_offset, .. } => {
             let n = normal?;
             let plane = solidcore_record::Plane::from_normal(at, n)?;
             let two_sided = crate::dialogs::two_sided(*direction);
-            // The window sends a taper only with one side (positive or negative), as the build
-            // gets it.
-            let taper = if *direction < 2 { taper.as_str() } else { "" };
-            let from = from_slope_height(app, d, &plane, at, *all, taper, two_sided)
+            // The tapers the window sends, as the build gets them: none where it offers none,
+            // the second only with two sides.
+            let shown = crate::dialogs::extrude_taper_shown(*direction, *thin, *offset_start && *symmetric_offset);
+            let tapers = match (shown, two_sided) {
+                (false, _) => ["", ""],
+                (true, false) => [taper.as_str(), ""],
+                (true, true) => [taper.as_str(), taper2.as_str()],
+            };
+            let from = from_slope_height(app, d, &plane, at, *all, tapers, two_sided)
                 .or_else(|| reference_height(app, d, "From Object", &plane, at))
                 .unwrap_or(0.0);
             let offset = if start.trim().is_empty() { 0.0 } else { crate::length_input::eval(&app.session.doc, start, ValueKind::Length).ok()? };
@@ -236,23 +241,25 @@ pub(crate) fn profile_plane(app: &SolveApp, sketch: u64) -> Option<solidcore_rec
 
 /// Where an extrude From a flat face at a slant starts above `centre`, on the face, when the
 /// build starts it there ([`solidcraft_engine::doc::from_slope_height`], which decides by the
-/// same rule as the build: To Object on a flat end, Through All (`all`), a nonzero `taper`, Two
-/// Sides (`two_sided`)), and not for an edited extrude kept on its old start at the face's level
-/// (`from_level`). `None` otherwise, so the arrow starts at [`reference_height`] as before.
+/// same rule as the build: To Object on a flat end, Through All (`all`), a nonzero taper (either
+/// of `tapers`), Two Sides (`two_sided`)), and not for an edited extrude kept on its old start
+/// at the face's level (`from_level`). `None` otherwise, so the arrow starts at [`reference_height`] as before.
 fn from_slope_height(
     app: &SolveApp,
     d: &Dialog,
     plane: &solidcore_record::Plane,
     centre: Vec3,
     all: bool,
-    taper: &str,
+    tapers: [&str; 2],
     two_sided: bool,
 ) -> Option<f64> {
     let to_point = crate::dialogs::object_point(&d.inputs, "To Object").and_then(|point| {
         let p = point.as_array()?;
         Some(Vec3::new(p.first()?.as_f64()?, p.get(1)?.as_f64()?, p.get(2)?.as_f64()?))
     });
-    let tapered = !taper.trim().is_empty() && crate::length_input::eval(&app.session.doc, taper, ValueKind::Angle).is_ok_and(|a| a != 0.0);
+    let tapered = tapers
+        .into_iter()
+        .any(|taper| !taper.trim().is_empty() && crate::length_input::eval(&app.session.doc, taper, ValueKind::Angle).is_ok_and(|a| a != 0.0));
     // An edit that takes To Object off clears `from_level`, as `timeline.edit` does.
     let has_to = d.inputs.iter().any(|input| input.label == "To Object" && !input.items.is_empty());
     let kept_level = d.editing.and_then(|(id, _)| app.session.doc.feature(id)).is_some_and(
@@ -453,6 +460,11 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
     // Test its geometry before navigation, including the first frame entering a handle.
     crate::joint_handles::owns_pointer(app, proj, p)
         || app.dialog.as_ref().and_then(|d| crate::dialogs_move::triad(app, d)).is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, p))
+        || app
+            .dialog
+            .as_ref()
+            .and_then(|d| crate::dialogs::transform_face::triad(app, d))
+            .is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, p))
         || app.dialog.as_ref().and_then(|d| sketch_move_triad(app, d, anchor(app, d)?.0)).is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, p))
         || app
             .dialog
@@ -499,6 +511,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
             app.dialog = Some(d);
             return;
         }
+    }
+    if matches!(d.kind, Kind::TransformFace { .. }) {
+        if let Some(t) = crate::dialogs::transform_face::triad(app, &d)
+            && let Some(g) = crate::gizmo::show(ui, painter, proj, egui::Id::unique("sc_transform_face_triad"), &t, snap_step(app.cam.half_height()))
+        {
+            crate::dialogs::transform_face::drag(app, &mut d, g);
+        }
+        app.dialog = Some(d);
+        return;
     }
     // Move: the triad at the pivot; dragging it sets the distances and angles. Its value box
     // sits beside it and reads the move's main value, so a drag shows its number and typing

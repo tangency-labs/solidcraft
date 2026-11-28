@@ -2348,6 +2348,21 @@ fn finishing_a_partly_read_assembly_reuses_its_placed_parts() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn ready_step_parts_and_work_ahead_fit_in_two_windows() {
+    let text = boxes_step(3 * MAX_WINDOW, "work ahead");
+    let mut reading = StepReading::with_workers(&text, 2).unwrap();
+    let ex = reading.rd.ex.clone();
+    parallel::with_queue(&ex, 2, 0, |queue| {
+        let queue = queue.expect("the STEP worker pool");
+        assert!(reading.rd.convert_window(false, Some(queue)));
+        assert_eq!(reading.rd.bodies.len(), MAX_WINDOW);
+        assert!(queue.peak_ahead > MAX_WINDOW, "workers can start parts beyond the current window");
+        assert!(queue.peak_ahead <= 2 * MAX_WINDOW, "{} parts ahead of publication", queue.peak_ahead);
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn cancelling_a_large_read_discards_work_ahead_and_allows_retry() {
     use std::sync::atomic::{AtomicBool, Ordering};
     struct CancelAtWindow(AtomicBool);
@@ -5993,11 +6008,36 @@ fn a_solid_with_edges_shorter_than_the_stated_tolerance_is_read_at_its_own() {
     // A file whose stated tolerance resolves every edge is read once, at what it states.
     let imp = step_import(&text).unwrap_or_else(|e| panic!("{e}"));
     assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
-    // So is one whose shortest edge is longer than the stated tolerance, however little.
+    // So is one whose shortest edge is twice the stated tolerance: its vertices' balls touch, no more.
     let (_, coarse) = stating_coarse(0.02);
     let imp = step_import(&coarse).unwrap_or_else(|e| panic!("{e}"));
     assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
     assert_eq!(imp.bodies[0].body.record().tolerance, 0.01);
+}
+
+/// #3212: a bar whose end's top edge is rounded 0.01 mm, in a file that states 0.01 mm. The
+/// round's edges are 0.0141 mm long: longer than the stated tolerance, so the bar was read at
+/// it, but shorter than its two vertices' tolerances together, so their balls overlap. United
+/// with a box whose side the rounded end touches, level with the box's top (the bar first),
+/// the union made the round's lower vertex one with the box's top edge 0.01 mm above it and
+/// refused ("a merged vertex needs tolerance 0.02 ... which reaches a vertex it does not
+/// bound"). Read at a quarter of its shortest edge, the bar joins the box as one solid.
+#[test]
+fn a_round_whose_edges_the_stated_tolerance_cannot_tell_apart_joins_after_import() {
+    let r = 0.01;
+    let bar = fillet(&box_solid(Vec3::new(-1.0, 0.0, 0.0), Vec3::new(0.0, 0.4, 0.15)).unwrap(), &[Vec3::new(0.0, 0.2, 0.15)], r).unwrap();
+    let text = step_export(&[&bar], "test").unwrap();
+    let line = text.lines().find(|l| l.contains("UNCERTAINTY_MEASURE_WITH_UNIT")).unwrap();
+    let (head, rest) = line.split_once("LENGTH_MEASURE(").unwrap();
+    let (_, tail) = rest.split_once(')').unwrap();
+    let coarse = text.replace(line, &format!("{head}LENGTH_MEASURE(0.01){tail}"));
+    let imp = step_import(&coarse).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let base = box_solid(Vec3::new(0.0, -1.0, -0.5), Vec3::new(1.6, 1.4, 0.15)).unwrap();
+    let joined = boolean(&imp.bodies[0].body, &base, BoolOp::Union).unwrap_or_else(|e| panic!("{e}")).unwrap();
+    let want = 1.6 * 2.4 * 0.65 + 0.4 * 0.15 - (1.0 - std::f64::consts::PI / 4.0) * r * r * 0.4;
+    let m = measure(&joined).unwrap();
+    assert!(rel(m.volume, want) < 1e-9, "volume {} want {want}", m.volume);
 }
 
 /// A closed polyhedron record from its corners and its faces (cycles of corner indices,

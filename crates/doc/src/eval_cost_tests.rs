@@ -2891,7 +2891,10 @@ fn a_grouped_modelled_thread_cuts_and_checks_each_target_once() {
             .record()
             .faces
             .iter()
-            .filter(|f| f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
+            .filter(|f| {
+                matches!(f.surface, Surface::Sweep { .. })
+                    || (f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
+            })
             .count();
         if continuous_flanks {
             assert_eq!(flanks, 8, "two whole flank faces on each of the four shafts");
@@ -3469,6 +3472,7 @@ fn a_flange_lays_its_sheet_out_once() {
         height_from: None,
         bend_relief_shape: None,
         corners: Vec::new(),
+        offset: None,
     };
     for p in [Vec3::new(75.0, 0.0, 2.5), Vec3::new(75.0, 100.0, 2.5), Vec3::new(0.0, 50.0, 2.5), Vec3::new(150.0, 50.0, 2.5)] {
         // The pick is named as the engine names it, on the model as it is.
@@ -7051,6 +7055,144 @@ fn fast_path_model_renames_clear_last_recomputed() {
     assert_eq!((model.last_recomputed, model.last_restored), (0, 0));
 }
 
+/// Zero-allocation hashing in `EvalKey::new` (threads, component ancestry via `ComponentDigests`,
+/// and body-name collision checks via `HashSet`) distinguishes every relevant change while keeping
+/// unrelated sibling components and unrelated body threads out of the `relative` key.
+#[test]
+fn eval_key_distinguishes_threads_components_and_body_names() {
+    use crate::thread_forms::{ThreadForm, ThreadHand};
+
+    let mut doc = Document::new("eval key hashing");
+    let grand = doc.add_component(Some("Grand"), 0).unwrap();
+    let parent = doc.add_component(Some("Parent"), grand).unwrap();
+    let child = doc.add_component(Some("Child"), parent).unwrap();
+    let mut unrelated = 0u64;
+    for k in 0..10 {
+        unrelated = doc.add_component(Some(&format!("Sibling{k}")), 0).unwrap();
+    }
+
+    let make_box = |doc: &mut Document, comp: u64, name: &str, corner: Vec3| -> u64 {
+        let id = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: point_expr(corner),
+                    length: "20".into(),
+                    width: "20".into(),
+                    height: "20".into(),
+                    operation: Operation::NewBody,
+                    centred: false,
+                },
+                None,
+            )
+            .unwrap();
+        let f = doc.feature_mut(id).unwrap();
+        f.component = comp;
+        f.body_names = vec![name.into()];
+        id
+    };
+    make_box(&mut doc, child, "Target", Vec3::ZERO);
+    make_box(&mut doc, unrelated, "Other", Vec3::new(100.0, 0.0, 0.0));
+
+    let cut_id = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(5.0, 5.0, -1.0)),
+                length: "5".into(),
+                width: "5".into(),
+                height: "22".into(),
+                operation: Operation::Cut,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(cut_id).unwrap();
+        f.component = child;
+        f.participants = vec!["Target".into()];
+        // More than 4 body names exercises the `HashSet<&str>` body-name collision path.
+        f.body_names = vec!["Out1".into(), "Out2".into(), "Out3".into(), "Out4".into(), "Out5".into()];
+    }
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    // State immediately before `cut_id`.
+    let before = (*model.results[1].state).clone();
+    let steps = super::ImportDigests::default();
+
+    let eval_key = |doc: &Document, st: &ModelState| {
+        let vals = super::evaluation_values(doc).0;
+        let comps = super::ComponentDigests::of(doc);
+        let constructions = super::construction_indices(doc);
+        let f = doc.feature(cut_id).unwrap();
+        let fp = super::chain_fingerprint(doc, &vals, f, 0, false, &steps, Some(st), &constructions);
+        let k = super::EvalKey::new(doc, &vals, f, fp, 11, 22, st, &steps, &constructions, &comps);
+        (k.reads.map(|(h, _)| h).unwrap(), k.relative.unwrap())
+    };
+
+    let base = eval_key(&doc, &before);
+
+    // 1. Thread changes: thread on `Target` changes both `reads` and `relative`; thread on
+    //    unrelated `Other` changes `reads` only.
+    let sample_thread = |body: &str, designation: &str| ThreadInfo {
+        feature: 99,
+        body: body.into(),
+        designation: designation.into(),
+        major_diameter: 8.0,
+        radius: 4.0,
+        pitch: 1.25,
+        internal: true,
+        axis_point: Vec3::ZERO,
+        axis: solidcraft_geom::UnitVec3::Z,
+        start: 0.0,
+        end: 10.0,
+        form: ThreadForm::Metric,
+        hand: ThreadHand::Right,
+        starts: 1,
+    };
+    let mut with_other_thread = before.clone();
+    with_other_thread.threads.push(sample_thread("Other", "M8"));
+    let k_other_thread = eval_key(&doc, &with_other_thread);
+    assert_ne!(k_other_thread.0, base.0, "unrelated thread still changes `reads`");
+    assert_eq!(k_other_thread.1, base.1, "unrelated thread does not change `relative`");
+
+    let mut with_target_thread = before.clone();
+    with_target_thread.threads.push(sample_thread("Target", "M8"));
+    let k_target_m8 = eval_key(&doc, &with_target_thread);
+    assert_ne!(k_target_m8.0, base.0);
+    assert_ne!(k_target_m8.1, base.1);
+
+    with_target_thread.threads[0].pitch = 1.0;
+    let k_target_fine = eval_key(&doc, &with_target_thread);
+    assert_ne!(k_target_fine.0, k_target_m8.0);
+    assert_ne!(k_target_fine.1, k_target_m8.1);
+
+    // 2. Component ancestry changes: renaming `Grand` (depth 2 ancestor) or `Child` changes
+    //    `relative`; renaming an unrelated sibling does not.
+    let mut doc_sibling = doc.clone();
+    doc_sibling.components.iter_mut().find(|c| c.id == unrelated).unwrap().name = "RenamedSibling".into();
+    assert_eq!(eval_key(&doc_sibling, &before).1, base.1, "unrelated component does not change `relative`");
+
+    let mut doc_ancestor = doc.clone();
+    doc_ancestor.components.iter_mut().find(|c| c.id == grand).unwrap().name = "RenamedGrand".into();
+    assert_ne!(eval_key(&doc_ancestor, &before).1, base.1, "ancestor rename must invalidate `relative`");
+
+    let mut doc_child = doc.clone();
+    doc_child.components.iter_mut().find(|c| c.id == child).unwrap().name = "RenamedChild".into();
+    assert_ne!(eval_key(&doc_child, &before).1, base.1, "component rename must invalidate `relative`");
+
+    // 3. Body-name collision check (> 4 names): renaming an unrelated body to another non-colliding
+    //    name keeps `relative`, while renaming it to match `f.body_names` invalidates both keys.
+    let mut renamed_unrelated = before.clone();
+    renamed_unrelated.bodies[1].name = "StillUnrelated".into();
+    assert_eq!(eval_key(&doc, &renamed_unrelated).1, base.1, "non-colliding unrelated rename must keep `relative`");
+    let mut colliding = before.clone();
+    colliding.bodies[1].name = "Out5".into();
+    let k_colliding = eval_key(&doc, &colliding);
+    assert_ne!(k_colliding.0, base.0);
+    assert_ne!(k_colliding.1, base.1);
+}
+
 /// Multi-body `join` pre-filters targets by inflated exact bounds before calling `Body::meets`,
 /// so distant untouched bodies never run fine contact tests or get meshed.
 #[test]
@@ -7973,7 +8115,7 @@ fn capture_position_keeps_the_centered_pose_after_a_wall_is_removed() {
         id: 1,
         name: "Center1".into(),
         kind: JointKind::Planar,
-        a: JointOrigin::new(wall_occ, Snap::BetweenFaces { a, b }),
+        a: JointOrigin::new(wall_occ, Snap::BetweenFaces { a, b, snap: None }),
         b: JointOrigin::new(slider_occ, Snap::Frame { origin: Vec3::ZERO, z: Vec3::X, x: None }),
         values: vec![0.0; 3],
         limits: vec![None; 3],

@@ -3287,6 +3287,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         .chain(super::construct::COMMANDS)
         .chain(super::surface::COMMANDS)
         .chain(super::surface_boundary::COMMANDS)
+        .chain(super::surface_morph::COMMANDS)
         .any(|candidate| candidate.id == spec.id)
         || matches!(
             spec.id,

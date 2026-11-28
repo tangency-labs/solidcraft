@@ -27,6 +27,7 @@ pub mod cell_grid;
 pub mod curves;
 pub mod develop;
 pub mod dxf;
+pub mod exact;
 pub mod exchange;
 pub mod frames;
 pub mod hatch;
@@ -49,6 +50,7 @@ pub use affine::{Affine, AffineRefused, AxisRefusal, Matrix, OffsetQuad, SquareF
 pub use cell_grid::{CellGrid, CellGridLimits};
 pub use curves::{CurveRefused, CurveSample, Curves};
 pub use dxf::Dxf;
+pub use exact::{ExactAssembled, ExactBody, ExactBound, ExactEdge, ExactExported, ExactFace, ExactHistory, ExactKind, ExactUse};
 pub use exchange::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten, Exchange};
 pub use frames::{Frames, GussetFailure, MemberRefusal, PathFailure, PathRefusal, TrimRefusal, TrimTarget};
 pub use hole_stacks::{HoleStacks, HoleStacksRefused};
@@ -109,6 +111,8 @@ pub enum OpKind {
     Thicken,
     /// Faces moved along their normals ([`Modelling::offset_faces`]).
     OffsetFaces,
+    /// One face retrimmed on its rigidly moved surface ([`Modelling::transform_face`]).
+    TransformFace,
     /// Faces tilted about a neutral plane ([`Modelling::draft`]).
     Draft,
     /// Faces and bodies split by a tool, and surface bodies trimmed ([`Modelling::split_body`],
@@ -179,6 +183,7 @@ impl OpKind {
         OpKind::Shell,
         OpKind::Thicken,
         OpKind::OffsetFaces,
+        OpKind::TransformFace,
         OpKind::Draft,
         OpKind::Split,
         OpKind::Sweep,
@@ -220,6 +225,7 @@ impl OpKind {
             OpKind::Shell => "shell",
             OpKind::Thicken => "thicken",
             OpKind::OffsetFaces => "offset_faces",
+            OpKind::TransformFace => "transform_face",
             OpKind::Draft => "draft",
             OpKind::Split => "split",
             OpKind::Sweep => "sweep",
@@ -334,7 +340,10 @@ pub enum BackendError {
 /// makes exactly the call it would make without the router.
 ///
 /// A body is the kernel's own form ([`Backend::Form`]); it enters as the record
-/// ([`Backend::import`]) and leaves as the record with its history ([`Backend::export`]).
+/// ([`Backend::import`]) and leaves as the record with its history ([`Backend::export`]). A
+/// kernel that can't write the record's canonical order itself takes and gives bodies in memory
+/// as exact bodies instead ([`Backend::import_exact`], [`Backend::export_exact`]), which solidcore
+/// assembles into the record: no body crosses as a file.
 ///
 /// What a kernel does is in families, one trait over this one for each, in its own module:
 /// [`Modelling`], the body-making operations. A family names its operations in [`OpKind`], so
@@ -358,6 +367,22 @@ pub trait Backend: Send + Sync + 'static {
     fn import(&self, record: &Brep) -> Result<Self::Form, Self::Error>;
     /// The form as a record in canonical order, with the history that made it.
     fn export(&self, form: &Self::Form) -> Result<Exported, Self::Error>;
+
+    /// Whether the router hands this kernel bodies as exact bodies ([`Backend::import_exact`])
+    /// rather than as the record ([`Backend::import`]).
+    fn takes_exact(&self) -> bool {
+        false
+    }
+    /// The exact body as the kernel's form, for a kernel that takes bodies that way
+    /// ([`Backend::takes_exact`]): `None` for one that takes the record.
+    fn import_exact(&self, _body: &ExactBody) -> Option<Result<Self::Form, Self::Error>> {
+        None
+    }
+    /// The form as an exact body with the history that made it, which the router assembles into
+    /// the record: `None` for a kernel that gives the record itself ([`Backend::export`]).
+    fn export_exact(&self, _form: &Self::Form) -> Option<Result<ExactExported, Self::Error>> {
+        None
+    }
 }
 
 #[cfg(test)]

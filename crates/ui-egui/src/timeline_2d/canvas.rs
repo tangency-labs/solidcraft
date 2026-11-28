@@ -676,6 +676,7 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
                                 &grid_painter,
                                 chip_rect,
                                 f,
+                                crate::timeline::feature_status(app, fid),
                                 is_active,
                                 is_selected,
                                 is_prereq,
@@ -1321,8 +1322,16 @@ fn paint_two_tier_header(
     p.line_segment([banner_rect.left_bottom(), banner_rect.right_bottom()], Stroke::new(1.0, t.border.gamma_multiply(0.4)));
 
     // Diamond icon + Title + Count Badge
-    p.text(pos2(banner_rect.left() + 10.0, banner_rect.center().y), egui::Align2::LEFT_CENTER, "◆", FontId::proportional(t.font_small), accent.color);
-    let heading_rect = p.text(
+    crate::ui_kit::paint_anchored(
+        p,
+        pos2(banner_rect.left() + 10.0, banner_rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        "◆",
+        FontId::proportional(t.font_small),
+        accent.color,
+    );
+    let heading_rect = crate::ui_kit::paint_anchored(
+        p,
         pos2(banner_rect.left() + 24.0, banner_rect.center().y),
         egui::Align2::LEFT_CENTER,
         solidcraft_ui_text::tr_label("MODELING FEATURES"),
@@ -1334,7 +1343,7 @@ fn paint_two_tier_header(
     let badge_rect = Rect::from_min_size(pos2(badge_left, banner_rect.center().y - 8.0), vec2(58.0, 16.0));
     p.rect_filled(badge_rect, 3.0, accent.color.gamma_multiply(0.18));
     p.rect_stroke(badge_rect, 3.0, Stroke::new(1.0, accent.color.gamma_multiply(0.4)), StrokeKind::Inside);
-    p.text(badge_rect.center(), egui::Align2::CENTER_CENTER, count_text, FontId::monospace(t.font_badge), accent.color);
+    crate::ui_kit::paint_anchored(p, badge_rect.center(), egui::Align2::CENTER_CENTER, count_text, FontId::monospace(t.font_badge), accent.color);
 
     // Right side: Active summary and quick transport buttons
     if banner_rect.width() > 320.0 {
@@ -1343,7 +1352,8 @@ fn paint_two_tier_header(
             "ui.timeline_2d_active_summary",
             &[("active", &active_features.to_string()), ("total", &total_features.to_string())],
         );
-        p.text(
+        crate::ui_kit::paint_anchored(
+            p,
             pos2(banner_rect.right() - 85.0, banner_rect.center().y),
             egui::Align2::RIGHT_CENTER,
             active_summary,
@@ -1413,7 +1423,8 @@ fn paint_two_tier_header(
                 let text_color = if is_step_active { accent.color } else { t.text_dim.gamma_multiply(0.6) };
 
                 // Tier 1: Step number
-                p.text(
+                crate::ui_kit::paint_anchored(
+                    p,
                     pos2(notch_x, t1_top + HEADER_T1_HEIGHT / 2.0 + 2.0),
                     egui::Align2::CENTER_CENTER,
                     format!("{step_number:02}"),
@@ -1435,7 +1446,8 @@ fn paint_two_tier_header(
             }
             VisualColumn::FoldedGroup { .. } => {
                 // Tier 1: Dash (-) in group column
-                p.text(
+                crate::ui_kit::paint_anchored(
+                    p,
                     pos2(notch_x, t1_top + HEADER_T1_HEIGHT / 2.0 + 2.0),
                     egui::Align2::CENTER_CENTER,
                     "-",
@@ -1533,13 +1545,23 @@ fn paint_two_tier_header(
                 if !displayed_title.is_empty() {
                     let galley = p_banner.layout_no_wrap(displayed_title, font.clone(), text_color);
                     let title_w = galley.size().x;
-                    let title_pos = pos2(banner_rect.left() + 18.0, banner_rect.center().y - galley.size().y / 2.0);
+                    let title_pos = pos2(
+                        banner_rect.left() + 18.0,
+                        banner_rect.center().y - galley.size().y / 2.0 - egui::galley_cap_ink_rise(&p_banner, &galley),
+                    );
                     p_banner.galley(title_pos, galley, text_color);
 
                     let available_right = banner_rect.width() - (title_w + 24.0);
                     let right_pos = pos2(banner_rect.right() - 6.0, banner_rect.center().y);
                     if available_right > 36.0 {
-                        p_banner.text(right_pos, egui::Align2::RIGHT_CENTER, "Close", FontId::proportional(t.font_micro), text_color);
+                        crate::ui_kit::paint_anchored(
+                            &p_banner,
+                            right_pos,
+                            egui::Align2::RIGHT_CENTER,
+                            "Close",
+                            FontId::proportional(t.font_micro),
+                            text_color,
+                        );
                     }
                 }
             }
@@ -1576,7 +1598,8 @@ fn paint_pinned_left(
     // Components Icon + Label + Badge
     let comp_icon_rect = Rect::from_center_size(pos2(banner_rect.left() + 16.0, banner_rect.center().y), vec2(14.0, 14.0));
     crate::icons::paint_icon(p, comp_icon_rect, "component", 1.0);
-    p.text(
+    crate::ui_kit::paint_anchored(
+        p,
         pos2(banner_rect.left() + 28.0, banner_rect.center().y),
         egui::Align2::LEFT_CENTER,
         solidcraft_ui_text::tr_label("COMPONENTS"),
@@ -1588,7 +1611,7 @@ fn paint_pinned_left(
     let badge_rect = Rect::from_center_size(pos2(banner_rect.left() + 118.0, banner_rect.center().y), vec2(22.0, 15.0));
     p.rect_filled(badge_rect, 3.0, t.accent.gamma_multiply(0.2));
     p.rect_stroke(badge_rect, 3.0, Stroke::new(1.0, t.accent.gamma_multiply(0.4)), StrokeKind::Inside);
-    p.text(badge_rect.center(), egui::Align2::CENTER_CENTER, count_text, FontId::monospace(t.font_badge), t.accent);
+    crate::ui_kit::paint_anchored(p, badge_rect.center(), egui::Align2::CENTER_CENTER, count_text, FontId::monospace(t.font_badge), t.accent);
 
     // Leading Transport Header (area between HEADER_BANNER_HEIGHT and HEADER_TOTAL_HEIGHT = 42px)
     let transport_area = Rect::from_min_max(
@@ -1742,6 +1765,7 @@ fn paint_action_chip(
     p: &egui::Painter,
     rect: Rect,
     f: &Feature,
+    status: Option<crate::ui_kit::Status>,
     is_active: bool,
     is_selected: bool,
     is_prereq: bool,
@@ -1752,7 +1776,12 @@ fn paint_action_chip(
     accent: solidcraft_theme::TabAccent,
     t: &Tokens,
 ) {
-    let stroke_color = if is_selected {
+    // A feature in error is marked as in the Browser and the history bar (#23390): the error
+    // fill and edge, and the error or warning icon in the top-right corner.
+    let error = status == Some(crate::ui_kit::Status::Error);
+    let stroke_color = if error {
+        t.form_error
+    } else if is_selected {
         if is_active { t.text } else { t.text_dim }
     } else if is_prereq {
         if is_active { prereq_color } else { t.text_dim }
@@ -1764,7 +1793,9 @@ fn paint_action_chip(
         t.border.gamma_multiply(0.5)
     };
 
-    let bg_color = if is_selected {
+    let bg_color = if error {
+        t.form_error_fill
+    } else if is_selected {
         if is_active { accent.soft } else { t.panel }
     } else if is_suppressed {
         t.panel.gamma_multiply(0.7)
@@ -1774,7 +1805,7 @@ fn paint_action_chip(
         t.panel
     };
 
-    let stroke_width = if is_selected || is_prereq || is_dependent { 1.5 } else { 1.0 };
+    let stroke_width = if error || is_selected || is_prereq || is_dependent { 1.5 } else { 1.0 };
     p.rect_filled(rect, 4.0, bg_color);
     if is_suppressed {
         let corners = [rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom(), rect.left_top()];
@@ -1800,6 +1831,11 @@ fn paint_action_chip(
         crate::icons::paint_accented(p, icon_rect, icon, feat_accent, 1.0);
     } else {
         crate::icons::paint_greyscale(p, icon_rect, icon, feat_accent, 1.0);
+    }
+    if let Some(status) = status {
+        let side = t.space_10;
+        let mark = Rect::from_min_size(rect.right_top() - vec2(side, 0.0), vec2(side, side));
+        crate::icons::paint_icon(p, mark, if status == crate::ui_kit::Status::Error { "error" } else { "warning" }, 1.0);
     }
 }
 
@@ -1885,7 +1921,8 @@ fn paint_virtual_group_chip(p: &egui::Painter, rect: Rect, group_name: &str, cou
     // Count badge
     let badge_rect = Rect::from_center_size(pos2(rect.center().x, rect.top() + HEADER_T2_HEIGHT + 14.0), vec2(18.0, 14.0));
     p.rect_filled(badge_rect, 3.0, if is_active { t.accent.gamma_multiply(0.2) } else { t.text_dim.gamma_multiply(0.15) });
-    p.text(
+    crate::ui_kit::paint_anchored(
+        p,
         badge_rect.center(),
         egui::Align2::CENTER_CENTER,
         count.to_string(),

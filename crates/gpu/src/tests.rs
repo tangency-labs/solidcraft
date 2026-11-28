@@ -210,6 +210,30 @@ fn the_shader_takes_every_degree_the_cpu_evaluator_does() {
     assert!(SHADER.contains(&slots), "tess.wgsl must declare `{slots}`");
 }
 
+/// Older NVIDIA Vulkan drivers (a Kepler GeForce GT 730 on 456.71) misread an array value indexed
+/// by a loop counter: with the NURBS basis held in `let`, a third of a model's vertices came out
+/// millimetres off and the view showed stretched wedges, while D3D12 on the same card was right
+/// (#18685). The same arrays held in `var` are read right, so the shader indexes arrays only
+/// through a variable.
+#[test]
+fn the_shader_indexes_arrays_only_through_variables() {
+    let module = ok(naga::front::wgsl::parse_str(SHADER));
+    let info = ok(naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&module));
+    let functions = module.functions.iter().map(|(handle, function)| (function, &info[handle]));
+    let entries = module.entry_points.iter().enumerate().map(|(i, entry)| (&entry.function, info.get_entry_point(i)));
+    for (function, function_info) in functions.chain(entries) {
+        for (handle, expression) in function.expressions.iter() {
+            let naga::Expression::Access { base, .. } = expression else { continue };
+            let base_type = function_info[*base].ty.inner_with(&module.types);
+            assert!(
+                !matches!(base_type, naga::TypeInner::Array { .. }),
+                "{:?} indexes an array value by a run-time index ({handle:?}): hold the array in a `var`",
+                function.name
+            );
+        }
+    }
+}
+
 /// Browsers compile WGSL with Tint, which keeps a rule of the WGSL grammar that naga doesn't: a
 /// shift, `&`, `|` and `^` don't mix in one expression without parentheses (`a << 3u | b` is
 /// refused, `(a << 3u) | b` isn't). A shader that breaks it runs on the desktop and leaves the

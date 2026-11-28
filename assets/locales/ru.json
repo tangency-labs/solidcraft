@@ -6158,7 +6158,7 @@
   "ui.drawing_detail.step_size": "Щёлкните, чтобы задать размер области.",
   "ui.drawing_detail.title": "Выносной вид",
   "ui.drawing_dimension_tool.pick": "Щёлкните ребро на виде чертежа.",
-  "ui.drawing_dimension_tool.place": "Щёлкните на листе, чтобы разместить размер.",
+  "ui.drawing_dimension_tool.place": "Щёлкните на листе или нажмите Enter, чтобы разместить размер.",
   "ui.drawing_export.all_sheets": "Все листы",
   "ui.drawing_export.dxf": "DXF (линии)",
   "ui.drawing_export.dxf_note": "Показанный лист, его линии в миллиметрах, по слою на каждый тип линий. Закрашенные виды и изображения не включаются.",

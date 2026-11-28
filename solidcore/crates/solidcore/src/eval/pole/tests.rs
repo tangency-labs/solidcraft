@@ -1,5 +1,6 @@
 use super::*;
 use crate::eval::spline::EvalSurface;
+use crate::math::det;
 
 const L: f64 = 10.0;
 const MID: f64 = std::f64::consts::FRAC_1_SQRT_2;
@@ -30,7 +31,7 @@ fn turned_on(profile: &[[f64; 2]], offset: [f64; 3], c: f64) -> EvalSurface {
 /// θ of the rational quarter arc at v.
 fn angle(v: f64) -> f64 {
     let (b0, b1, b2) = ((1.0 - v) * (1.0 - v), 2.0 * v * (1.0 - v) * MID, v * v);
-    (b1 + b2).atan2(b0 + b1)
+    det::atan2(b1 + b2, b0 + b1)
 }
 
 fn close(a: Vec3, b: Vec3) -> bool {
@@ -67,12 +68,15 @@ fn the_three_faces_have_their_closed_form_limits() {
     for v in [0.0, 0.3, 0.77, 1.0] {
         let th = angle(v);
         let cases = [
-            (&face1, Vec3::new(-th.cos(), -th.sin(), 0.0)),
+            (&face1, Vec3::new(-det::cos(th), -det::sin(th), 0.0)),
             (&face2, Vec3::new(-1.0, 0.0, 0.0)),
-            (&cone([0.0; 3]), Vec3::new(-th.cos(), -th.sin(), 1.0) * MID),
+            (
+                &cone([0.0; 3]),
+                Vec3::new(-det::cos(th), -det::sin(th), 1.0) * MID,
+            ),
             (
                 &cone([1000.0, -500.0, 200.0]),
-                Vec3::new(-th.cos(), -th.sin(), 1.0) * MID,
+                Vec3::new(-det::cos(th), -det::sin(th), 1.0) * MID,
             ),
         ];
         for (k, (s, want)) in cases.iter().enumerate() {
@@ -171,7 +175,7 @@ fn a_pole_within_a_reach_gets_its_directional_limit() {
     let spread = EvalSurface::nurbs(n.degree(), n.knots().clone(), n.count(), ctrl);
     for v in [0.0, 0.3, 1.0] {
         let th = angle(v);
-        let want = Vec3::new(-th.cos(), -th.sin(), 1.0) * MID;
+        let want = Vec3::new(-det::cos(th), -det::sin(th), 1.0) * MID;
         let (got, k) = spread.limit_along(0.0, v, [1.0, 0.0], 1e-6).unwrap();
         assert_eq!(k, 3);
         assert!(got.dist(want) <= 1e-8, "v {v}: {got:?} vs {want:?}");
@@ -221,7 +225,7 @@ fn the_certified_bound_covers_a_weight_near_zero_the_model_did_not() {
         .iter()
         .map(|h| (Vec3::new(h[0], h[1], h[2]) * (1.0 / h[3]) - at).len())
         .fold(0.0, f64::max);
-    let model = |i: i32, j: i32| crate::nurbs::math::gamma(1024) * size * 4f64.powi(i + j);
+    let model = |i: i32, j: i32| crate::nurbs::math::gamma(1024) * size * det::powi(4f64, i + j);
     let mut beyond = 0;
     for i in 0..=MAX_PARTIAL_ORDER {
         for j in 0..=MAX_PARTIAL_ORDER - i {

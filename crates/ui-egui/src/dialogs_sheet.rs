@@ -418,6 +418,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 position: usize,
                 /// Edge flanges: where the height is measured from (index into `HEIGHT_FROM`).
                 height_from: usize,
+                /// Edge flanges: how far the bends move out past their position; empty for none.
+                offset: String,
                 /// Contour flange: which side of the sheet thickness the contour follows.
                 orientation: usize,
                 /// Contour flange: split its width equally across the sketch plane.
@@ -566,6 +568,7 @@ fn new_flange(app: &SolveApp, ty: usize) -> Sm {
         radius: String::new(),
         position: 0,
         height_from: 0,
+        offset: String::new(),
         orientation: 1,
         symmetric: false,
         flip: false,
@@ -973,6 +976,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut Vec<
             radius,
             position,
             height_from,
+            offset,
             orientation,
             symmetric,
             flip,
@@ -1080,6 +1084,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut Vec<
                     }
                     crate::ui_kit::section(ui, "flange_advanced", "Advanced", false, |ui| {
                         enter |= hint_row(ui, "Bend Radius", radius, solidcraft_ui_text::tr_label("from the rule"));
+                        enter |= hint_row(ui, "Bend Offset", offset, solidcraft_ui_text::tr_label("none"));
                         // The relief beside the bends' ends: the rule's unless set here.
                         choice_row(ui, "Bend Relief Shape", "sm_flange_bend_relief", bend_relief, &FLANGE_BEND_RELIEF_LABELS);
                         // The relief at the corners these flanges make: the rule's unless set here.
@@ -1921,6 +1926,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             radius,
             position,
             height_from,
+            offset,
             orientation,
             symmetric,
             flip,
@@ -1940,7 +1946,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
                 1 => {
                     let mut p = json!({"type": "edge", "edges": flange_edges_segmented(inputs, own, segments)?, "height": height, "angle": angle,
                         "position": POSITIONS.get(*position).copied().unwrap_or("inside")});
-                    put(&mut p, &[("radius", radius)]);
+                    put(&mut p, &[("radius", radius), ("offset", offset)]);
                     if let Some(from) = HEIGHT_FROM.get(*height_from).filter(|_| *height_from > 0) {
                         p["height_from"] = json!(from);
                     }
@@ -2260,6 +2266,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             height_from,
             bend_relief_shape,
             corners,
+            offset,
             ..
         } => {
             if let Some(b) = body {
@@ -2309,6 +2316,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                     .as_deref()
                     .and_then(|name| HEIGHT_FROM.iter().position(|h| h.eq_ignore_ascii_case(name.trim())))
                     .unwrap_or(0),
+                offset: offset.as_deref().map(str::to_string).unwrap_or_default(),
                 orientation: 1,
                 symmetric: false,
                 flip: *flip,

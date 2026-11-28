@@ -33,6 +33,7 @@ use crate::blend::fillet_executive::NoRoomReason;
 use crate::error::blend::BlendFailure;
 use crate::error::{Failure, Fit, FitMeasure, Result, SolidError};
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::math::det;
 use crate::math::PI;
 
 use super::chamfer::ChamferDefinition;
@@ -90,7 +91,7 @@ impl BeadDefinition {
     #[must_use]
     pub fn chord(&self) -> f64 {
         let [d1, d2] = self.chamfer.setbacks();
-        (d1 * d1 + d2 * d2 - 2.0 * d1 * d2 * self.chamfer.wedge.cos())
+        (d1 * d1 + d2 * d2 - 2.0 * d1 * d2 * det::cos(self.chamfer.wedge))
             .max(0.0)
             .sqrt()
     }
@@ -99,8 +100,11 @@ impl BeadDefinition {
     #[must_use]
     pub fn toe_angles(&self) -> [f64; 2] {
         let [d1, d2] = self.chamfer.setbacks();
-        let (s, c) = self.chamfer.wedge.sin_cos();
-        [(d2 * s).atan2(d1 - d2 * c), (d1 * s).atan2(d2 - d1 * c)]
+        let (s, c) = det::sin_cos(self.chamfer.wedge);
+        [
+            det::atan2(d2 * s, d1 - d2 * c),
+            det::atan2(d1 * s, d2 - d1 * c),
+        ]
     }
 
     /// The open bound on `|h|` on the side of `sagitta`'s sign: concave below
@@ -160,7 +164,7 @@ impl BeadDefinition {
         // the chord along x with its middle at 0, the root above it at (p, height), the
         // circle's centre below it, `radius - |h|` from the chord
         let [b1, _] = self.toe_angles();
-        let p = -c / 2.0 + d1 * b1.cos();
+        let p = -c / 2.0 + d1 * det::cos(b1);
         let h = self.sagitta.abs();
         let below = radius - h;
         let up = height + below;
@@ -183,9 +187,9 @@ impl BeadDefinition {
     #[must_use]
     pub fn section_area(&self) -> f64 {
         let [d1, d2] = self.chamfer.setbacks();
-        let triangle = 0.5 * d1 * d2 * self.chamfer.wedge.sin();
+        let triangle = 0.5 * d1 * d2 * det::sin(self.chamfer.wedge);
         let arc = BeadArc::radius_and_turn(self.chord(), self.sagitta);
-        let segment = arc.map_or(0.0, |(r, turn)| 0.5 * r * r * (turn - turn.sin()));
+        let segment = arc.map_or(0.0, |(r, turn)| 0.5 * r * r * (turn - det::sin(turn)));
         triangle + self.sagitta.signum() * segment
     }
 }
@@ -217,7 +221,7 @@ impl BeadArc {
             return None;
         }
         let radius = (chord * chord / 4.0 + h * h) / (2.0 * h);
-        let turn = 4.0 * (2.0 * h / chord).atan();
+        let turn = 4.0 * det::atan(2.0 * h / chord);
         (radius.is_finite() && turn.is_finite()).then_some((radius, turn))
     }
 
@@ -256,14 +260,14 @@ impl BeadArc {
     /// The point at angle `t` from `x` towards `y`.
     #[must_use]
     pub fn point(&self, t: f64) -> Point3 {
-        let (s, c) = t.sin_cos();
+        let (s, c) = det::sin_cos(t);
         self.centre + self.x * (self.radius * c) + self.y * (self.radius * s)
     }
 
     /// The unit tangent at angle `t`, the way the arc runs (from the first foot to the second).
     #[must_use]
     pub fn tangent(&self, t: f64) -> Vec3 {
-        let (s, c) = t.sin_cos();
+        let (s, c) = det::sin_cos(t);
         self.y * c - self.x * s
     }
 
@@ -276,9 +280,9 @@ impl BeadArc {
     #[must_use]
     pub fn rows(&self) -> ([Point3; 5], [f64; 5]) {
         let half = self.turn / 2.0;
-        let w = (half / 2.0).cos();
+        let w = det::cos(half / 2.0);
         let corner = |t: f64| {
-            let (s, c) = t.sin_cos();
+            let (s, c) = det::sin_cos(t);
             self.centre + (self.x * c + self.y * s) * (self.radius / w)
         };
         (
@@ -297,7 +301,7 @@ impl BeadArc {
 /// The height of the triangle the root and the feet at `setbacks` make at `wedge`, over the
 /// chord `chord` between the feet: `d_1 d_2 sin(alpha) / c` (twice its area over its base).
 fn triangle_height(setbacks: [f64; 2], wedge: f64, chord: f64) -> f64 {
-    setbacks[0] * setbacks[1] * wedge.sin() / chord
+    setbacks[0] * setbacks[1] * det::sin(wedge) / chord
 }
 
 /// The equal legs `z` that give a bead the throat `a` at `wedge` and `sagitta`: `z = a /
@@ -307,7 +311,7 @@ fn triangle_height(setbacks: [f64; 2], wedge: f64, chord: f64) -> f64 {
 #[must_use]
 pub fn equal_legs_for_throat(throat: f64, wedge: f64, sagitta: f64) -> f64 {
     let dip = if sagitta < 0.0 { sagitta.abs() } else { 0.0 };
-    (throat + dip) / (wedge / 2.0).cos()
+    (throat + dip) / det::cos(wedge / 2.0)
 }
 
 /// The sagitta's open bound over `chord` with the toe angles `toes` ([`BeadDefinition::bound`]
@@ -318,9 +322,9 @@ pub fn sagitta_bound(chord: f64, toes: [f64; 2], sagitta: f64) -> f64 {
     let [b1, b2] = toes;
     let half = chord / 2.0;
     if sagitta < 0.0 {
-        half * (b1.min(b2) / 2.0).tan()
+        half * det::tan(b1.min(b2) / 2.0)
     } else {
-        half * ((PI - b1.max(b2)) / 2.0).tan()
+        half * det::tan((PI - b1.max(b2)) / 2.0)
     }
 }
 
@@ -331,7 +335,7 @@ pub fn sagitta_bound(chord: f64, toes: [f64; 2], sagitta: f64) -> f64 {
 pub fn overhang_bound(chord: f64, toes: [f64; 2]) -> f64 {
     let [b1, b2] = toes;
     let lean = (PI / 2.0 - b1.max(b2)).max(0.0);
-    chord / 2.0 * (lean / 2.0).tan()
+    chord / 2.0 * det::tan(lean / 2.0)
 }
 
 /// Where along its edge a bead runs: from `from` to `to`, fractions of the edge's length from

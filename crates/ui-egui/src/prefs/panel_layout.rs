@@ -212,7 +212,14 @@ fn reset_button(ui: &mut Ui, label: &str, enabled: bool) -> Response {
             "undo",
             ink,
         );
-        ui.painter().text(pos2(rect.left() + t.space_24, rect.center().y), Align2::LEFT_CENTER, label, FontId::proportional(t.font_label), ink);
+        crate::ui_kit::paint_anchored(
+            ui.painter(),
+            pos2(rect.left() + t.space_24, rect.center().y),
+            Align2::LEFT_CENTER,
+            label,
+            FontId::proportional(t.font_label),
+            ink,
+        );
         if response.has_focus() {
             ui.painter().rect_stroke(rect, t.control_radius, Stroke::new(1.0, t.form_primary), egui::StrokeKind::Inside);
         }
@@ -782,7 +789,8 @@ fn save_field(
         }
         let count = name.trim().chars().count();
         let counter = Rect::from_min_max(pos2(response.rect.right() - t.space_24 * 2.0, response.rect.top()), response.rect.max);
-        ui.painter().text(
+        crate::ui_kit::paint_anchored(
+            ui.painter(),
             counter.center(),
             Align2::CENTER_CENTER,
             format!("{count}/64"),

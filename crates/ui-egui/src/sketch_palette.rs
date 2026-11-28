@@ -313,6 +313,7 @@ fn image_tool_presentation(app: &SolveApp) -> Option<crate::panel_runtime::Panel
         status: None,
         attention: false,
         actions: Vec::new(),
+        menu_heading: None,
     })
 }
 
@@ -417,6 +418,7 @@ pub(crate) fn shared_presentation(app: &SolveApp) -> Option<crate::panel_runtime
         status: Some(constraint_status(sketch.report.shown_dof(), solved, has_geometry(&sketch.sketch))),
         attention: !solved,
         actions: Vec::new(),
+        menu_heading: None,
     })
 }
 

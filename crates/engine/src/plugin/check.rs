@@ -269,6 +269,9 @@ fn component_fix(reason: &str) -> String {
     if reason.contains("wasi:") {
         return "The app links no WASI: build for wasm32-unknown-unknown (not wasm32-wasip1 or wasip2), and keep crates that read the clock, environment or files through std out of the plugin.".into();
     }
+    if reason.contains("multi-memory") {
+        return "Build the component so its parts share one linear memory: lowering a function between inner modules with their own memories needs a second one. A component wrapped from a single core module has one.".into();
+    }
     if reason.contains("import") {
         return format!(
             "Import only the interfaces of the plugin's world, from {API}: world command-plugin for a command plugin, world importer-plugin for an importer, world exporter-plugin for an exporter. Generate the bindings from this SolidCraft's crates/craft-plugin/wit/plugin.wit."
@@ -468,4 +471,14 @@ pub fn check(session: &Session, path: &str) -> CheckResult {
     result.problems.sort_by_key(|p| p.severity != Severity::Error);
     result.ok = !result.problems.iter().any(|p| p.severity == Severity::Error);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    /// #23498: the multi-memory refusal says what to build instead, not to export the world.
+    #[test]
+    fn a_multi_memory_refusal_has_its_own_fix() {
+        let fix = super::component_fix("this component needs WebAssembly multi-memory, which SolidCraft does not enable");
+        assert!(fix.contains("one linear memory"), "{fix}");
+    }
 }

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Morph</title>
+  <path d="M32 27.25L54.52 40.25L32 53.25L9.48 40.25Z" fill="#e2e8ef"/>
+  <path d="M32 27.25L54.52 40.25L32 53.25L9.48 40.25Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M11.22 22.25Q22.47 14.75 33.73 35.25L33.73 41.25Q22.47 20.75 11.22 28.25Z" fill="#328bd3"/>
+  <path d="M33.73 35.25L52.78 24.25L52.78 30.25L33.73 41.25Z" fill="#236ead"/>
+  <path d="M30.27 11.25Q41.53 3.75 52.78 24.25L33.73 35.25Q22.47 14.75 11.22 22.25Z" fill="#b9ddf8"/>
+  <path d="M11.22 22.25Q22.47 14.75 33.73 35.25L33.73 41.25Q22.47 20.75 11.22 28.25ZM33.73 35.25L52.78 24.25L52.78 30.25L33.73 41.25ZM30.27 11.25Q41.53 3.75 52.78 24.25L33.73 35.25Q22.47 14.75 11.22 22.25Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -6138,7 +6138,7 @@
   "ui.drawing_browser_title_block": "Antet",
   "ui.drawing_browser_view": "Görünüm {number}",
   "ui.drawing_dimension_tool.pick": "Teknik resim görünümünde bir kenara tıklayın.",
-  "ui.drawing_dimension_tool.place": "Ölçülendirmeyi yerleştirmek için sayfaya tıklayın.",
+  "ui.drawing_dimension_tool.place": "Ölçülendirmeyi yerleştirmek için sayfaya tıklayın veya Enter'a basın.",
   "ui.drawing_first.after_named": "{name} sonrasına",
   "ui.drawing_first.any_size": "herhangi bir boyut",
   "ui.drawing_first.blank": "Boş teknik resim sayfası",

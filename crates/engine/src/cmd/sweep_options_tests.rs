@@ -553,6 +553,45 @@ fn a_closed_sweep_whose_inner_edge_lies_on_the_corner_centres_builds() {
     assert!((got - want).abs() <= 1e-6 * want, "volume {got} vs {want}");
 }
 
+/// the same closed sweep with `w = 2 - 1e-6`, so the profile's inner edge lies `1e-6` mm
+/// inside the corner centres. Still a solid, and still the Pappus volume: profile area times the
+/// centreline, `(2 w) (104 + 4 pi)`.
+#[test]
+fn a_closed_sweep_whose_inner_edge_lies_1e_6_inside_the_corner_centres_builds() {
+    let mut s = Session::default();
+    let w = 2.0 - 1e-6;
+    rounded_rectangle_and_profile(&mut s, w);
+    let built = sweep_along(&mut s, &["l1", "a1", "l2", "a2", "l3", "a3", "l4", "a4"], "S");
+    assert!(built.is_ok(), "sweep refused: {built:?}");
+    let want = (2.0 * w) * (104.0 + 4.0 * PI);
+    let got = only_volume(&s);
+    assert!((got - want).abs() <= 1e-9 * want, "volume {got} vs {want}");
+}
+
+/// the same closed sweep with the inner edge `delta` mm inside the corner centres,
+/// `delta` from `6e-6` to `1.5e-5` (`w = 2 - delta`). Still a solid, and still the Pappus
+/// volume: profile area times the centreline, `(2 w) (104 + 4 pi)`.
+#[test]
+fn a_closed_sweep_whose_inner_edge_lies_8e_6_to_1_2e_5_inside_the_corner_centres_builds() {
+    let mut failed = String::new();
+    for delta in [6e-6, 8e-6, 9e-6, 1e-5, 1.2e-5, 1.5e-5] {
+        let mut s = Session::default();
+        let w = 2.0 - delta;
+        rounded_rectangle_and_profile(&mut s, w);
+        match sweep_along(&mut s, &["l1", "a1", "l2", "a2", "l3", "a3", "l4", "a4"], "S") {
+            Ok(_) => {
+                let want = (2.0 * w) * (104.0 + 4.0 * PI);
+                let got = only_volume(&s);
+                if !((got - want).abs() <= 1e-9 * want) {
+                    failed.push_str(&format!("delta={delta}: volume {got} vs {want}\n"));
+                }
+            }
+            Err(err) => failed.push_str(&format!("delta={delta}: {err}\n")),
+        }
+    }
+    assert!(failed.is_empty(), "{failed}");
+}
+
 /// The same profile along the open run `l1`..`l3` (two corners, the inner edge on their centres
 /// too) is still the exact piecewise sweep: `4 (36 + 16 + 36 + 2 pi)`.
 #[test]

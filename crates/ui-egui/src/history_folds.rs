@@ -23,14 +23,36 @@ const CHOICES_MAX: usize = 10_000;
 /// ([`legacy_folded`]).
 const SHARED_ONCE: [&str; 3] = [crate::timeline_fold::KEY, crate::timeline_folders::KEY, crate::dialogs_assembly::FOLDER_JOINTS_KEY];
 
+/// Monotonic revision for [`Folds`] mutations, so History bar grouping caches can detect fold
+/// changes in O(1) without hashing every stored key on every frame.
+static FOLDS_REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn next_revision() -> u64 {
+    FOLDS_REVISION.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 /// One design's choices: the History keys of the runs and folders opened and folded.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct Folds {
     open: BTreeSet<String>,
     folded: BTreeSet<String>,
+    revision: u64,
 }
 
+impl PartialEq for Folds {
+    fn eq(&self, other: &Self) -> bool {
+        self.open == other.open && self.folded == other.folded
+    }
+}
+
+impl Eq for Folds {}
+
 impl Folds {
+    /// A revision number that changes whenever a choice in `self` changes (0 while empty).
+    pub(crate) fn revision(&self) -> u64 {
+        self.revision
+    }
+
     /// The choice made for `key`: opened (true), folded (false), or none.
     fn get(&self, key: &str) -> Option<bool> {
         if self.open.contains(key) {
@@ -43,6 +65,9 @@ impl Folds {
     }
 
     fn set(&mut self, key: &str, open: bool) {
+        if self.get(key) == Some(open) {
+            return;
+        }
         self.open.remove(key);
         self.folded.remove(key);
         if open {
@@ -50,6 +75,7 @@ impl Folds {
         } else {
             self.folded.insert(key.to_string());
         }
+        self.revision = next_revision();
     }
 
     fn is_empty(&self) -> bool {
@@ -63,7 +89,9 @@ impl Folds {
                 .map(|a| a.iter().take(CHOICES_MAX).filter_map(|x| x.as_str().map(str::to_string)).collect())
                 .unwrap_or_default()
         };
-        Folds { open: keys("open"), folded: keys("folded") }
+        let (open, folded) = (keys("open"), keys("folded"));
+        let revision = if open.is_empty() && folded.is_empty() { 0 } else { next_revision() };
+        Folds { open, folded, revision }
     }
 }
 

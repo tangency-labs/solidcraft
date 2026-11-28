@@ -631,3 +631,34 @@ fn a_planar_face_piece_stays_resolved_when_an_adjacent_cut_shortens() {
     assert!(crate::name_lookup::locate_one(&split_state, Some("Body1"), &stored).is_err());
     assert!(split_doc.lineage_face_indices(split_body, &stored).is_err());
 }
+
+#[test]
+fn qualifier_status_tracks_surviving_and_missing_context_for_whole_and_split_faces() {
+    let whole = qualify(named(&["F15:side:l15", "F10:side:l7", "F123:side:l2"]), &[(0, 1), (0, 2)]);
+    let status = qualifier_status(&whole, 0, "F15:side:l15#[F10:side:l7,F25:side:l2]", "F123:side:l2").expect("whole face matches by stem");
+    assert_eq!(status.matched, 1);
+    assert!(!status.lists_other);
+    assert_eq!(status.missing, vec!["F25:side:l2".to_string()]);
+
+    let corner = qualify(named(&["F48:side:l2", "F48:side:l1"]), &[(0, 1)]);
+    let status = qualifier_status(&corner, 0, "F48:side:l2#[F48:side:l1,F52:side:l1]", "F48:side:l1").expect("whole corner face");
+    assert_eq!(status.matched, 1);
+    assert!(status.lists_other);
+    assert_eq!(status.missing, vec!["F52:side:l1".to_string()]);
+
+    // Numbered pieces and mismatched copy instances return None.
+    assert_eq!(qualifier_status(&whole, 0, "F15:side:l15#1", "F123:side:l2"), None);
+    assert_eq!(qualifier_status(&whole, 0, "F15:side:l15#[F10:side:l7]#2", "F123:side:l2"), None);
+    let copied = qualify(named(&["F48:side:l2@F60.1", "F48:side:l1@F60.1"]), &[(0, 1)]);
+    let status = qualifier_status(&copied, 0, "F48:side:l2#[F48:side:l1,F52:side:l1]@F60.1", "F48:side:l1@F60.1").expect("copy matches");
+    assert_eq!(status.matched, 1);
+    assert!(status.lists_other);
+    assert_eq!(qualifier_status(&copied, 0, "F48:side:l2#[F48:side:l1,F52:side:l1]@F60.2", "F48:side:l1@F60.2"), None);
+
+    // On a still-split face where one sibling piece has bare stem (`own` empty), `unique_resuffixed_on_body`
+    // must not abort on the unqualified sibling and must still recover the qualified piece.
+    let split_with_bare_sibling = qualify(named(&["side", "side", "common_a", "hole1", "hole2", "hole3"]), &[(0, 2), (0, 3), (0, 4), (0, 5), (1, 2)]);
+    assert_eq!(split_with_bare_sibling.faces[0], "side#[hole1,hole2,hole3]");
+    assert_eq!(split_with_bare_sibling.faces[1], "side");
+    assert_eq!(crate::name_lookup::unique_resuffixed_on_body(&split_with_bare_sibling, "side#[bevel,hole1,hole2,hole3]"), Some(0));
+}

@@ -493,6 +493,7 @@ fn surface_word(s: &solidcore_record::brep::Surface) -> &'static str {
         S::Spline { .. } | S::RationalSpline { .. } => "bspline",
         S::PlacedRevolution { .. } => "revolution",
         S::Blend { .. } => "blend",
+        S::Sweep { .. } => "sweep",
     }
 }
 
@@ -817,9 +818,9 @@ fn check_case_in(
         let record = b.body.record();
         for f in &record.faces {
             kinds.insert(surface_word(&f.surface));
-            // A blend face's net is its NURBS form: the spline check reads its degrees there.
+            // A blend's or a sweep's net is its NURBS form: the spline check reads its degrees there.
             let net = match &f.surface {
-                solidcore_record::brep::Surface::Blend { .. } => f.nurbs.as_ref(),
+                solidcore_record::brep::Surface::Blend { .. } | solidcore_record::brep::Surface::Sweep { .. } => f.nurbs.as_ref(),
                 _ => None,
             };
             spline_faces.extend(spline_shape(net.unwrap_or(&f.surface)));

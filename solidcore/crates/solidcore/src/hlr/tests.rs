@@ -5,6 +5,7 @@ use super::*;
 use crate::eval::form;
 use crate::eval::label::{curve_natural, form_turns, surface_natural};
 use crate::eval::SurfaceEval;
+use crate::math::det;
 
 /// The kinds a body is built from: the evaluator's curves and surfaces and the body's parts.
 mod k {
@@ -960,7 +961,7 @@ fn a_torus_seen_nearly_along_its_axis_keeps_its_silhouettes() {
             let [t0, t1] = c.domain();
             (0..=8).map(move |i| c.at(t0 + (t1 - t0) * i as f64 / 8.))
         })
-        .map(|p| p.x.hypot(p.y))
+        .map(|p| det::hypot(p.x, p.y))
         .collect();
     assert!(
         radii.iter().any(|r| *r > 1400.) && radii.iter().any(|r| *r < 600.),
@@ -984,7 +985,7 @@ fn a_shallow_cut_through_a_torus_tube_is_found() {
         .filter(|(_, grazing)| !grazing)
         .map(|(l, _)| *l)
         .collect();
-    let half = (25f64 - 4.99f64.powi(2)).sqrt();
+    let half = (25f64 - det::powi(4.99f64, 2)).sqrt();
     assert!(
         hits.len() == 2
             && (hits[0] - (10. - half)).abs() < 1e-6
@@ -1059,7 +1060,7 @@ fn turned(r0: f64, r1: f64, h: f64) -> Brep {
         Surface::Cone {
             frame: frame_at([0.; 3]),
             radius_at_origin: r0,
-            half_angle: ((r1 - r0) / h).atan(),
+            half_angle: det::atan((r1 - r0) / h),
             angle: [0., tau],
             height: [0., h],
         }
@@ -1206,7 +1207,7 @@ fn turn_or_chords<'a>(pieces: impl Iterator<Item = &'a Piece>) -> Option<f64> {
             let Seg2::Conic { w, .. } = *g else {
                 panic!("a circle is drawn as conic arcs: {g:?}")
             };
-            sweep += 2. * w.acos();
+            sweep += 2. * det::acos(w);
         }
     }
     Some(sweep)
@@ -1236,7 +1237,7 @@ fn nearest_points_on_a_traced_silhouette_are_found_as_by_every_chord() {
     let mut pts: Vec<Vec3> = (0..700)
         .map(|i| {
             let t = f64::from(i) * 0.03;
-            Vec3::new(10. * t.cos(), 7. * (1.3 * t).sin(), 0.4 * t)
+            Vec3::new(10. * det::cos(t), 7. * det::sin(1.3 * t), 0.4 * t)
         })
         .collect();
     pts.insert(300, *pts.get(300).unwrap());
@@ -1750,7 +1751,10 @@ fn a_circle_racing_through_its_first_turn_is_drawn_whole_edge_on() {
     let mut num = Vec::new();
     let mut pw = (1f64, 0f64);
     for k in 0..=6 {
-        num.push((0.05f64.powi(6 - k) * pw.0, 0.05f64.powi(6 - k) * pw.1));
+        num.push((
+            det::powi(0.05f64, 6 - k) * pw.0,
+            det::powi(0.05f64, 6 - k) * pw.1,
+        ));
         pw = (pw.0 * c1.0 - pw.1 * c1.1, pw.0 * c1.1 + pw.1 * c1.0);
     }
     let q = [0.0025, 0.05, 4.];
@@ -1807,7 +1811,7 @@ fn an_arc_racing_through_almost_a_full_turn_is_drawn_whole() {
     // at -0.45 rad, the first samples look straight and turn little between them; the arcs
     // must still turn the whole 2 pi - 0.04.
     let phi = std::f64::consts::FRAC_PI_2 - 0.01;
-    let c1 = (400. * phi.cos(), 400. * phi.sin());
+    let c1 = (400. * det::cos(phi), 400. * det::sin(phi));
     let mut num = Vec::new();
     let mut pw = (1f64, 0f64);
     for _ in 0..=4 {
@@ -1822,7 +1826,7 @@ fn an_arc_racing_through_almost_a_full_turn_is_drawn_whole() {
         .map(|((re, im), w)| [10. * re, 10. * im, 0., *w])
         .collect();
     let sweep_want = 4. * phi;
-    let end = [10. * sweep_want.cos(), 10. * sweep_want.sin(), 0.];
+    let end = [10. * det::cos(sweep_want), 10. * det::sin(sweep_want), 0.];
     let shape = Brep {
         shells: vec![Shell {
             vertices: vec![[10., 0., 0.], end],
@@ -1855,7 +1859,7 @@ fn an_arc_racing_through_almost_a_full_turn_is_drawn_whole() {
     };
     let def = prepare(&shape, &Options::default()).unwrap();
     let view = View::new(
-        Vec3::new(0.45f64.sin(), 0.45f64.cos(), 0.),
+        Vec3::new(det::sin(0.45f64), det::cos(0.45f64), 0.),
         Vec3::new(0., 0., 1.),
     )
     .unwrap();
@@ -1896,13 +1900,13 @@ fn a_short_piece_of_a_fast_arc_turns_its_own_way() {
             })
             .collect()
     };
-    let unit = |a: f64| (a.cos(), a.sin());
+    let unit = |a: f64| (det::cos(a), det::sin(a));
     // Weights far apart in the first span (|z| from 1 to 40) crowd its turn near its start.
-    let fast = (40. * 1.25f64.cos(), 40. * 1.25f64.sin());
+    let fast = (40. * det::cos(1.25f64), 40. * det::sin(1.25f64));
     let first = span(unit(0.), fast);
     let second = span(fast, unit(1.45));
     let homogeneous: Vec<[f64; 4]> = first.iter().chain(second.iter().skip(1)).copied().collect();
-    let end = [10. * 5.8f64.cos(), 10. * 5.8f64.sin(), 0.];
+    let end = [10. * det::cos(5.8f64), 10. * det::sin(5.8f64), 0.];
     let shape = Brep {
         shells: vec![Shell {
             vertices: vec![[10., 0., 0.], end],
@@ -1961,8 +1965,8 @@ fn a_short_piece_of_a_fast_arc_turns_its_own_way() {
 /// The homogeneous control points of an exact quartic arc of radius 10 about the origin from
 /// angle `a0` to `a1` (z^4 / |z|^4 with z running straight between the quarter angles).
 fn quartic_arc(a0: f64, a1: f64) -> Vec<[f64; 4]> {
-    let (c0, c1) = ((a0 / 4.).cos(), (a0 / 4.).sin());
-    let (d0, d1) = ((a1 / 4.).cos(), (a1 / 4.).sin());
+    let (c0, c1) = (det::cos(a0 / 4.), det::sin(a0 / 4.));
+    let (d0, d1) = (det::cos(a1 / 4.), det::sin(a1 / 4.));
     let mul = |a: (f64, f64), b: (f64, f64)| (a.0 * b.0 - a.1 * b.1, a.0 * b.1 + a.1 * b.0);
     let pw = |c: (f64, f64), k: usize| (0..k).fold((1., 0.), |acc, _| mul(acc, c));
     let q = [1., c0 * d0 + c1 * d1, 1.];
@@ -1980,8 +1984,8 @@ fn an_arc_whose_whole_domain_is_8_roundings_wide_is_not_guessed() {
     // An exact arc of radius 10 turning +3.75 rad over the parameters 0.25 to 0.25 + 2^-51
     // (8 roundings), closed by a chord: drawn as the right arc or as chords, never as the short
     // arc the other way round, through (0, -10).
-    let k = 0.25 + 2f64.powi(-51);
-    let end = [10. * 3.75f64.cos(), 10. * 3.75f64.sin(), 0.];
+    let k = 0.25 + det::powi(2f64, -51);
+    let end = [10. * det::cos(3.75f64), 10. * det::sin(3.75f64), 0.];
     let shape = Brep {
         shells: vec![Shell {
             vertices: vec![[10., 0., 0.], end],
@@ -2051,7 +2055,7 @@ fn a_piece_in_a_knot_span_of_1e_11_turns_its_own_way() {
         .copied()
         .collect();
     let k = 0.25 + 1e-11;
-    let end = [10. * 4.5f64.cos(), 10. * 4.5f64.sin(), 0.];
+    let end = [10. * det::cos(4.5f64), 10. * det::sin(4.5f64), 0.];
     let shape = Brep {
         shells: vec![Shell {
             vertices: vec![[10., 0., 0.], end],
@@ -2084,12 +2088,12 @@ fn a_piece_in_a_knot_span_of_1e_11_turns_its_own_way() {
     };
     let arc = prepare(&shape, &Options::default()).unwrap();
     let low = prepare(
-        &cuboid([9., -1., 1.], [11., 10. * 0.1f64.sin(), 2.]),
+        &cuboid([9., -1., 1.], [11., 10. * det::sin(0.1f64), 2.]),
         &Options::default(),
     )
     .unwrap();
     let high = prepare(
-        &cuboid([-11., -11., 1.], [0., 10. * 3.85f64.sin(), 2.]),
+        &cuboid([-11., -11., 1.], [0., 10. * det::sin(3.85f64), 2.]),
         &Options::default(),
     )
     .unwrap();
@@ -2112,7 +2116,7 @@ fn a_piece_in_a_knot_span_of_1e_11_turns_its_own_way() {
     for p in &line.pieces {
         for g in &p.geometry {
             match *g {
-                Seg2::Conic { w, .. } => sweep += 2. * w.acos(),
+                Seg2::Conic { w, .. } => sweep += 2. * det::acos(w),
                 _ => panic!("an arc is drawn as conic arcs: {g:?}"),
             }
         }
@@ -2426,8 +2430,8 @@ fn an_arc_that_turns_back_is_drawn_as_chords() {
     let homogeneous: Vec<[f64; 4]> = (0..7)
         .map(|k| [10. * (1. - uu[k]), 20. * u[k], 0., 1. + uu[k]])
         .collect();
-    let th = 2. * u3[3].atan();
-    let end = [10. * th.cos(), 10. * th.sin(), 0.];
+    let th = 2. * det::atan(u3[3]);
+    let end = [10. * det::cos(th), 10. * det::sin(th), 0.];
     let shape = Brep {
         shells: vec![Shell {
             vertices: vec![[10., 0., 0.], end],
@@ -2566,7 +2570,7 @@ fn a_cone_tip_trimmed_near_the_apex_is_only_its_tip() {
                 surface: Surface::Cone {
                     frame: frame_at([0.; 3]),
                     radius_at_origin: 0.,
-                    half_angle: 0.25f64.atan(),
+                    half_angle: det::atan(0.25f64),
                     angle: [0., tau],
                     height: [0., 10_000.],
                 },
@@ -2728,9 +2732,9 @@ fn a_torus_stored_as_a_rational_spline_patch_is_recognised() {
     let s2 = std::f64::consts::SQRT_2;
     // The unit arc from -45 to 45 degrees: its control points and weights.
     let arc = [
-        ([q.cos(), -q.sin()], 1.),
-        ([s2, 0.], q.cos()),
-        ([q.cos(), q.sin()], 1.),
+        ([det::cos(q), -det::sin(q)], 1.),
+        ([s2, 0.], det::cos(q)),
+        ([det::cos(q), det::sin(q)], 1.),
     ];
     let homogeneous: Vec<Vec<[f64; 4]>> = arc
         .iter()
@@ -2745,19 +2749,19 @@ fn a_torus_stored_as_a_rational_spline_patch_is_recognised() {
         .collect();
     let at = |t: f64, f: f64| {
         [
-            (big + small * f.cos()) * t.cos(),
-            (big + small * f.cos()) * t.sin(),
-            small * f.sin(),
+            (big + small * det::cos(f)) * det::cos(t),
+            (big + small * det::cos(f)) * det::sin(t),
+            small * det::sin(f),
         ]
     };
     let parallel = |f: f64| k::Frame {
-        origin: [0., 0., small * f.sin()],
+        origin: [0., 0., small * det::sin(f)],
         x_axis: [1., 0., 0.],
         y_axis: [0., 1., 0.],
     };
     let meridian = |t: f64| k::Frame {
-        origin: [big * t.cos(), big * t.sin(), 0.],
-        x_axis: [t.cos(), t.sin(), 0.],
+        origin: [big * det::cos(t), big * det::sin(t), 0.],
+        x_axis: [det::cos(t), det::sin(t), 0.],
         y_axis: [0., 0., 1.],
     };
     let edges = vec![
@@ -2765,7 +2769,7 @@ fn a_torus_stored_as_a_rational_spline_patch_is_recognised() {
             vertices: [0, 1],
             curve: Curve::CircleArc {
                 frame: parallel(-q),
-                radius: big + small * q.cos(),
+                radius: big + small * det::cos(q),
                 angle: [-q, q],
             },
         },
@@ -2781,7 +2785,7 @@ fn a_torus_stored_as_a_rational_spline_patch_is_recognised() {
             vertices: [3, 2],
             curve: Curve::CircleArc {
                 frame: parallel(q),
-                radius: big + small * q.cos(),
+                radius: big + small * det::cos(q),
                 angle: [-q, q],
             },
         },
@@ -2860,16 +2864,19 @@ fn a_torus_patch_with_a_bump_in_a_narrow_knot_span_is_not_taken_for_a_torus() {
     let q = std::f64::consts::FRAC_PI_4;
     let s2 = std::f64::consts::SQRT_2;
     let ts = [-q, -q + 0.3, -q + 0.5, q];
-    let mut lon: Vec<([f64; 2], f64)> = vec![([ts[0].cos(), ts[0].sin()], 1.)];
+    let mut lon: Vec<([f64; 2], f64)> = vec![([det::cos(ts[0]), det::sin(ts[0])], 1.)];
     for w in ts.windows(2) {
         let (m, h) = (0.5 * (w[0] + w[1]), 0.5 * (w[1] - w[0]));
-        lon.push(([m.cos() / h.cos(), m.sin() / h.cos()], h.cos()));
-        lon.push(([w[1].cos(), w[1].sin()], 1.));
+        lon.push((
+            [det::cos(m) / det::cos(h), det::sin(m) / det::cos(h)],
+            det::cos(h),
+        ));
+        lon.push(([det::cos(w[1]), det::sin(w[1])], 1.));
     }
     let mer = [
-        ([q.cos(), -q.sin()], 1.),
-        ([s2, 0.], q.cos()),
-        ([q.cos(), q.sin()], 1.),
+        ([det::cos(q), -det::sin(q)], 1.),
+        ([s2, 0.], det::cos(q)),
+        ([det::cos(q), det::sin(q)], 1.),
     ];
     let homogeneous: Vec<Vec<[f64; 4]>> = lon
         .iter()
@@ -2887,19 +2894,19 @@ fn a_torus_patch_with_a_bump_in_a_narrow_knot_span_is_not_taken_for_a_torus() {
         .collect();
     let at = |t: f64, f: f64| {
         [
-            (big + small * f.cos()) * t.cos(),
-            (big + small * f.cos()) * t.sin(),
-            small * f.sin(),
+            (big + small * det::cos(f)) * det::cos(t),
+            (big + small * det::cos(f)) * det::sin(t),
+            small * det::sin(f),
         ]
     };
     let parallel = |f: f64| k::Frame {
-        origin: [0., 0., small * f.sin()],
+        origin: [0., 0., small * det::sin(f)],
         x_axis: [1., 0., 0.],
         y_axis: [0., 1., 0.],
     };
     let meridian = |t: f64| k::Frame {
-        origin: [big * t.cos(), big * t.sin(), 0.],
-        x_axis: [t.cos(), t.sin(), 0.],
+        origin: [big * det::cos(t), big * det::sin(t), 0.],
+        x_axis: [det::cos(t), det::sin(t), 0.],
         y_axis: [0., 0., 1.],
     };
     let edges = vec![
@@ -2907,7 +2914,7 @@ fn a_torus_patch_with_a_bump_in_a_narrow_knot_span_is_not_taken_for_a_torus() {
             vertices: [0, 1],
             curve: Curve::CircleArc {
                 frame: parallel(-q),
-                radius: big + small * q.cos(),
+                radius: big + small * det::cos(q),
                 angle: [-q, q],
             },
         },
@@ -2923,7 +2930,7 @@ fn a_torus_patch_with_a_bump_in_a_narrow_knot_span_is_not_taken_for_a_torus() {
             vertices: [3, 2],
             curve: Curve::CircleArc {
                 frame: parallel(q),
-                radius: big + small * q.cos(),
+                radius: big + small * det::cos(q),
                 angle: [-q, q],
             },
         },
@@ -2969,7 +2976,7 @@ fn a_big_circle_passing_behind_a_thin_left_out_face_is_uncertain_there() {
     // between them misses the tube's box by less than its sag, crossing none of its sides.
     let tau = std::f64::consts::TAU;
     let turn = 8.5 * std::f64::consts::PI / 256.;
-    let (c, sn) = (turn.cos(), turn.sin());
+    let (c, sn) = (det::cos(turn), det::sin(turn));
     let frame = k::Frame {
         origin: [0.; 3],
         x_axis: [-c, -sn, 0.],
@@ -3137,7 +3144,7 @@ fn folding_arc_under_a_patch(offset: f64) {
         x_axis: [1., 0., 0.],
         y_axis: [0., 0., 1.],
     };
-    let at = |t: f64| [10000. * t.cos(), 0., 10000. * t.sin()];
+    let at = |t: f64| [10000. * det::cos(t), 0., 10000. * det::sin(t)];
     let (start, end) = (at(ta), at(ta + std::f64::consts::PI / 8.));
     let arc = Brep {
         shells: vec![Shell {
@@ -3379,9 +3386,9 @@ fn a_sphere_with_a_spline_band_between_record_caps_is_one_sphere() {
         ([1., 0.], 1.),
     ];
     let lat = [
-        ([r * q.cos(), -r * q.sin()], 1.),
-        ([r / q.cos(), 0.], q.cos()),
-        ([r * q.cos(), r * q.sin()], 1.),
+        ([r * det::cos(q), -r * det::sin(q)], 1.),
+        ([r / det::cos(q), 0.], det::cos(q)),
+        ([r * det::cos(q), r * det::sin(q)], 1.),
     ];
     let homogeneous: Vec<Vec<[f64; 4]>> = ring
         .iter()
@@ -3398,8 +3405,8 @@ fn a_sphere_with_a_spline_band_between_record_caps_is_one_sphere() {
                 .collect()
         })
         .collect();
-    let z = r * q.sin();
-    let rho = r * q.cos();
+    let z = r * det::sin(q);
+    let rho = r * det::cos(q);
     let tau = std::f64::consts::TAU;
     let half = std::f64::consts::FRAC_PI_2;
     let cap = |latitude: [f64; 2], e: u32, forward: bool| Face {
@@ -3461,7 +3468,10 @@ fn chords_of_a_racing_circle_stay_within_their_stated_deviation() {
     let mut num = Vec::new();
     let mut pw = (1f64, 0f64);
     for k in 0..=6 {
-        num.push((0.01f64.powi(6 - k) * pw.0, 0.01f64.powi(6 - k) * pw.1));
+        num.push((
+            det::powi(0.01f64, 6 - k) * pw.0,
+            det::powi(0.01f64, 6 - k) * pw.1,
+        ));
         pw = (pw.0 * c1.0 - pw.1 * c1.1, pw.0 * c1.1 + pw.1 * c1.0);
     }
     let q = [1e-4, 0.01, 4.];
@@ -3541,7 +3551,7 @@ fn chords_of_a_racing_circle_stay_within_their_stated_deviation() {
         .collect();
     for k in 0..720 {
         let t = std::f64::consts::TAU * k as f64 / 720.;
-        let q = Vec2::new(t.cos(), t.sin());
+        let q = Vec2::new(det::cos(t), det::sin(t));
         let gap = chords
             .iter()
             .map(|(a, b)| point_segment([q.x, q.y], [a.x, a.y], [b.x, b.y]))
@@ -3562,7 +3572,10 @@ fn a_big_arc_is_cut_where_it_meets_a_left_out_faces_box() {
     // no visible piece of the arc may reach under the tube.
     let tau = std::f64::consts::TAU;
     let a0 = -std::f64::consts::PI / 8.;
-    let (start, end) = ([10000. * a0.cos(), 10000. * a0.sin(), 0.], [10000., 0., 0.]);
+    let (start, end) = (
+        [10000. * det::cos(a0), 10000. * det::sin(a0), 0.],
+        [10000., 0., 0.],
+    );
     let arc = Brep {
         shells: vec![Shell {
             vertices: vec![start, end],
@@ -3674,7 +3687,7 @@ fn a_big_arc_is_cut_where_it_meets_a_left_out_faces_box() {
     {
         for k in 0..=400 {
             let t = p.t[0] + (p.t[1] - p.t[0]) * k as f64 / 400.;
-            let (px, py) = (10000. * t.cos(), 10000. * t.sin());
+            let (px, py) = (10000. * det::cos(t), 10000. * det::sin(t));
             let under = px > x - 2.5 && px < x + 2.5 && py > -4000. && py < 3000.;
             assert!(!under, "visible at ({px}, {py}), t {t}, piece {:?}", p.t);
         }
@@ -3687,7 +3700,8 @@ fn narrow_torus_strips_keep_their_outline() {
     // seen from the side: each side of the outline is a 0.006 mm piece of the circle traced on
     // the whole torus, whose chords are far longer than the strips are wide.
     let tau = std::f64::consts::TAU;
-    let ring = |phi: f64, v: u32| circle([0., 0., 10. * phi.sin()], 20. + 10. * phi.cos(), v);
+    let ring =
+        |phi: f64, v: u32| circle([0., 0., 10. * det::sin(phi)], 20. + 10. * det::cos(phi), v);
     let strip = |m: [f64; 2], e: [u32; 2]| Face {
         loops: vec![vec![uses(e[0], true)], vec![uses(e[1], false)]],
         surface: Surface::Torus {
@@ -3704,7 +3718,7 @@ fn narrow_torus_strips_keep_their_outline() {
         shells: vec![Shell {
             vertices: phis
                 .iter()
-                .map(|p| [20. + 10. * p.cos(), 0., 10. * p.sin()])
+                .map(|p| [20. + 10. * det::cos(*p), 0., 10. * det::sin(*p)])
                 .collect(),
             edges: vec![ring(phis[0], 0), ring(phis[1], 1), ring(phis[2], 2)],
             faces: vec![
@@ -4022,7 +4036,7 @@ fn a_bent_quarter_in_a_knot_span_narrower_than_rounding_is_drawn() {
     if let Some(p) = pts.get_mut(3) {
         *p = [-11., 10.];
     }
-    let k = 0.25 + 2f64.powi(-50);
+    let k = 0.25 + det::powi(2f64, -50);
     let def = prepare(
         &disc(
             10.,
@@ -4076,7 +4090,7 @@ fn an_unevenly_parameterised_circle_is_drawn_whole() {
             let Seg2::Conic { w, .. } = *g else {
                 panic!("a circle is drawn as conic arcs: {g:?}")
             };
-            sweep += 2. * w.acos();
+            sweep += 2. * det::acos(w);
         }
     }
     assert!(
@@ -4142,7 +4156,7 @@ fn frustum(o: [f64; 3], r0: f64, k: f64, h: [f64; 2]) -> Shell {
             surface: Surface::Cone {
                 frame: frame_at(o),
                 radius_at_origin: r0,
-                half_angle: k.atan(),
+                half_angle: det::atan(k),
                 angle: [0., tau],
                 height: h,
             },
@@ -4185,8 +4199,8 @@ fn nearly_coaxial_cones_far_out_keep_their_own_silhouettes() {
 fn cone_sector(o: [f64; 3], r0: f64, k: f64, h: [f64; 2], a: [f64; 2]) -> Shell {
     let at = |z: f64, t: f64| {
         [
-            o[0] + (r0 + k * z) * t.cos(),
-            o[1] + (r0 + k * z) * t.sin(),
+            o[0] + (r0 + k * z) * det::cos(t),
+            o[1] + (r0 + k * z) * det::sin(t),
             o[2] + z,
         ]
     };
@@ -4221,7 +4235,7 @@ fn cone_sector(o: [f64; 3], r0: f64, k: f64, h: [f64; 2], a: [f64; 2]) -> Shell 
         surface: Surface::Cone {
             frame: frame_at(o),
             radius_at_origin: r0,
-            half_angle: k.atan(),
+            half_angle: det::atan(k),
             angle: a,
             height: h,
         },
@@ -4252,7 +4266,7 @@ fn nearly_coincident_cone_sectors_both_draw_their_outline() {
     ];
     let def = prepare(&Brep { shells }, &Options::default()).unwrap();
     let view = View::new(
-        Vec3::new(-(0.01f64.sin()), 0.01f64.cos(), 0.),
+        Vec3::new(-(det::sin(0.01f64)), det::cos(0.01f64), 0.),
         Vec3::new(0., 0., 1.),
     )
     .unwrap();
@@ -4321,12 +4335,12 @@ fn spherical_caps_through_one_circle_keep_their_own_outlines() {
         angle: [0., std::f64::consts::TAU],
     };
     let dz = 5e-7;
-    let lat = |zc: f64| ((z - zc) / r).asin();
+    let lat = |zc: f64| det::asin((z - zc) / r);
     let shells = vec![
         cap([0.; 3], r, lat(0.), edge(), [ring, 0., z]),
         cap(
             [0., 0., dz],
-            (ring * ring + (z - dz).powi(2)).sqrt(),
+            (ring * ring + det::powi(z - dz, 2)).sqrt(),
             lat(dz),
             edge(),
             [ring, 0., z],
@@ -4356,7 +4370,7 @@ fn spherical_caps_through_one_circle_keep_their_own_outlines() {
                 .sum::<f64>()
         })
         .sum();
-    let arc = 2. * r * (std::f64::consts::FRAC_PI_2 - (z / r).asin());
+    let arc = 2. * r * (std::f64::consts::FRAC_PI_2 - det::asin(z / r));
     assert!(
         drawn > 0.99 * arc,
         "{drawn} mm of outline drawn of about {arc}"
@@ -4368,9 +4382,9 @@ fn spherical_caps_through_one_circle_keep_their_own_outlines() {
 /// `h`, its axis turned by `tilt` about Y from +Z.
 fn tilted_cone(tilt: f64, h: [f64; 2]) -> Shell {
     let (x, y, z) = (
-        Vec3::new(tilt.cos(), 0., -tilt.sin()),
+        Vec3::new(det::cos(tilt), 0., -det::sin(tilt)),
         Vec3::new(0., 1., 0.),
-        Vec3::new(tilt.sin(), 0., tilt.cos()),
+        Vec3::new(det::sin(tilt), 0., det::cos(tilt)),
     );
     let arr = |v: Vec3| [v.x, v.y, v.z];
     let frame = |o: Vec3| k::Frame {
@@ -4404,7 +4418,7 @@ fn tilted_cone(tilt: f64, h: [f64; 2]) -> Shell {
         surface: Surface::Cone {
             frame: frame(Vec3::new(0., 0., 0.)),
             radius_at_origin: 0.,
-            half_angle: 0.25f64.atan(),
+            half_angle: det::atan(0.25f64),
             angle: [0., std::f64::consts::TAU],
             height: h,
         },
@@ -4466,11 +4480,11 @@ fn a_high_degree_spline_through_points_of_a_circle_is_not_taken_for_one() {
         .enumerate()
         .map(|(j, t)| {
             let a = std::f64::consts::TAU * j as f64 / n as f64
-                + 0.2 * (std::f64::consts::TAU * 3. * j as f64 / n as f64).sin();
+                + 0.2 * det::sin(std::f64::consts::TAU * 3. * j as f64 / n as f64);
             let mut row: Vec<f64> = (0..=n)
-                .map(|i| binom(i) * t.powi(i as i32) * (1. - t).powi((n - i) as i32))
+                .map(|i| binom(i) * det::powi(*t, i as i32) * det::powi(1. - t, (n - i) as i32))
                 .collect();
-            row.extend([10. * a.cos(), 10. * a.sin()]);
+            row.extend([10. * det::cos(a), 10. * det::sin(a)]);
             row
         })
         .collect();
@@ -4971,8 +4985,8 @@ fn chords_only_near_each_other_still_meet_their_crossings() {
         range: [0., 0.2],
     };
     let (a, b) = (arc.at(0.), arc.at(0.2));
-    let sag = 1000. * (1. - 0.1f64.cos());
-    let out = Vec3::new(0.1f64.cos(), 0.1f64.sin(), 0.);
+    let sag = 1000. * (1. - det::cos(0.1f64));
+    let out = Vec3::new(det::cos(0.1f64), det::sin(0.1f64), 0.);
     let line = C3::Line {
         a: a + out,
         b: b + out,
@@ -5182,7 +5196,7 @@ fn an_edge_is_cut_to_its_interval_on_its_unbounded_curve() {
     assert!(
         close(
             c.at(a0),
-            [1. + 4. * 0.5f64.cos(), 2. + 2. * 0.5f64.sin(), 3.]
+            [1. + 4. * det::cos(0.5f64), 2. + 2. * det::sin(0.5f64), 3.]
         ),
         "{c:?}"
     );
@@ -5500,7 +5514,7 @@ fn an_edge_no_face_uses_is_drawn_like_any_other() {
 #[test]
 fn a_traced_rim_is_drawn_on_the_true_intersection_or_refused() {
     let tolerance = 5e-3;
-    let k = 10. * 4. / 3. * (std::f64::consts::FRAC_PI_8).tan();
+    let k = 10. * 4. / 3. * det::tan(std::f64::consts::FRAC_PI_8);
     let knots = vec![
         0., 0., 0., 0., 1., 1., 1., 2., 2., 2., 3., 3., 3., 4., 4., 4., 4.,
     ];
@@ -5564,7 +5578,7 @@ fn a_traced_rim_is_drawn_on_the_true_intersection_or_refused() {
     assert!(
         above
             .iter()
-            .all(|p| (p[0].hypot(p[1]) - 10.).abs() <= tolerance),
+            .all(|p| (det::hypot(p[0], p[1]) - 10.).abs() <= tolerance),
         "{above:?}"
     );
     let spread = |at: usize| {
@@ -5607,7 +5621,7 @@ fn a_traced_rim_is_drawn_on_the_true_intersection_or_refused() {
 
 /// Turned `a` radians about Z, standing at `t`.
 fn turned_about_z(body: usize, a: f64, t: [f64; 3]) -> Placement {
-    let (c, s) = (a.cos(), a.sin());
+    let (c, s) = (det::cos(a), det::sin(a));
     Placement {
         body,
         rotation: [
@@ -6132,8 +6146,8 @@ fn wavy_disc(r: f64, n: usize) -> Brep {
     let points: Vec<[f64; 3]> = (0..n)
         .map(|i| {
             let a = tau * (i % (n - 1)) as f64 / (n - 1) as f64;
-            let rho = r * (1. + 0.01 * (7. * a).sin());
-            [rho * a.cos(), rho * a.sin(), 0.]
+            let rho = r * (1. + 0.01 * det::sin(7. * a));
+            [rho * det::cos(a), rho * det::sin(a), 0.]
         })
         .collect();
     let spans = n - 3;

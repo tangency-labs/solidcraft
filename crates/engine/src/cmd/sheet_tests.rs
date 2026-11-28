@@ -8334,6 +8334,102 @@ fn edge_flange_material_outside_and_tangent_positions_start_the_bend_where_they_
     assert!((bbox(&mut s)["min"][1].as_f64().unwrap_or(f64::NAN)).abs() < 1e-6);
 }
 
+#[test]
+fn edge_flange_offset_moves_the_bend_out_past_its_position() {
+    // T = 2, R = 2, K = 0.4, height 20 from the outer sharp on the edge y = 0, as above. An
+    // offset d moves the bend d further out than the position starts it, and the base grows by
+    // that strip: the least y and the flat both move by d, and the volume by 100·d·T.
+    let (t, r, k) = (2.0, 2.0, 0.4);
+    for deg in [90.0f64, 120.0] {
+        let th = deg.to_radians();
+        let half = (th / 2.0).tan();
+        for (position, setback) in [("inside", (r + t) * half), ("outside", 0.0), ("material_outside", r * half), ("tangent", r + t)] {
+            let mut s = Session::default();
+            r2_base(&mut s);
+            run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": format!("{deg} deg"), "position": position}));
+            let plain = volume(&mut s);
+            for d in [3.0, -0.5] {
+                let what = format!("{deg}° {position} offset {d}");
+                let mut s = Session::default();
+                r2_base(&mut s);
+                run(
+                    &mut s,
+                    "sheet.flange",
+                    json!({"edges": [[50, 0, 2]], "height": 20, "angle": format!("{deg} deg"), "position": position, "offset": format!("{d} mm")}),
+                );
+                let least_y = bbox(&mut s)["min"][1].as_f64().unwrap_or(f64::NAN);
+                let reach = setback - d - (r + t);
+                assert!((least_y - reach).abs() < 1e-6, "{what}: least y {least_y}, want {reach}");
+                let length = flat(&mut s)["flat_size_mm"][1].as_f64().unwrap_or(f64::NAN);
+                let want = 60.0 - setback + d + th * (r + k * t) + 20.0 - (r + t) * half;
+                assert!((length - want).abs() < 1e-6, "{what}: flat {length}, want {want}");
+                assert!(rel(volume(&mut s), plain + 100.0 * d * t) < 1e-6, "{what}: volume {}, want {}", volume(&mut s), plain + 100.0 * d * t);
+                let saved = serde_json::to_value(s.doc.features.last().map(|f| f.kind.clone())).unwrap_or_default();
+                assert_eq!(saved["offset"], format!("{d} mm"), "{what}");
+            }
+        }
+    }
+}
+
+#[test]
+fn edge_flange_offset_past_the_bend_band_keeps_the_rim_names() {
+    let names = |offset: Option<&str>| {
+        let mut s = Session::default();
+        r2_base(&mut s);
+        let mut p = json!({"edges": [[50, 0, 2]], "height": 20, "position": "outside"});
+        if let Some(d) = offset {
+            p["offset"] = json!(d);
+        }
+        run(&mut s, "sheet.flange", p);
+        let state = s.model.state();
+        let mut names = solidcraft_doc::naming::face_names(&state.bodies[0]).as_ref().clone();
+        names.sort_unstable();
+        names
+    };
+    let plain = names(None);
+    assert!(plain.iter().all(|n| !n.contains("/?")), "{plain:?}");
+    for d in ["3 mm", "20 mm", "-6.5 mm"] {
+        assert_eq!(names(Some(d)), plain, "offset {d}");
+    }
+}
+
+#[test]
+fn edge_flange_offset_is_a_parameter_carries_down_a_chain_and_is_saved_only_when_given() {
+    let (t, r, k) = (2.0, 2.0, 0.4);
+    let ba = FRAC_PI_2 * (r + k * t);
+    // No offset: nothing saved, and the flat is the outside position's.
+    let mut s = Session::default();
+    r2_base(&mut s);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "position": "outside"}));
+    let saved = serde_json::to_value(s.doc.features.last().map(|f| f.kind.clone())).unwrap_or_default();
+    assert!(saved.get("offset").is_none(), "{saved}");
+    let plain = flat(&mut s)["flat_size_mm"][1].as_f64().unwrap_or(f64::NAN);
+    assert!((plain - (60.0 + ba + 16.0)).abs() < 1e-6, "{plain}");
+    // The offset is the feature's last input: changing it rebuilds the flange.
+    let mut s = Session::default();
+    r2_base(&mut s);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "position": "outside", "offset": "3 mm"}));
+    let names = s.doc.features.last().map(|f| f.param_names.clone()).unwrap_or_default();
+    let last = names.last().cloned().unwrap_or_default();
+    run(&mut s, "parameters.change", json!({"name": last, "expression": "5 mm"}));
+    let moved = flat(&mut s)["flat_size_mm"][1].as_f64().unwrap_or(f64::NAN);
+    assert!((moved - (plain + 5.0)).abs() < 1e-6, "{moved}");
+    // A chain: each further bend takes the first one's offset, on the far edge of the one before.
+    let mut s = Session::default();
+    r2_base(&mut s);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "position": "outside", "offset": "1 mm", "then": [{"height": 15}]}));
+    let kinds: Vec<Value> = s.doc.features.iter().rev().take(2).map(|f| serde_json::to_value(&f.kind).unwrap_or_default()).collect();
+    assert!(kinds.iter().all(|v| v["offset"] == "1 mm"), "{kinds:?}");
+    // Refusals leave the design as it was: a base flange takes no offset, and an offset is a length.
+    let mut s = Session::default();
+    r2_base(&mut s);
+    let features = s.doc.features.len();
+    let e = s.execute("sheet.flange", &json!({"sketch": "Base", "offset": "3 mm"})).unwrap_err().to_string();
+    assert!(e.contains("`offset` is only for edge flanges"), "{e}");
+    assert!(s.execute("sheet.flange", &json!({"edges": [[50, 0, 2]], "height": 20, "offset": "30 deg"})).is_err());
+    assert_eq!(s.doc.features.len(), features);
+}
+
 /// A new fold refuses a `fixed` point in a cut-out or past the outline, leaving the design
 /// untouched (#263). A point on the sheet decides the side that stays as the fold is made: the
 /// fold keeps that side and not the point, so a recompute that takes the material from under

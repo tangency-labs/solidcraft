@@ -52,6 +52,7 @@
 //! void exactly), takes the class a deleted face has on both sides ([`deleted_face_sides`]);
 //! upstream leaves it the flag it had, so the filled void stayed void.
 
+use crate::math::det;
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
 use super::p1::{self, MergeOptions};
@@ -780,7 +781,7 @@ fn cone_box_gap(
     let mut rho = f64::MAX;
     for &x in points {
         let (h, v) = about(x);
-        let t = v.dot(e2).atan2(v.dot(e1));
+        let t = det::atan2(v.dot(e2), v.dot(e1));
         if t.abs().partial_cmp(&(0.5 * PI)) != Some(Ordering::Less) {
             return None;
         }
@@ -795,7 +796,7 @@ fn cone_box_gap(
         return None;
     }
     // a point within `widen` of the cone where its radius is `R` turns by at most this
-    let spread = (widen / (r_min - widen)).min(1.0).asin();
+    let spread = det::asin((widen / (r_min - widen)).min(1.0));
     let margin_h = widen + gamma(8) * s;
     let margin_t = spread + gamma(16) * s / rho + 4.0 * f64::EPSILON;
     let (h0, h1, t0, t1) = (h0 - margin_h, h1 + margin_h, t0 - margin_t, t1 + margin_t);
@@ -807,10 +808,10 @@ fn cone_box_gap(
     let c = normal.dot(origin - plane_origin);
     let d = normal.dot(axis);
     let (alpha, beta) = (normal.dot(e1), normal.dot(e2));
-    let sine = |t: f64| alpha * t.cos() + beta * t.sin();
-    let crest = beta.atan2(alpha);
+    let sine = |t: f64| alpha * det::cos(t) + beta * det::sin(t);
+    let crest = det::atan2(beta, alpha);
     let (mut s_min, mut s_max) = (sine(t0).min(sine(t1)), sine(t0).max(sine(t1)));
-    let amplitude = alpha.hypot(beta);
+    let amplitude = det::hypot(alpha, beta);
     for (peak, value) in [(crest, amplitude), (crest + PI, -amplitude)] {
         // the peak's turn nearest the box
         let at = peak + 2.0 * PI * ((0.5 * (t0 + t1) - peak) / (2.0 * PI)).round();
@@ -1514,15 +1515,7 @@ fn classify_remaining(
             let edges = traverser::face_edges(source, f)?;
             let mut region = None;
             for &edge_id in &edges {
-                // Upstream deliberately/repeatedly uses sFaceEdges[0] in the
-                // primary pass; the other pass uses j and a different fraction.
-                // (inside the loop over `edges`, so the list has a first edge)
-                let selected = if reverse {
-                    edge_id
-                } else {
-                    edges.first().copied().unwrap_or(edge_id)
-                };
-                let e = source.edge(selected)?;
+                let e = source.edge(edge_id)?;
                 let curve = e
                     .curve
                     .as_ref()
@@ -3022,7 +3015,7 @@ mod tests {
             for &t in ts {
                 for &h in hs {
                     let rh = r + tan * h;
-                    out.push(Vec3::new(rh * t.cos(), rh * t.sin(), h));
+                    out.push(Vec3::new(rh * det::cos(t), rh * det::sin(t), h));
                 }
             }
             out
@@ -3032,12 +3025,12 @@ mod tests {
         let sliver = on(5.0, 0.0, &[0.0, 1e-3], &[0.0, 10.0]);
         let cylinder = (Vec3::new(0.0, 0.0, 0.0), z, 5.0, 0.0);
         let tangent = (Vec3::new(5.0, 0.0, 0.0), x);
-        let exact = 5.0 * (1.0 - 1e-3_f64.cos());
+        let exact = 5.0 * (1.0 - det::cos(1e-3_f64));
         let bound = cone_box_gap(cylinder, tangent, &sliver, 0.0).unwrap();
         assert!(bound >= exact && bound < exact + 1e-12, "{bound} {exact}");
         // the plane x = 4.99 cuts into the cylinder: the face's corners lie on it, but the
         // face's middle, at y = 0, lies 0.01 beyond it
-        let t = (4.99_f64 / 5.0).acos();
+        let t = det::acos(4.99_f64 / 5.0);
         let chord = on(5.0, 0.0, &[-t, t], &[0.0, 10.0]);
         let cutting = (Vec3::new(4.99, 0.0, 0.0), x);
         assert!(chord
@@ -3052,7 +3045,7 @@ mod tests {
         let cone = (Vec3::new(0.0, 0.0, 0.0), z, 5.0, 0.5);
         let normal = Vec3::new(1.0, 0.0, -0.5) * (1.0 / 1.25_f64.sqrt());
         let sliver = on(5.0, 0.5, &[0.0, 1e-3], &[0.0, 4.0]);
-        let exact = 7.0 * (1.0 - 1e-3_f64.cos()) / 1.25_f64.sqrt();
+        let exact = 7.0 * (1.0 - det::cos(1e-3_f64)) / 1.25_f64.sqrt();
         let bound = cone_box_gap(cone, (Vec3::new(5.0, 0.0, 0.0), normal), &sliver, 0.0).unwrap();
         assert!(bound >= exact && bound < exact + 1e-12, "{bound} {exact}");
         // a boundary that reaches a quarter turn from its mean direction is not bounded

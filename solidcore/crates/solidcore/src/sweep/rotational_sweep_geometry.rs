@@ -59,6 +59,14 @@
 //!   `CopyAndAddAnalytics` of the B-spline. The trims are the analytic surface's own
 //!   boundary; the normal is the analytic surface's, taken before the copy as the
 //!   fork does (`AnalyticSurface` replaces `sm_CreateRotSrf`).
+//! - **Omitted corner on a closed path.** A closed path of lines and arcs
+//!   sets [`RotationalSweepGeometry::set_omitted_corner_scale`] to the path arc's
+//!   radius. On-axis tests use the larger of [`omitted_corner_band`] and the sweep
+//!   tolerance, so a corner under 0.5 mm keeps the base test. Side curves
+//!   inside that band are the corner the sweep already omits, and
+//!   [`cover_axis_chords`] covers that chord. A plain revolve leaves the scale
+//!   unset: on-axis tests use `eps` and side curves use `start_curve_tol`.
+//!   The walls are not moved. Not upstream.
 //! - **Recursion.** None.
 
 use crate::curve::curve::p8::CurveIntersectOptions;
@@ -70,6 +78,7 @@ use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p1::{line_closest_point, line_point_distance};
 use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
+use crate::geom::tol::{size_estimate_to_zone_tol_3d, zone_tol3d, TOL_GAP_GAIN};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, EFF_ZERO_DEG, EFF_ZERO_SQRT, PI};
@@ -79,6 +88,7 @@ use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::surface::surface::Surface;
+use crate::topology::brep::p1 as brep_p1;
 use crate::topology::{edge, face, vertex, Brep, EdgeId, FaceId, VertexId};
 
 use super::analytic_revolution::analytic_revolution;
@@ -212,8 +222,91 @@ fn start_and_other(b: &Brep, e: EdgeId, op: &'static str) -> Result<(VertexId, V
     Ok((start, end))
 }
 
-/// `sm_CheckEdgeVerticesOnAxis`: whether the edge's end vertices are within `eps` of
-/// the axis and, for a line, whether it is parallel or perpendicular to the axis.
+/// Radius that still counts as a corner axis, from the path arc's radius.
+///
+/// The zone is [`size_estimate_to_zone_tol_3d`] of that radius, never the body's
+/// tolerance. A quarter turn of radius `r` leaves a gap of `r * sqrt(2)`, which
+/// that zone accepts only while `r` is under about `zone / sqrt(2)`, so the band
+/// is `zone * sqrt(2)`. A plain revolve does not use this.
+#[must_use]
+pub(crate) fn omitted_corner_band(feature_scale: f64) -> f64 {
+    size_estimate_to_zone_tol_3d(feature_scale) * (2.0_f64).sqrt()
+}
+
+/// The vertex tolerance that covers the chord of a turn of `angle` radians at
+/// radius `dist`.
+///
+/// The chord is `dist * 2 * |sin(angle / 2)|`. A quarter turn is `dist * sqrt(2)`.
+/// The check accepts a gap only up to half the vertex tolerance, so the cover is
+/// twice that chord times [`TOL_GAP_GAIN`].
+#[must_use]
+pub(crate) fn chord_cover_tolerance(k: &Kernel, dist: f64, angle: f64) -> f64 {
+    let chord = dist * 2.0 * (angle * 0.5).sin().abs();
+    zone_tol3d(k, 2.0 * chord * TOL_GAP_GAIN)
+}
+
+/// Grow each vertex of `b` within `band` of the axis through `centre` along
+/// `axis` to [`chord_cover_tolerance`] for a turn of `angle` radians. A vertex
+/// already at least that large is left as it is. Walls are not moved. `band` is
+/// [`omitted_corner_band`] of the path arc; a plain revolve does not call this.
+///
+/// # Errors
+///
+/// Those of the vertex queries.
+pub(crate) fn cover_axis_chords(
+    k: &Kernel,
+    b: &mut Brep,
+    centre: Point3,
+    axis: Vec3,
+    angle: f64,
+    band: f64,
+) -> Result<()> {
+    for v in brep_p1::vertices(b, None)? {
+        let point = vertex::point(b, v)?;
+        let (dist, _) = line_point_distance(centre, axis, point);
+        if dist.partial_cmp(&band) != Some(std::cmp::Ordering::Less) {
+            continue;
+        }
+        let cover = chord_cover_tolerance(k, dist, angle);
+        vertex::set_tolerance(b, v, cover, true, false)?;
+    }
+    Ok(())
+}
+
+/// Tolerance for dropping a side curve that is the omitted corner.
+///
+/// With no band, the edge tolerance: a plain revolve. With one, a quarter-turn's
+/// control polygon is point-sized once its box is under the band, and only while
+/// both ends lie inside it. The outer wall's arc stays. The stored edge tolerance
+/// is unchanged.
+fn side_curve_degeneracy_tol(
+    k: &Kernel,
+    base_pt: Point3,
+    axis: Vec3,
+    curve: &Curve,
+    edge_tol: f64,
+    band: Option<f64>,
+) -> Result<f64> {
+    let Some(band) = band else {
+        return Ok(edge_tol);
+    };
+    let ivl = curve.natural_interval();
+    let start = curve.evaluate_point(k, ivl.min())?;
+    let end = curve.evaluate_point(k, ivl.max())?;
+    let (start_dist, _) = line_point_distance(base_pt, axis, start);
+    let (end_dist, _) = line_point_distance(base_pt, axis, end);
+    if start_dist < band && end_dist < band {
+        Ok(band.max(edge_tol))
+    } else {
+        Ok(edge_tol)
+    }
+}
+
+/// `sm_CheckEdgeVerticesOnAxis`: whether the edge's end vertices are within
+/// `on_axis` of the axis and, for a line, whether it is parallel or perpendicular
+/// to the axis. `on_axis` is the larger of the tolerance and the closed path's
+/// corner band. A band below the tolerance does not narrow the test. A plain
+/// revolve passes `eps`. The line-length test stays on `eps`.
 fn check_edge_vertices_on_axis(
     base_pt: Point3,
     axis: Vec3,
@@ -221,6 +314,7 @@ fn check_edge_vertices_on_axis(
     e: EdgeId,
     edge_is_line: bool,
     eps: f64,
+    on_axis: f64,
 ) -> Result<VerticesOnAxis> {
     // init output
     let mut out = VerticesOnAxis {
@@ -239,10 +333,10 @@ fn check_edge_vertices_on_axis(
     let (end_dist, _) = line_point_distance(base_pt, axis, end_pt);
 
     // set output: remember if EdgeEndPoints are on rotation axis
-    if start_dist < eps {
+    if start_dist < on_axis {
         out.start_on = true;
     }
-    if end_dist < eps {
+    if end_dist < on_axis {
         out.end_on = true;
     }
 
@@ -275,9 +369,10 @@ fn check_edge_on_axis(
     curve: &Curve,
     edge_is_line: bool,
     eps: f64,
+    on_axis: f64,
 ) -> Result<bool> {
     // see if edge->EndVertices are on rotation axis
-    let on = check_edge_vertices_on_axis(base_pt, axis, b, e, edge_is_line, eps)?;
+    let on = check_edge_vertices_on_axis(base_pt, axis, b, e, edge_is_line, eps, on_axis)?;
 
     // low work - either endVertex is not on rotation axis
     if !on.start_on || !on.end_on {
@@ -504,6 +599,10 @@ pub struct RotationalSweepGeometry {
     angle: f64,
     /// `m_dEps`: the tolerance for geometry on the axis, zero sweep lengths, lines.
     eps: f64,
+    /// Closed path of lines and arcs: [`omitted_corner_band`] of the path
+    /// arc's radius. `None` on a plain revolve, where on-axis tests use `eps` and
+    /// side curves use `start_curve_tol`.
+    omitted_corner_band: Option<f64>,
 }
 
 impl RotationalSweepGeometry {
@@ -518,16 +617,33 @@ impl RotationalSweepGeometry {
             axis: axis.unitize_or_z(),
             angle: angle_deg,
             eps,
+            omitted_corner_band: None,
         }
     }
 
     /// `Copy`: a new sweep geometry from this one's data (the axis is unitized again)
-    /// with the same analytics settings.
+    /// with the same analytics settings and omitted-corner band.
     #[must_use]
     pub fn copy(&self) -> Self {
         let mut new = Self::new(self.base_pt, self.axis, self.angle, self.eps);
         new.base.set_make_analytics(self.base.make_analytics);
+        new.omitted_corner_band = self.omitted_corner_band;
         new
+    }
+
+    /// The omitted-corner band of a closed path arc whose radius is `feature_scale`.
+    /// A plain revolve does not call this: on-axis tests stay on `eps`.
+    pub(crate) fn set_omitted_corner_scale(&mut self, feature_scale: f64) {
+        self.omitted_corner_band = Some(omitted_corner_band(feature_scale));
+    }
+
+    /// The larger of `eps` and the closed path's corner band. A band below `eps`
+    /// does not narrow the on-axis test. With no band, `eps`.
+    fn axis_reach(&self, eps: f64) -> f64 {
+        match self.omitted_corner_band {
+            Some(band) => smos_max(band, eps),
+            None => eps,
+        }
     }
 
     /// `m_sBasePt`.
@@ -688,7 +804,8 @@ impl RotationalSweepGeometry {
 
     /// `VertexSweepHigher`: the degree 2 circular arc swept by vertex `v`, with the
     /// vertex tolerance; `None` when the vertex is on the axis (within the larger of
-    /// the sweep and vertex tolerances).
+    /// the sweep and vertex tolerances and, when set, the closed path's corner
+    /// band). A band below that tolerance does not narrow the test.
     ///
     /// # Errors
     ///
@@ -703,7 +820,7 @@ impl RotationalSweepGeometry {
         let eps = smos_max(self.eps, orig_vertex_tolerance);
 
         let mut x_vect = original_pt - rot_center;
-        if x_vect.length() < eps {
+        if x_vect.length() < self.axis_reach(eps) {
             // point lies on axis
             return Ok(None);
         }
@@ -819,6 +936,7 @@ impl RotationalSweepGeometry {
             original_edge_curve,
             is_line,
             eps,
+            self.axis_reach(eps),
         )?;
 
         // no work - edge is on axis and it's not transformed by the rotation
@@ -857,7 +975,15 @@ impl RotationalSweepGeometry {
         let mut trim_ivl = original_edge_ivl;
         copied_orig_edge_curve.trim(k, &mut trim_ivl, TrimMode::Notify)?;
 
-        let on_axis = check_edge_vertices_on_axis(self.base_pt, self.axis, b, e, is_line, eps)?;
+        let on_axis = check_edge_vertices_on_axis(
+            self.base_pt,
+            self.axis,
+            b,
+            e,
+            is_line,
+            eps,
+            self.axis_reach(eps),
+        )?;
 
         // This setting seems to be needed for CreateLinearSweep
         let start_trim_curve_param = SurfParamType::U;
@@ -1093,7 +1219,15 @@ impl RotationalSweepGeometry {
         let mut end_vert_curve = None;
         let c = take(&mut a3d, 1)?;
         let uv = take_uv(&mut a_uv, 1)?;
-        let side = if c.is_degenerate(k, out.start_curve_tol, None)? {
+        let drop_tol = side_curve_degeneracy_tol(
+            k,
+            self.base_pt,
+            self.axis,
+            &c,
+            out.start_curve_tol,
+            self.omitted_corner_band,
+        )?;
+        let side = if c.is_degenerate(k, drop_tol, None)? {
             is_degenerate = true;
             None
         } else {
@@ -1129,7 +1263,15 @@ impl RotationalSweepGeometry {
         //----3----- the second side curve (NULL if degenerate)
         let c = take(&mut a3d, 3)?;
         let uv = take_uv(&mut a_uv, 3)?;
-        let side = if c.is_degenerate(k, out.start_curve_tol, None)? {
+        let drop_tol = side_curve_degeneracy_tol(
+            k,
+            self.base_pt,
+            self.axis,
+            &c,
+            out.start_curve_tol,
+            self.omitted_corner_band,
+        )?;
+        let side = if c.is_degenerate(k, drop_tol, None)? {
             is_degenerate = true;
             None
         } else {
@@ -1204,6 +1346,7 @@ impl RotationalSweepGeometry {
 
         let is_line = check_edge_curve_line(original_edge_curve, &original_edge_iv, eps)?;
 
+        let edge_eps = smos_max(self.eps, original_edge_tol);
         let edge_on_axis = check_edge_on_axis(
             k,
             self.base_pt,
@@ -1212,7 +1355,8 @@ impl RotationalSweepGeometry {
             e,
             original_edge_curve,
             is_line,
-            smos_max(self.eps, original_edge_tol),
+            edge_eps,
+            self.axis_reach(edge_eps),
         )?;
 
         let mut new_edge_curve = original_edge_curve.copy(k)?;
@@ -1299,6 +1443,7 @@ fn remove_first(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
     use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
     use crate::topology::{
         Edge, Edgeuse, EdgeuseId, EdgeuseOwner, Region, Shell, Vertex, Vertexuse, VertexuseOwner,
@@ -1471,7 +1616,7 @@ mod tests {
                 for f in [0.0, 0.2, 0.45, 0.7, 1.0] {
                     let p = rim.evaluate_point(&k, ivl.evaluate(f)).unwrap();
                     assert!(
-                        p.z.abs() <= 1e-12 && (p.x.hypot(p.y) - 1.0).abs() <= 1e-12,
+                        p.z.abs() <= 1e-12 && (det::hypot(p.x, p.y) - 1.0).abs() <= 1e-12,
                         "rim {p:?}"
                     );
                 }

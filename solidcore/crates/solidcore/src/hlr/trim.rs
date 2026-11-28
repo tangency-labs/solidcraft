@@ -28,6 +28,7 @@ use super::curve::C3;
 use super::surface::S3;
 use super::vec::V3;
 use crate::eval::SurfaceEval;
+use crate::math::det;
 use crate::math::Vec3;
 
 #[derive(Clone, Debug)]
@@ -382,7 +383,7 @@ pub(crate) fn build(face: &Face, edges: &[C3], surface: &S3, per_break: usize) -
     if !real.is_empty() && (open || area != 0.) {
         let len = |i: usize| {
             segs.get(i).map_or(0., |(a, b)| {
-                ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt()
+                (det::powi(b[0] - a[0], 2) + det::powi(b[1] - a[1], 2)).sqrt()
             })
         };
         let best = real
@@ -391,7 +392,7 @@ pub(crate) fn build(face: &Face, edges: &[C3], surface: &S3, per_break: usize) -
             .max_by(|a, b| len(*a).total_cmp(&len(*b)));
         if let Some((a, b)) = best.and_then(|i| segs.get(i)) {
             let m = [0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1])];
-            let l = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
+            let l = (det::powi(b[0] - a[0], 2) + det::powi(b[1] - a[1], 2)).sqrt();
             let n = [-(b[1] - a[1]) / l * sigma, (b[0] - a[0]) / l * sigma];
             // Stay well inside: a quarter of the distance to any other boundary piece.
             let mut room = l;
@@ -468,7 +469,7 @@ fn point_segment(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
     } else {
         0.
     };
-    ((a[0] + t * ex - p[0]).powi(2) + (a[1] + t * ey - p[1]).powi(2)).sqrt()
+    (det::powi(a[0] + t * ex - p[0], 2) + det::powi(a[1] + t * ey - p[1], 2)).sqrt()
 }
 
 impl Trim {

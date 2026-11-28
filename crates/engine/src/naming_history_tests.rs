@@ -1823,3 +1823,230 @@ fn a_renamed_piece_of_a_mirrored_cut_keeps_its_name_when_an_upstream_notch_takes
     assert!(has_volume(&s, "Beam", 176.0 * 400.0), "{}", volume_of(&s, "Beam"));
     assert!(has_volume(&s, "RightEnd", 2000.0 - 200.0), "{}", volume_of(&s, "RightEnd"));
 }
+
+/// #4341: suppressing or deleting the feature that created a blend's target body must never jump
+/// a Fillet or Chamfer onto another body in the design. Suppressing the upstream maker leaves the
+/// blend failing with a clear suppressed-maker diagnostic (nothing re-pointed, distinct from
+/// `Reselect`/`unknown body`) and recovers cleanly on unsuppress; deleting the upstream maker
+/// invalidates cached state and fails with an actionable missing-reference error.
+#[test]
+fn suppressing_or_deleting_target_body_never_jumps_blend_to_another_body() {
+    let fillet_removed = (4.0 - std::f64::consts::PI) * 30.0;
+    let chamfer_removed = 2.0 * 30.0;
+    for (command, size, removed) in [("solid.fillet", "radius", fillet_removed), ("solid.chamfer", "distance", chamfer_removed)] {
+        for clear_body in [false, true] {
+            let mut s = Session::default();
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S1"}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "solid.extrude", json!({"sketch": "S1", "distance": 10, "name": "Extrude1", "body_name": "Body1"}));
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S2"}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": [100, 0], "p1": [140, 30]}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "solid.extrude", json!({"sketch": "S2", "distance": 10, "operation": "new", "name": "Extrude2", "body_name": "Body2"}));
+            run(&mut s, command, json!({"edges": [[40, 15, 10]], size: 2, "name": "Blend"}));
+            if clear_body {
+                let bid = id(&s, "Blend");
+                match &mut s.doc_mut().feature_mut(bid).unwrap().kind {
+                    solidcraft_doc::FeatureKind::Fillet { body, .. } | solidcraft_doc::FeatureKind::Chamfer { body, .. } => *body = None,
+                    other => panic!("unexpected feature kind: {other:?}"),
+                }
+                s.refresh();
+            }
+            assert_eq!(error(&s, "Blend"), None, "{command} clear_body={clear_body}");
+            assert_eq!(warning(&s, "Blend"), None, "{command} clear_body={clear_body}");
+            assert!(has_volume(&s, "Body1", 12000.0 - removed), "{command}: {}", volume_of(&s, "Body1"));
+            assert!(has_volume(&s, "Body2", 12000.0), "{command}: {}", volume_of(&s, "Body2"));
+
+            // Suppressing Extrude1 leaves Blend failing with a suppressed-maker error (not Reselect)
+            // and must never touch Body2.
+            run(&mut s, "timeline.suppress", json!({"feature": "Extrude1", "suppressed": true}));
+            let suppressed_err = error(&s, "Blend").unwrap_or_default();
+            assert!(
+                suppressed_err.contains("Extrude1") && suppressed_err.contains("suppressed"),
+                "{command} clear_body={clear_body}: {suppressed_err}"
+            );
+            assert!(reselect(&s, "Blend").is_none(), "{command} clear_body={clear_body}: suppressed maker must not ask to reselect");
+            assert!(has_volume(&s, "Body2", 12000.0), "{command} jumped onto Body2: {}", volume_of(&s, "Body2"));
+            assert!(solid_at(&s, [139.9, 15.0, 9.9]), "{command} blended Body2's edge");
+
+            // Cold rebuild matches incremental state.
+            let mut cold = Session::new(solidcraft_doc::Document::clone(&s.doc));
+            cold.model.no_cache = true;
+            cold.refresh();
+            assert_eq!(error(&cold, "Blend"), error(&s, "Blend"), "cold {command}");
+            assert!(has_volume(&cold, "Body2", 12000.0), "cold {command}");
+
+            // Unsuppressing Extrude1 restores the exact original blend with no error or warning.
+            run(&mut s, "timeline.suppress", json!({"feature": "Extrude1", "suppressed": false}));
+            assert_eq!(error(&s, "Blend"), None, "unsuppressed {command}");
+            assert_eq!(warning(&s, "Blend"), None, "unsuppressed {command}");
+            assert!(has_volume(&s, "Body1", 12000.0 - removed), "unsuppressed {command}: {}", volume_of(&s, "Body1"));
+            assert!(has_volume(&s, "Body2", 12000.0), "unsuppressed {command}: {}", volume_of(&s, "Body2"));
+
+            // Transitioning from suppressed -> deleted invalidates any cached state and errors clearly.
+            run(&mut s, "timeline.suppress", json!({"feature": "Extrude1", "suppressed": true}));
+            assert!(error(&s, "Blend").as_deref().is_some_and(|e| e.contains("suppressed")));
+            run(&mut s, "timeline.delete", json!({"features": ["Extrude1"]}));
+            let err = error(&s, "Blend").expect("deleted upstream maker must error");
+            if clear_body {
+                assert!(reselect(&s, "Blend").is_some(), "{command}: expected reselect, got {err}");
+            } else {
+                assert!(err.contains("unknown body `Body1`"), "{command}: {err}");
+            }
+            assert!(has_volume(&s, "Body2", 12000.0), "{command} deleted maker jumped onto Body2: {}", volume_of(&s, "Body2"));
+        }
+    }
+}
+
+/// An unnamed single-body fillet saved without edge names, edge refs, or an explicit body keeps
+/// following the moved edge via the unique-nearest fallback (with a warning) when the sole box is
+/// resized so the pick lies more than 5% off the edge.
+#[test]
+fn single_body_unnamed_fillet_follows_moved_edge_after_resize_with_warning() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "len", "expression": "40 mm"}));
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": "len", "width": 30, "height": 10, "name": "Box1", "body_name": "Body1"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[40, 15, 10]], "radius": 2, "name": "Round"}));
+    let fid = id(&s, "Round");
+    {
+        let f = s.doc_mut().feature_mut(fid).unwrap();
+        f.edge_names.clear();
+        f.edge_refs.clear();
+        if let solidcraft_doc::FeatureKind::Fillet { body, .. } = &mut f.kind {
+            *body = None;
+        }
+    }
+    s.refresh();
+    let strip = (4.0 - std::f64::consts::PI) * 30.0;
+    assert_eq!(error(&s, "Round"), None);
+    assert_eq!(warning(&s, "Round"), None);
+    assert!(has_volume(&s, "Body1", 12000.0 - strip), "{}", volume_of(&s, "Body1"));
+
+    // Resize so the saved pick at x=40 is 6 mm off the moved edge at x=34 (> 5% of the ~46.4 mm
+    // body diagonal, so outside pick reach) while remaining uniquely nearest within 0.25 * size.
+    change(&mut s, "len", "34 mm");
+    assert_eq!(error(&s, "Round"), None);
+    let warn = warning(&s, "Round").unwrap_or_default();
+    assert!(warn.contains("re-found on the nearest edge"), "{warn}");
+    assert!(has_volume(&s, "Body1", 34.0 * 30.0 * 10.0 - strip), "{}", volume_of(&s, "Body1"));
+    assert!(!solid_at(&s, [33.9, 15.0, 9.9]), "fillet must land on the moved x=34 top edge");
+    assert!(solid_at(&s, [0.1, 15.0, 9.9]), "opposite top edge must stay sharp");
+}
+
+/// #4341: an unnamed legacy Fillet or Chamfer (empty `edge_names`, `body: None`) must neither
+/// remap its bounding box onto an unrelated body when its original body disappears nor jump onto
+/// an unrelated nearby edge on the same body when the picked edge is gone.
+#[test]
+fn unnamed_blend_never_jumps_to_another_body_or_unrelated_edge() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "len", "expression": "40 mm"}));
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": "len", "width": 30, "height": 10, "name": "Extrude1", "body_name": "Body1"}));
+    run(
+        &mut s,
+        "solid.box",
+        json!({"corner": [100, 0, 0], "length": 40, "width": 30, "height": 10, "operation": "new", "name": "Extrude2", "body_name": "Body2"}),
+    );
+    run(&mut s, "solid.chamfer", json!({"edges": [[40, 15, 10]], "distance": 2, "name": "Bevel"}));
+    let bid = id(&s, "Bevel");
+    {
+        let f = s.doc_mut().feature_mut(bid).unwrap();
+        f.edge_names.clear();
+        if let solidcraft_doc::FeatureKind::Chamfer { body, .. } = &mut f.kind {
+            *body = None;
+        }
+    }
+    s.refresh();
+    assert_eq!(error(&s, "Bevel"), None);
+    assert!(has_volume(&s, "Body1", 12000.0 - 60.0));
+    assert!(has_volume(&s, "Body2", 12000.0));
+
+    // Suppressing Extrude1 leaves only Body2: EdgeRef must NOT remap onto Body2.
+    run(&mut s, "timeline.suppress", json!({"feature": "Extrude1", "suppressed": true}));
+    assert!(error(&s, "Bevel").is_some(), "unnamed chamfer with Body1 gone must fail cleanly");
+    assert!(has_volume(&s, "Body2", 12000.0), "unnamed chamfer jumped to Body2: {}", volume_of(&s, "Body2"));
+
+    // Restore Extrude1, drop edge_refs, and shrink Body1 so the picked point is 6 mm off the
+    // nearest edge (within the old 0.25 * size jump radius): must refuse instead of chamfering x=34.
+    run(&mut s, "timeline.suppress", json!({"feature": "Extrude1", "suppressed": false}));
+    s.doc_mut().feature_mut(bid).unwrap().edge_refs.clear();
+    change(&mut s, "len", "34 mm");
+    assert!(error(&s, "Bevel").is_some(), "disappeared edge must fail cleanly instead of jumping");
+    assert!(has_volume(&s, "Body1", 34.0 * 30.0 * 10.0), "chamfer jumped to another edge on Body1: {}", volume_of(&s, "Body1"));
+    assert!(has_volume(&s, "Body2", 12000.0));
+}
+
+/// #4341: suppressing an upstream joined feature on the same body leaves a Fillet/Chamfer on its
+/// edges failing with a suppressed-feature diagnostic (leaving the base body untouched and
+/// distinct from `Reselect`), recovers cleanly on unsuppress, and transitions to `Reselect` when
+/// the maker feature is deleted instead.
+#[test]
+fn suppressed_vs_deleted_joined_maker_on_same_body_is_distinct_and_recovers() {
+    let fillet_removed = (1.0 - std::f64::consts::FRAC_PI_4) * 10.0;
+    let chamfer_removed = 0.5 * 10.0;
+    for (command, size, removed) in [("solid.fillet", "radius", fillet_removed), ("solid.chamfer", "distance", chamfer_removed)] {
+        let mut s = Session::default();
+        block(&mut s);
+        run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10, "name": "BossSketch"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [15, 10], "p1": [25, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "BossSketch", "distance": 5, "operation": "join", "name": "Boss"}));
+        run(&mut s, command, json!({"edges": [[25, 15, 15]], size: 1, "name": "Blend", "tangent_chain": false}));
+        assert_eq!(error(&s, "Blend"), None, "{command}");
+        assert!(has_volume(&s, "Body1", 12500.0 - removed), "{command}: {}", volume_of(&s, "Body1"));
+
+        // Suppress Boss: Body1 stays at 12000 mm³, Blend fails naming suppressed Boss (not Reselect).
+        run(&mut s, "timeline.suppress", json!({"feature": "Boss", "suppressed": true}));
+        let suppressed_err = error(&s, "Blend").unwrap_or_default();
+        assert!(suppressed_err.contains("Boss") && suppressed_err.contains("suppressed"), "{command}: {suppressed_err}");
+        assert!(reselect(&s, "Blend").is_none(), "suppressed {command} must not ask to reselect");
+        assert!(has_volume(&s, "Body1", 12000.0), "suppressed {command} touched Body1: {}", volume_of(&s, "Body1"));
+
+        // Unsuppress Boss: Blend resolves the original edge again.
+        run(&mut s, "timeline.suppress", json!({"feature": "Boss", "suppressed": false}));
+        assert_eq!(error(&s, "Blend"), None, "unsuppressed {command}");
+        assert_eq!(warning(&s, "Blend"), None, "unsuppressed {command}");
+        assert!(has_volume(&s, "Body1", 12500.0 - removed), "unsuppressed {command}: {}", volume_of(&s, "Body1"));
+
+        // Suppress then delete Boss: must switch cleanly from suppressed error to Reselect error.
+        run(&mut s, "timeline.suppress", json!({"feature": "Boss", "suppressed": true}));
+        assert!(error(&s, "Blend").as_deref().is_some_and(|e| e.contains("suppressed")));
+        run(&mut s, "timeline.delete", json!({"features": ["Boss"]}));
+        assert!(reselect(&s, "Blend").is_some(), "deleted {command}: {:?}", error(&s, "Blend"));
+        assert!(has_volume(&s, "Body1", 12000.0), "deleted {command} touched Body1: {}", volume_of(&s, "Body1"));
+    }
+}
+
+/// #4341: a single Fillet spanning two bodies skips the edge whose maker is suppressed (with a
+/// warning) while keeping only the surviving body's own edge rounded, never jumping the skipped
+/// edge onto the surviving body.
+#[test]
+fn multi_body_blend_skips_suppressed_body_without_jumping_to_surviving_body() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S1"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "S1", "distance": 10, "name": "Extrude1", "body_name": "Body1"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S2"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [100, 0], "p1": [140, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "S2", "distance": 10, "operation": "new", "name": "Extrude2", "body_name": "Body2"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[40, 15, 10], [140, 15, 10]], "radius": 2, "name": "Both"}));
+    let strip = (4.0 - std::f64::consts::PI) * 30.0;
+    assert_eq!(error(&s, "Both"), None);
+    assert!(has_volume(&s, "Body1", 12000.0 - strip));
+    assert!(has_volume(&s, "Body2", 12000.0 - strip));
+
+    run(&mut s, "timeline.suppress", json!({"feature": "Extrude1", "suppressed": true}));
+    assert_eq!(error(&s, "Both"), None);
+    let warn = warning(&s, "Both").unwrap_or_default();
+    assert!(warn.contains("Extrude1") && warn.contains("suppressed"), "{warn}");
+    assert!(has_volume(&s, "Body2", 12000.0 - strip), "Body2 must keep only its own rounded edge: {}", volume_of(&s, "Body2"));
+    assert!(solid_at(&s, [100.1, 15.0, 9.9]), "Body2's opposite top edge must stay sharp");
+
+    run(&mut s, "timeline.suppress", json!({"feature": "Extrude1", "suppressed": false}));
+    assert_eq!(error(&s, "Both"), None);
+    assert_eq!(warning(&s, "Both"), None);
+    assert!(has_volume(&s, "Body1", 12000.0 - strip));
+    assert!(has_volume(&s, "Body2", 12000.0 - strip));
+}

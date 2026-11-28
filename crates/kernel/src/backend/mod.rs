@@ -8,7 +8,7 @@
 //! into [`BackendError`] for anything that compares kernels.
 
 use solidcore_record::brep::Brep;
-use solidcraft_kernel_api::{Backend, BackendError, BackendId, Exported, OpKind, Support};
+use solidcraft_kernel_api::{Backend, BackendError, BackendId, ExactBody, ExactExported, Exported, OpKind, Support};
 
 mod affine;
 mod cell_grid;
@@ -68,6 +68,16 @@ impl Backend for Solidcore {
             return Err(KernelError::Failed("a mesh body has no B-rep record to export".into()));
         }
         Ok(Exported { record: form.record().clone(), history: form.history().cloned() })
+    }
+
+    /// An exact body assembled by solidcore's assembly stage, with no history (it has no
+    /// operation's operands to be over).
+    fn import_exact(&self, body: &ExactBody) -> Option<Result<Body>> {
+        Some(crate::exact::body_from_exact(ExactExported { body: body.clone(), history: None }, &[]))
+    }
+
+    fn export_exact(&self, form: &Body) -> Option<Result<ExactExported>> {
+        Some(crate::exact::exact_exported(form))
     }
 }
 

@@ -59,6 +59,7 @@ use crate::error::Result;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::vector3d::Vec3;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::nurbs::math::gamma;
 use crate::surface::surface::p2::SurfaceKind;
 use crate::surface::surface::Surface;
@@ -95,7 +96,7 @@ fn seen_within(rho: f64, len: f64, e: f64) -> Option<f64> {
     if !(num.is_finite() && den.is_finite() && num >= 0.0 && den > 0.0 && num < den) {
         return None;
     }
-    let half = (num / den).asin() * (1.0 + gamma(8)) + gamma(8);
+    let half = det::asin(num / den) * (1.0 + gamma(8)) + gamma(8);
     (half.is_finite() && half < 0.5 * std::f64::consts::PI).then_some(half)
 }
 
@@ -171,7 +172,7 @@ impl Surface {
 
 /// The angle between `a` and `b` as lines, by `atan2` of the cross and the dot products.
 fn line_angle(a: Vec3, b: Vec3) -> f64 {
-    let between = a.cross(b).length().atan2(a.dot(b));
+    let between = det::atan2(a.cross(b).length(), a.dot(b));
     between.min(std::f64::consts::PI - between)
 }
 
@@ -243,7 +244,7 @@ pub(crate) fn crossing_line_in_ball(
     let [a1, a2] = crossing.axes;
     let line = a1.cross(a2);
     let len = line.length();
-    let sine = crossing.theta.sin() * (1.0 - gamma(4));
+    let sine = det::sin(crossing.theta) * (1.0 - gamma(4));
     if !(len.is_finite() && len > 0.0 && sine > 0.0) {
         return None;
     }
@@ -295,7 +296,7 @@ fn least_crossing_sine(
         let halves = piece > rho && x < mid && mid < y;
         match theta {
             Some((theta, wide)) if wide <= FINE || !halves => {
-                least = least.min(theta.sin() * (1.0 - gamma(4)));
+                least = least.min(det::sin(theta) * (1.0 - gamma(4)));
             }
             _ if halves => {
                 stack.push((mid, y));
@@ -400,23 +401,27 @@ mod tests {
         // points on each surface, with their exact normals
         let radius = 0.05;
         let on_sphere = |u: f64, v: f64| {
-            let n = Vec3::new(v.cos() * u.cos(), v.cos() * u.sin(), v.sin());
+            let n = Vec3::new(
+                det::cos(v) * det::cos(u),
+                det::cos(v) * det::sin(u),
+                det::sin(v),
+            );
             (n, n)
         };
         let on_cylinder = |u: f64, v: f64| {
-            let n = Vec3::new(u.cos(), u.sin(), 0.0);
+            let n = Vec3::new(det::cos(u), det::sin(u), 0.0);
             (n * 2.0 + Vec3::Z * (2.5 + v), n)
         };
         // radius 2 at z = 0 down to 1 at z = 3: slope -1/3
         let on_cone = |u: f64, v: f64| {
             let h = 1.5 + v;
             let r = 2.0 - h / 3.0;
-            let radial = Vec3::new(u.cos(), u.sin(), 0.0);
+            let radial = Vec3::new(det::cos(u), det::sin(u), 0.0);
             (radial * r + Vec3::Z * h, radial + Vec3::Z / 3.0)
         };
         let on_torus = |u: f64, v: f64| {
-            let radial = Vec3::new(u.cos(), u.sin(), 0.0);
-            let n = radial * v.cos() + Vec3::Z * v.sin();
+            let radial = Vec3::new(det::cos(u), det::sin(u), 0.0);
+            let n = radial * det::cos(v) + Vec3::Z * det::sin(v);
             (radial * 3.0 + n, n)
         };
         let cases: [(&Surface, &Point); 4] = [

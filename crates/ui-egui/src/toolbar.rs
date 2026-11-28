@@ -3090,6 +3090,12 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
             }
             continue;
         }
+        // Enter places the Dimension tool's dimension where its preview is, as a click there does
+        // (#22661). A focused button keeps its own Enter: no shortcut runs while a widget has the
+        // keyboard (above). Otherwise Enter goes on to the keymap.
+        if drawing && k == Key::Enter && mods.is_none() && crate::drawing_workspace::dimension::place_preview(app) {
+            continue;
+        }
         // Delete and Backspace delete the selection through the model's own path.
         if drawing_history && matches!(k, Key::Delete | Key::Backspace) && !mods.command && !mods.alt {
             crate::viewport::delete_selection(app);
@@ -5129,7 +5135,9 @@ mod dropdown_tests {
         for theme in ["dark", "blueprint"] {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
-            h.call("ui.resize", json!({"width":1280,"height":800}));
+            // Tall enough that the whole MODIFY menu (Transform Face made it one row longer) fits without
+            // scrolling, so its separator before the ungrouped commands is on screen to count.
+            h.call("ui.resize", json!({"width":1280,"height":1100}));
             h.call("ui.prefs", json!({"theme": theme, "construct_menu_groups": true, "ribbon_icon_grid": false}));
             for panel in ["panel:MODEL:MODIFY", "panel:MODEL:CONSTRUCT"] {
                 h.frames(4);
@@ -5137,7 +5145,7 @@ mod dropdown_tests {
                 h.frames(6);
                 let bounds = crate::scenario::rect_of("toolbar_dropdown").expect("the drop-down is open");
                 let mut output = h.ctx.run_ui(
-                    egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 800.0))), ..Default::default() },
+                    egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 1100.0))), ..Default::default() },
                     |ui| h.app.ui(ui),
                 );
                 output.textures_delta.clear();

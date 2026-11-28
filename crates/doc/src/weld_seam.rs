@@ -462,7 +462,7 @@ impl Laid {
     /// A one-face planar sheet with the piece, moved by `lift`, as one of its edges, and that
     /// edge's record index: a line closed by a triangle standing off it along `n`, an arc by the
     /// two lines to its centre.
-    fn helper(&self, lift: [f64; 3], n: [f64; 3], size: f64, tol: f64) -> Result<(Body, usize)> {
+    pub(crate) fn helper(&self, lift: [f64; 3], n: [f64; 3], size: f64, tol: f64) -> Result<(Body, usize)> {
         let (a, b) = self.ends();
         let (a, b) = (add(a, lift), add(b, lift));
         let curves = match *self {

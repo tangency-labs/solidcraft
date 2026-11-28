@@ -2957,7 +2957,9 @@ fn a_tapered_foot_under_a_part_joins_as_drawn() {
 /// along the sketch normal and the walls are drafted from there, so the section at the start
 /// plane is the profile itself and the solid is the frustum over it, moved along the normal by
 /// the offset. Controls that build today: the same extrude with the taper and no offset, and
-/// with the offset and no taper. Two-sided and symmetric tapers are still refused, by name.
+/// with the offset and no taper. A taper with a symmetric offset, and one on a thin wall with
+/// two sides, are still refused, by name (two-sided and symmetric tapers build:
+/// `a_symmetric_taper_drafts_both_halves_from_the_start`).
 #[test]
 fn a_drafted_extrude_starts_at_an_offset() {
     use solidcraft_kernel::{FaceSurface, face_surface, measure as measure_body};
@@ -3045,13 +3047,207 @@ fn a_drafted_extrude_starts_at_an_offset() {
     }
 
     // The extents that are still to come are refused, and say which they are.
-    for p in [json!({"distance":h,"distance2":5,"taper":"6 deg"}), json!({"distance":h,"direction":"symmetric","taper":"6 deg"})] {
+    for (p, why) in [
+        (json!({"distance":h,"direction":"symmetric","start_offset":off,"symmetric_offset":true,"taper":"6 deg"}), "a taper with symmetric offset"),
+        (json!({"distance":h,"distance2":5,"thin":true,"thickness":1,"taper":"6 deg"}), "a taper on a thin extrude with two sides or symmetric"),
+    ] {
         let mut s = Session::default();
         run(&mut s, "sketch.create", json!({"plane":"XY"}));
         run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[w,d]}));
         run(&mut s, "sketch.finish", json!({}));
         let e = s.execute("solid.extrude", &p).unwrap_err().to_string();
-        assert!(e.contains("not supported yet: taper with two-sided or symmetric extents"), "{p}: {e}");
+        assert!(e.contains(&format!("not supported yet: {why}")), "{p}: {e}");
+    }
+}
+
+/// The solid a drafted extrude of the `w` x `d` rectangle at (0, 0)..(w, d) on XY makes: one body
+/// of one lump. Its volume, area, height range and faces: `walls` planes leaning by the tapers
+/// and two flat caps, at `z0` and `z1`, none on the plane the halves meet on.
+fn drafted_solid(s: &mut Session, (w, d): (f64, f64), (z0, z1): (f64, f64), walls: usize) -> (f64, f64) {
+    use solidcraft_kernel::{FaceSurface, face_surface, measure as measure_body};
+    let v = volume(s);
+    let st = s.model.state();
+    assert_eq!(st.bodies.len(), 1, "one body");
+    let b = &st.body("B").unwrap().body;
+    let m = measure_body(b).unwrap();
+    assert_eq!(m.shells, 1, "one lump");
+    assert!(b.validity().is_empty(), "{:?}", b.validity());
+    assert!((m.bbox.min.z - z0).abs() < 1e-9 && (m.bbox.max.z - z1).abs() < 1e-9, "{:?} for z {z0}..{z1}", m.bbox);
+    let (mut planes, mut caps) = (0, 0);
+    for i in 0..b.face_count() {
+        match face_surface(b, i) {
+            Some(FaceSurface::Plane { normal, point }) if normal.z.abs() > 1.0 - 1e-9 => {
+                caps += 1;
+                assert!((point.z - z0).abs() < 1e-9 || (point.z - z1).abs() < 1e-9, "a cap at z = {}", point.z);
+            }
+            Some(FaceSurface::Plane { .. }) => planes += 1,
+            other => panic!("face {i} is {other:?}"),
+        }
+    }
+    assert_eq!((planes, caps), (walls, 2), "{w} x {d}");
+    (v, m.area)
+}
+
+/// A rectangle `w` x `d` drafted so each side moves out by `s * t` at the signed height `s` along
+/// the first side's way (`t` = tan of the taper): A(s) = (w + 2 s t)(d + 2 s t), so over `s0..s1`
+/// V = w d (s1 - s0) + (w + d) t (s1^2 - s0^2) + 4/3 t^2 (s1^3 - s0^3) (exact: A is quadratic).
+/// The frustum of height h is `drafted_volume(w, d, 0, h, t)`.
+fn drafted_volume(w: f64, d: f64, s0: f64, s1: f64, t: f64) -> f64 {
+    w * d * (s1 - s0) + (w + d) * t * (s1 * s1 - s0 * s0) + 4.0 / 3.0 * t * t * (s1.powi(3) - s0.powi(3))
+}
+
+/// Area of the walls of that rectangle's frustum of height `h` drafted `a` radians: four
+/// trapezoids, each (base + top)/2 by the slant height h / cos a.
+fn drafted_walls(w: f64, d: f64, h: f64, a: f64) -> f64 {
+    let t = a.tan();
+    2.0 * h / a.cos() * ((w + h * t) + (d + h * t))
+}
+
+/// A symmetric extrude with a taper (#22419): each half is drafted by the taper from the start
+/// plane outward, so the solid is two frusta over the profile, back to back. 24 mm total at
+/// 6 deg: V = 2 * frustum_12(tan 6), and the area is the two far caps (w + 2*12 t)(d + 2*12 t)
+/// plus both halves' walls. The halves meet on the profile at z = 0, which is no face.
+#[test]
+fn a_symmetric_taper_drafts_both_halves_from_the_start() {
+    let (w, d, h) = (30.0, 20.0, 12.0);
+    let a = 6f64.to_radians();
+    let t = a.tan();
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[w,d]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance":2.0 * h,"direction":"symmetric","taper":"6 deg","body_name":"B"}));
+    let (v, area) = drafted_solid(&mut s, (w, d), (-h, h), 8);
+    let v_want = 2.0 * drafted_volume(w, d, 0.0, h, t);
+    let far = (w + 2.0 * h * t) * (d + 2.0 * h * t);
+    let a_want = 2.0 * (far + drafted_walls(w, d, h, a));
+    assert!(rel(v, v_want) < 1e-9, "{v} mm3 for {v_want}");
+    assert!(rel(area, a_want) < 1e-9, "{area} mm2 for {a_want}");
+}
+
+/// Two Sides with a taper on each (#22419): the first side 12 mm up drafted 6 deg, the second
+/// 5 mm down drafted `taper2`, each from the start plane, so V = frustum_12(tan 6) +
+/// frustum_5(tan t2). Without `taper2` the second side takes the first's taper, as a symmetric
+/// extrude's halves do. With `taper2` = 0 the second side is the straight prism, w d 5. With
+/// `taper2` = -6 deg the second side's walls continue the first's
+/// through the profile: one drafted solid over s in -5..12, whose walls are one plane each.
+#[test]
+fn a_two_sided_taper_drafts_each_side_by_its_own_taper() {
+    let (w, d) = (30.0, 20.0);
+    let tan = |deg: f64| deg.to_radians().tan();
+    // (taper2, wall faces, the volume: side 1 over 0..12 at 6 deg, side 2 over 0..5 at its taper)
+    let f = |s0: f64, s1: f64, deg: f64| drafted_volume(w, d, s0, s1, tan(deg));
+    for (taper2, walls, v_want) in [
+        (Some("-3 deg"), 8, f(0.0, 12.0, 6.0) + f(0.0, 5.0, -3.0)),
+        (None, 8, f(0.0, 12.0, 6.0) + f(0.0, 5.0, 6.0)),
+        // An undrafted second side is the straight prism over the profile: w d 5.
+        (Some("0 deg"), 8, f(0.0, 12.0, 6.0) + w * d * 5.0),
+        // One plane through the profile: the section at s along the first side is grown by
+        // s tan 6, for s from -5 to 12.
+        (Some("-6 deg"), 4, f(-5.0, 12.0, 6.0)),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane":"XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[w,d]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"distance":12,"distance2":5,"taper":"6 deg","body_name":"B"});
+        if let Some(t2) = taper2 {
+            p["taper2"] = json!(t2);
+        }
+        run(&mut s, "solid.extrude", p);
+        let (v, _) = drafted_solid(&mut s, (w, d), (-5.0, 12.0), walls);
+        assert!(rel(v, v_want) < 1e-9, "taper2 {taper2:?}: {v} mm3 for {v_want}");
+    }
+}
+
+/// A two-sided drafted cut inside a block (#22419) takes out exactly the two frusta: the block,
+/// 50 x 40 x 40 from (-10, -10, -20), less frustum_12(tan 6) + frustum_5(tan -3) over the
+/// 30 x 20 profile, which stays inside it (it grows at most 12 tan 6 = 1.3 mm).
+#[test]
+fn a_two_sided_drafted_cut_removes_both_frusta() {
+    let (w, d) = (30.0, 20.0);
+    let tan = |deg: f64| deg.to_radians().tan();
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":50,"width":40,"height":40,"corner":[-10,-10,-20],"body_name":"Block"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[w,d]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance":12,"distance2":5,"taper":"6 deg","taper2":"-3 deg","operation":"cut","targets":["Block"]}));
+    let removed = drafted_volume(w, d, 0.0, 12.0, tan(6.0)) + drafted_volume(w, d, 0.0, 5.0, tan(-3.0));
+    let want = 50.0 * 40.0 * 40.0 - removed;
+    let v = volume(&mut s);
+    assert!(rel(v, want) < 1e-9, "{v} mm3 for {want}");
+    assert_eq!(s.model.state().bodies.len(), 1);
+}
+
+/// A taper renames no cap (#22419): a symmetric extrude started 8 mm up, 10 mm in total (both
+/// caps above the sketch plane, at 3 and 13 along its normal), a two-sided one, 12 up and 5 down,
+/// and that one with an undrafted second side (`taper2` 0) give their caps the names the
+/// straight extrude gives them. The symmetric one again on a sketch whose normal is -Z (x along
+/// X, y along -Y), where its caps lie at z = -3 and -13: two caps named alike are numbered by
+/// where they lie, whichever way the sketch faces.
+#[test]
+fn a_taper_on_two_sides_keeps_the_straight_cap_names() {
+    let (w, d) = (30.0, 20.0);
+    let xy = json!("XY");
+    let down = json!({"origin":[0,0,0],"x_dir":[1,0,0],"y_dir":[0,-1,0]});
+    for (plane, p, y, (z0, z1)) in [
+        (&xy, json!({"distance":10,"direction":"symmetric","start_offset":8}), d / 2.0, (3.0, 13.0)),
+        (&xy, json!({"distance":12,"distance2":5}), d / 2.0, (-5.0, 12.0)),
+        (&xy, json!({"distance":12,"distance2":5,"taper2":"0 deg"}), d / 2.0, (-5.0, 12.0)),
+        (&down, json!({"distance":10,"direction":"symmetric","start_offset":8}), -d / 2.0, (-3.0, -13.0)),
+    ] {
+        let caps = |taper: Option<&str>| {
+            let mut s = Session::default();
+            run(&mut s, "sketch.create", json!({"plane":plane}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[w,d]}));
+            run(&mut s, "sketch.finish", json!({}));
+            let mut p = p.clone();
+            if let Some(t) = taper {
+                p["taper"] = json!(t);
+            }
+            run(&mut s, "solid.extrude", p);
+            let pts = [solidcore_record::Vec3::new(w / 2.0, y, z0), solidcore_record::Vec3::new(w / 2.0, y, z1)];
+            solidcraft_doc::naming::face_names_at(&s.model.state(), &pts)
+        };
+        let straight = caps(None);
+        assert!(straight.iter().all(|n| !n.is_empty()), "{plane} {p}: {straight:?}");
+        let tapered = caps(Some("6 deg"));
+        assert_eq!(tapered, straight, "{plane} {p}: tapered {tapered:?}, straight {straight:?}");
+    }
+}
+
+/// `taper2` is the second side's: without `distance2` the command refuses it, by name.
+#[test]
+fn a_second_taper_needs_a_second_side() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[30,20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let e = s.execute("solid.extrude", &json!({"distance":12,"taper":"6 deg","taper2":"3 deg"})).unwrap_err().to_string();
+    assert!(e.contains("`taper2` goes with `distance2`"), "{e}");
+}
+
+/// A second side that runs Through All or To Object (#18691) takes no taper yet: a taper on the
+/// first side (which the second would take) or one of its own is refused, by name, and the
+/// design keeps no half-built feature.
+#[test]
+fn a_taper_with_the_second_side_through_all_or_to_object_is_refused() {
+    for second in [json!({"through_all2":true}), json!({"to2":[0,0,-20]})] {
+        for tapers in [json!({"taper":"6 deg"}), json!({"taper":"6 deg","taper2":"3 deg"}), json!({"taper":"0 deg","taper2":"3 deg"})] {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", json!({"length":40,"width":40,"height":40,"corner":[-20,-20,-20],"body_name":"Box"}));
+            run(&mut s, "sketch.create", json!({"plane":"XY","name":"Hole"}));
+            run(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":5}));
+            run(&mut s, "sketch.finish", json!({}));
+            let before = s.doc.to_json();
+            let mut p = json!({"sketch":"Hole","distance":"5 mm","operation":"cut","targets":["Box"]});
+            p.as_object_mut().unwrap().extend(second.as_object().unwrap().clone());
+            p.as_object_mut().unwrap().extend(tapers.as_object().unwrap().clone());
+            let e = s.execute("solid.extrude", &p).unwrap_err().to_string();
+            assert!(e.contains("a taper with the second side Through All or To Object"), "{second} {tapers}: {e}");
+            assert_eq!(s.doc.to_json(), before, "{second} {tapers}: the design is unchanged");
+        }
     }
 }
 
