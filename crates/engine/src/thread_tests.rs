@@ -2419,3 +2419,316 @@ fn a_thread_goes_on_a_body_of_its_own_component() {
     let on: Vec<String> = s.model.state().threads.iter().map(|t| t.body.clone()).collect();
     assert_eq!(on, [body_of(&s, "Stud B")]);
 }
+/// A plain `solid.move` (no copy) must carry the body's thread record with the body.
+/// The record keeps the thread feature's id and its hand; a rigid turn does not flip that hand,
+/// and a body left out of the move keeps the record it had. A copied move is covered above.
+#[test]
+fn a_plain_move_carries_the_bodys_thread_record() {
+    // A modelled thread is cut into the body and moves with it; only a cosmetic one has a record to carry.
+    {
+        let modeled = false;
+        let mut s = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+        run(&mut s, "solid.cylinder", json!({"radius":4,"height":8,"body_name":"Shaft"}));
+        let shaft_feature =
+            run(&mut s, "solid.thread", json!({"face":[4,0,4],"designation":"M8-6g","hand":"left","modeled":modeled}))["feature"]
+                .clone();
+        run(&mut s, "solid.cylinder", json!({"radius":4,"height":8,"base":[40,0,0],"body_name":"Peg","operation":"new"}));
+        let peg_feature =
+            run(&mut s, "solid.thread", json!({"face":[44,0,4],"designation":"M8-6g","modeled":modeled}))["feature"].clone();
+        assert_ne!(shaft_feature, peg_feature, "modeled {modeled}, before the move: the two threads are different features");
+
+        let (shaft_start, shaft_end, peg_start, peg_end) = {
+            let listed = run(&mut s, "model.threads", json!({}));
+            let threads = listed["threads"].as_array().unwrap_or_else(|| panic!("modeled {modeled}, before the move: {listed}"));
+            let pick = |body: &str| {
+                let found: Vec<_> = threads.iter().filter(|t| t["body"] == body).collect();
+                assert_eq!(found.len(), 1, "modeled {modeled}, before the move: expected one {body} record, got {listed}");
+                found[0]
+            };
+            let num = |t: &Value, body: &str, key: &str| {
+                t[key].as_f64().unwrap_or_else(|| panic!("modeled {modeled}, before the move: {body} {key} is {t}"))
+            };
+            let shaft = pick("Shaft");
+            let peg = pick("Peg");
+            (num(shaft, "Shaft", "start"), num(shaft, "Shaft", "end"), num(peg, "Peg", "start"), num(peg, "Peg", "end"))
+        };
+
+        let coords_near = |got: &Value, want: [f64; 3], step: &str, what: &str| {
+            for (i, want_i) in want.into_iter().enumerate() {
+                let g = got.get(i).and_then(Value::as_f64);
+                assert!(g.is_some_and(|g| (g - want_i).abs() < 1e-6), "modeled {modeled}, {step}: {what}[{i}] is {got}, expected {want:?}");
+            }
+        };
+        let scalar_near = |got: &Value, want: f64, step: &str, what: &str| {
+            let g = got.as_f64();
+            assert!(g.is_some_and(|g| (g - want).abs() < 1e-6), "modeled {modeled}, {step}: {what} is {got}, expected {want}");
+        };
+        let expect = |s: &mut Session, step: &str, shaft_point: [f64; 3], shaft_axis: [f64; 3]| {
+            let listed = run(s, "model.threads", json!({}));
+            let threads = listed["threads"].as_array().unwrap_or_else(|| panic!("modeled {modeled}, {step}: {listed}"));
+            assert_eq!(threads.len(), 2, "modeled {modeled}, {step}: expected one record each for Shaft and Peg, got {listed}");
+            for (body, feature, point, axis, hand, start, end) in [
+                ("Shaft", &shaft_feature, shaft_point, shaft_axis, "left", shaft_start, shaft_end),
+                ("Peg", &peg_feature, [40.0, 0.0, 0.0], [0.0, 0.0, 1.0], "right", peg_start, peg_end),
+            ] {
+                let found: Vec<_> = threads.iter().filter(|t| t["body"] == body).collect();
+                assert_eq!(found.len(), 1, "modeled {modeled}, {step}: expected one {body} record, got {listed}");
+                let t = found[0];
+                coords_near(&t["axis_point"], point, step, &format!("{body} axis_point"));
+                coords_near(&t["axis"], axis, step, &format!("{body} axis"));
+                assert_eq!(t["feature"], *feature, "modeled {modeled}, {step}: {body} feature id, got {t}");
+                assert_eq!(t["body"], body, "modeled {modeled}, {step}: body, got {t}");
+                assert_eq!(t["hand"], hand, "modeled {modeled}, {step}: {body} hand, got {t}");
+                assert_eq!(t["designation"], "M8-6g", "modeled {modeled}, {step}: {body} designation, got {t}");
+                scalar_near(&t["start"], start, step, &format!("{body} start"));
+                scalar_near(&t["end"], end, step, &format!("{body} end"));
+            }
+        };
+        let body_names = |s: &Session| {
+            let mut names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+            names.sort();
+            names
+        };
+        let at_origin = ([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        let translated = ([30.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        // Right-hand quarter turn about +X: (x, y, z) relative to the pivot maps to (x, -z, y).
+        let turned = ([30.0, 0.0, 0.0], [0.0, -1.0, 0.0]);
+
+        expect(&mut s, "before the move", at_origin.0, at_origin.1);
+
+        let moved = run(&mut s, "solid.move", json!({"bodies":["Shaft"],"translate":[30,0,0]}));
+        assert_eq!(moved["created_bodies"], json!([]), "modeled {modeled}, after the 30 mm move: a plain move must not create a copy: {moved}");
+        assert_eq!(
+            body_names(&s),
+            ["Peg".to_string(), "Shaft".to_string()],
+            "modeled {modeled}, after the 30 mm move: Shaft stays the moved body and Peg stays"
+        );
+        expect(&mut s, "after the 30 mm move", translated.0, translated.1);
+        let contains = |at: [f64; 3]| {
+            let state = s.model.state();
+            let shaft = state.body("Shaft").unwrap_or_else(|| panic!("modeled {modeled}, after the 30 mm move: Shaft is gone"));
+            shaft.body.classify_point(Vec3::new(at[0], at[1], at[2])).unwrap() == solidcraft_kernel::PointClass::Inside
+        };
+        assert!(contains([30.0, 0.0, 4.0]), "modeled {modeled}, after the 30 mm move: the shaft should contain [30, 0, 4]");
+        assert!(!contains([0.0, 0.0, 4.0]), "modeled {modeled}, after the 30 mm move: the shaft should not contain [0, 0, 4]");
+
+        let turned_reply = run(&mut s, "solid.move", json!({"bodies":["Shaft"],"axis":[1,0,0],"angle":"90 deg","origin":[30,0,0]}));
+        assert_eq!(
+            turned_reply["created_bodies"],
+            json!([]),
+            "modeled {modeled}, after the 90 deg turn: a plain move must not create a copy: {turned_reply}"
+        );
+        assert_eq!(body_names(&s), ["Peg".to_string(), "Shaft".to_string()], "modeled {modeled}, after the 90 deg turn: Shaft and Peg only");
+        expect(&mut s, "after the 90 deg turn", turned.0, turned.1);
+
+        run(&mut s, "edit.undo", json!({}));
+        expect(&mut s, "after undoing the turn", translated.0, translated.1);
+        run(&mut s, "edit.undo", json!({}));
+        expect(&mut s, "after undoing the move", at_origin.0, at_origin.1);
+        run(&mut s, "edit.redo", json!({}));
+        run(&mut s, "edit.redo", json!({}));
+        expect(&mut s, "after redoing both", turned.0, turned.1);
+
+        let folder = crate::tests::Folder::new(&format!("plain-move-thread-record-{modeled}"));
+        let path = folder.path("move.sc");
+        run(&mut s, "file.save_as", json!({"path":path,"format":"container","cache":true}));
+        let mut reopened = Session::default();
+        run(&mut reopened, "doc.open", json!({"path":path,"read_only":true}));
+        assert_eq!(reopened.model.last_recomputed, 0, "modeled {modeled}, reopened: reopen should reuse the saved model");
+        expect(&mut reopened, "reopened", turned.0, turned.1);
+        let mut rebuilt = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        expect(&mut rebuilt, "rebuilt", turned.0, turned.1);
+        std::fs::remove_dir_all(&folder.0).unwrap();
+    }
+}
+
+/// #310: a plain `solid.move` (no copy) that lists the same body more than once applies that
+/// one rigid motion once per listing, to the body and to each of that body's thread records.
+/// The record ends where the body ends. Hand, feature id, designation, class, start and end
+/// stay. A body left out of the move does not move.
+#[test]
+fn a_plain_move_that_names_a_body_more_than_once_carries_its_thread_record() {
+    // A modelled thread is cut into the body and moves with it; only a cosmetic one has a record to carry.
+    {
+        let modeled = false;
+        let prepare = || {
+            let mut s = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+            run(&mut s, "solid.cylinder", json!({"radius":4,"height":8,"body_name":"Shaft"}));
+            let shaft_feature = run(
+                &mut s,
+                "solid.thread",
+                json!({"face":[4,0,4],"designation":"M8-6g","hand":"left","modeled":modeled}),
+            )["feature"]
+                .clone();
+            run(&mut s, "solid.cylinder", json!({"radius":4,"height":8,"base":[40,0,0],"body_name":"Peg","operation":"new"}));
+            let peg_feature =
+                run(&mut s, "solid.thread", json!({"face":[44,0,4],"designation":"M8-6g","modeled":modeled}))["feature"].clone();
+            assert_ne!(shaft_feature, peg_feature, "modeled {modeled}, before the move: the two threads are different features");
+            let (shaft_start, shaft_end, peg_start, peg_end) = {
+                let listed = run(&mut s, "model.threads", json!({}));
+                let threads = listed["threads"].as_array().unwrap_or_else(|| panic!("modeled {modeled}, before the move: {listed}"));
+                let pick = |body: &str| {
+                    let found: Vec<_> = threads.iter().filter(|t| t["body"] == body).collect();
+                    assert_eq!(found.len(), 1, "modeled {modeled}, before the move: expected one {body} record, got {listed}");
+                    found[0]
+                };
+                let num = |t: &Value, body: &str, key: &str| {
+                    t[key].as_f64().unwrap_or_else(|| panic!("modeled {modeled}, before the move: {body} {key} is {t}"))
+                };
+                let shaft = pick("Shaft");
+                let peg = pick("Peg");
+                (num(shaft, "Shaft", "start"), num(shaft, "Shaft", "end"), num(peg, "Peg", "start"), num(peg, "Peg", "end"))
+            };
+            (s, shaft_feature, peg_feature, shaft_start, shaft_end, peg_start, peg_end)
+        };
+        let coords_near = |got: &Value, want: [f64; 3], step: &str, what: &str| {
+            for (i, want_i) in want.into_iter().enumerate() {
+                let g = got.get(i).and_then(Value::as_f64);
+                assert!(g.is_some_and(|g| (g - want_i).abs() < 1e-6), "modeled {modeled}, {step}: {what}[{i}] is {got}, expected {want:?}");
+            }
+        };
+        let scalar_near = |got: &Value, want: f64, step: &str, what: &str| {
+            let g = got.as_f64();
+            assert!(g.is_some_and(|g| (g - want).abs() < 1e-6), "modeled {modeled}, {step}: {what} is {got}, expected {want}");
+        };
+        let expect = |s: &mut Session,
+                      step: &str,
+                      shaft_feature: &Value,
+                      peg_feature: &Value,
+                      shaft_start: f64,
+                      shaft_end: f64,
+                      peg_start: f64,
+                      peg_end: f64,
+                      shaft_point: [f64; 3],
+                      shaft_axis: [f64; 3]| {
+            let listed = run(s, "model.threads", json!({}));
+            let threads = listed["threads"].as_array().unwrap_or_else(|| panic!("modeled {modeled}, {step}: {listed}"));
+            assert_eq!(threads.len(), 2, "modeled {modeled}, {step}: expected one record each for Shaft and Peg, got {listed}");
+            for (body, feature, point, axis, hand, start, end) in [
+                ("Shaft", shaft_feature, shaft_point, shaft_axis, "left", shaft_start, shaft_end),
+                ("Peg", peg_feature, [40.0, 0.0, 0.0], [0.0, 0.0, 1.0], "right", peg_start, peg_end),
+            ] {
+                let found: Vec<_> = threads.iter().filter(|t| t["body"] == body).collect();
+                assert_eq!(found.len(), 1, "modeled {modeled}, {step}: expected one {body} record, got {listed}");
+                let t = found[0];
+                coords_near(&t["axis_point"], point, step, &format!("{body} axis_point"));
+                coords_near(&t["axis"], axis, step, &format!("{body} axis"));
+                assert_eq!(t["feature"], *feature, "modeled {modeled}, {step}: {body} feature id, got {t}");
+                assert_eq!(t["body"], body, "modeled {modeled}, {step}: body, got {t}");
+                assert_eq!(t["hand"], hand, "modeled {modeled}, {step}: {body} hand, got {t}");
+                assert_eq!(t["designation"], "M8-6g", "modeled {modeled}, {step}: {body} designation, got {t}");
+                scalar_near(&t["start"], start, step, &format!("{body} start"));
+                scalar_near(&t["end"], end, step, &format!("{body} end"));
+            }
+        };
+        let class_at = |s: &Session, at: [f64; 3], step: &str| {
+            let state = s.model.state();
+            let shaft = state.body("Shaft").unwrap_or_else(|| panic!("modeled {modeled}, {step}: Shaft is gone"));
+            shaft
+                .body
+                .classify_point(Vec3::new(at[0], at[1], at[2]))
+                .unwrap_or_else(|err| panic!("modeled {modeled}, {step}: classify_point {at:?} failed: {err}"))
+        };
+        let at_origin = ([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+
+        // Two listings of +30 mm: the body and its record both end at x = 60.
+        {
+            let (mut s, shaft_feature, peg_feature, shaft_start, shaft_end, peg_start, peg_end) = prepare();
+            expect(&mut s, "before the move", &shaft_feature, &peg_feature, shaft_start, shaft_end, peg_start, peg_end, at_origin.0, at_origin.1);
+            let moved = run(&mut s, "solid.move", json!({"bodies":["Shaft","Shaft"],"translate":[30,0,0]}));
+            assert_eq!(
+                moved["created_bodies"],
+                json!([]),
+                "modeled {modeled}, after naming Shaft twice: a plain move must not create a copy: {moved}"
+            );
+            let step = "after naming Shaft twice";
+            assert_eq!(
+                class_at(&s, [60.0, 0.0, 4.0], step),
+                solidcraft_kernel::PointClass::Inside,
+                "modeled {modeled}, {step}: the shaft should contain [60, 0, 4]"
+            );
+            assert_ne!(
+                class_at(&s, [30.0, 0.0, 4.0], step),
+                solidcraft_kernel::PointClass::Inside,
+                "modeled {modeled}, {step}: the shaft should not contain [30, 0, 4]"
+            );
+            assert_ne!(
+                class_at(&s, [0.0, 0.0, 4.0], step),
+                solidcraft_kernel::PointClass::Inside,
+                "modeled {modeled}, {step}: the shaft should not contain [0, 0, 4]"
+            );
+            expect(&mut s, step, &shaft_feature, &peg_feature, shaft_start, shaft_end, peg_start, peg_end, [60.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+            run(&mut s, "edit.undo", json!({}));
+            expect(&mut s, "after one undo", &shaft_feature, &peg_feature, shaft_start, shaft_end, peg_start, peg_end, at_origin.0, at_origin.1);
+        }
+
+        // Three listings of +30 mm land at x = 90.
+        {
+            let (mut s, shaft_feature, peg_feature, shaft_start, shaft_end, peg_start, peg_end) = prepare();
+            expect(
+                &mut s,
+                "before the three-name move",
+                &shaft_feature,
+                &peg_feature,
+                shaft_start,
+                shaft_end,
+                peg_start,
+                peg_end,
+                at_origin.0,
+                at_origin.1,
+            );
+            let moved = run(&mut s, "solid.move", json!({"bodies":["Shaft","Shaft","Shaft"],"translate":[30,0,0]}));
+            assert_eq!(
+                moved["created_bodies"],
+                json!([]),
+                "modeled {modeled}, after naming Shaft three times: a plain move must not create a copy: {moved}"
+            );
+            let step = "after naming Shaft three times";
+            assert_eq!(
+                class_at(&s, [90.0, 0.0, 4.0], step),
+                solidcraft_kernel::PointClass::Inside,
+                "modeled {modeled}, {step}: the shaft should contain [90, 0, 4]"
+            );
+            assert_ne!(
+                class_at(&s, [30.0, 0.0, 4.0], step),
+                solidcraft_kernel::PointClass::Inside,
+                "modeled {modeled}, {step}: the shaft should not contain [30, 0, 4]"
+            );
+            expect(&mut s, step, &shaft_feature, &peg_feature, shaft_start, shaft_end, peg_start, peg_end, [90.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        }
+
+        // Two right-hand quarter turns about +X: (x, y, z) -> (x, -z, y) each time,
+        // so the axis [0, 0, 1] becomes [0, 0, -1] and the axis point stays at the origin.
+        {
+            let (mut s, shaft_feature, peg_feature, shaft_start, shaft_end, peg_start, peg_end) = prepare();
+            expect(
+                &mut s,
+                "before the two turns",
+                &shaft_feature,
+                &peg_feature,
+                shaft_start,
+                shaft_end,
+                peg_start,
+                peg_end,
+                at_origin.0,
+                at_origin.1,
+            );
+            let moved = run(&mut s, "solid.move", json!({"bodies":["Shaft","Shaft"],"axis":[1,0,0],"angle":"90 deg","origin":[0,0,0]}));
+            assert_eq!(moved["created_bodies"], json!([]), "modeled {modeled}, after two 90 deg turns: a plain move must not create a copy: {moved}");
+            let step = "after two 90 deg turns about +X";
+            // (0, 0, 4) -> (0, -4, 0) -> (0, 0, -4). One turn would still contain (0, -4, 0).
+            assert_eq!(
+                class_at(&s, [0.0, 0.0, -4.0], step),
+                solidcraft_kernel::PointClass::Inside,
+                "modeled {modeled}, {step}: the shaft should contain [0, 0, -4]"
+            );
+            assert_ne!(
+                class_at(&s, [0.0, -4.0, 0.0], step),
+                solidcraft_kernel::PointClass::Inside,
+                "modeled {modeled}, {step}: the shaft should not contain [0, -4, 0]"
+            );
+            expect(&mut s, step, &shaft_feature, &peg_feature, shaft_start, shaft_end, peg_start, peg_end, [0.0, 0.0, 0.0], [0.0, 0.0, -1.0]);
+        }
+    }
+}
+

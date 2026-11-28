@@ -31,6 +31,14 @@ pub struct ThreadInfo {
 }
 
 impl ThreadInfo {
+    /// This record carried by a rigid motion `m` of its body (a plain move): its axis moved with the
+    /// body, everything else kept. None when `m` does not give a finite axis.
+    pub(crate) fn moved(&self, m: &crate::Mat) -> Option<ThreadInfo> {
+        let axis = crate::apply_vector(m, *self.axis).unit()?;
+        let axis_point = crate::apply_point(m, self.axis_point);
+        axis_point.is_finite().then(|| ThreadInfo { axis_point, axis, ..self.clone() })
+    }
+
     /// Whether two cosmetic thread markings agree on every field, bit for bit (distinguishing
     /// `0.0` from `-0.0`). Every field is destructured so a new one cannot be left out.
     pub(crate) fn same_bits(&self, other: &Self) -> bool {
