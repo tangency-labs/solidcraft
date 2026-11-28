@@ -1305,14 +1305,17 @@ impl SurfaceSheet {
             }
             plans.push(FlangeRun { angle, toward, sharp, leg, by, junction: square_end, anchor, strip });
         }
+        for run in &plans {
+            let (origin, to) = run.anchor;
+            if !((to - origin).dot(d) > 1e-9) {
+                return err("the edge's neighbours leave its flange no length at its bend");
+            }
+        }
         let mut made = Vec::with_capacity(plans.len());
         let mut square = Vec::new();
         for run in plans {
             let (origin, to) = run.anchor;
             let len = (to - origin).dot(d);
-            if !(len > 1e-9) {
-                return err("the edge's neighbours leave its flange no length at its bend");
-            }
             // A sharp inside the edge by no more than the thickness needs no cut: the bend's band
             // runs a thickness past its anchor and takes that strip, leaving the panel's other
             // edges (and the rips along them) as they are.
@@ -5485,7 +5488,7 @@ mod tests {
 
         // A partial opposite-side flange ending well clear of the corner (x=0..85 vs x=96..100)
         // must not trim the flange on x=100.
-        let (mut partial, _) = crate::SurfaceSheet::base("Body1", "R1", &rule, solidcore_record::Plane::XY, plate, &[], 1).unwrap();
+        let (mut partial, _) = crate::SurfaceSheet::base("Body1", "R1", &rule, solidcore_record::Plane::XY, plate.clone(), &[], 1).unwrap();
         let e1 = partial.free_edge_at(Vec3::new(50.0, 0.0, 2.0)).unwrap().unwrap();
         let (js, sqs) =
             partial.flanges_on(e1, &[(0.0, 0.85, 60.0, std::f64::consts::FRAC_PI_2, false)], 2.0, "inside", super::HeightFrom::Outer).unwrap();
@@ -5519,8 +5522,40 @@ mod tests {
         narrow.clear_of_neighbours(&[nj1, nj2]).unwrap();
         narrow.build().unwrap();
         let before_joints = narrow.sheet.joints.len();
+        let before_panels = narrow.sheet.panels.len();
         let ne3 = narrow.free_edge_at(Vec3::new(100.0, 3.0, 2.0)).unwrap().unwrap();
         assert!(narrow.flange_on(ne3, 20.0, std::f64::consts::FRAC_PI_2, 2.0, "outside", super::HeightFrom::Outer, true).is_err());
         assert_eq!(narrow.sheet.joints.len(), before_joints);
+        assert_eq!(narrow.sheet.panels.len(), before_panels);
+
+        // Multi-run atomicity: if a later run on the same edge is completely consumed by an
+        // existing opposite-side bend (0.98..1.0 is only 3 mm < 4 mm setback), the whole call
+        // fails without applying the earlier run.
+        let (mut multi, _) = crate::SurfaceSheet::base("Body1", "R1", &rule, solidcore_record::Plane::XY, plate, &[], 1).unwrap();
+        let me1 = multi.free_edge_at(Vec3::new(80.0, 0.0, 2.0)).unwrap().unwrap();
+        let me2 = multi.free_edge_at(Vec3::new(80.0, 150.0, 2.0)).unwrap().unwrap();
+        let (mj1, msq1) = multi.flange_on(me1, 60.0, std::f64::consts::FRAC_PI_2, 2.0, "inside", super::HeightFrom::Outer, false).unwrap();
+        let (mj2, msq2) = multi.flange_on(me2, 60.0, std::f64::consts::FRAC_PI_2, 2.0, "inside", super::HeightFrom::Outer, false).unwrap();
+        multi.close_flange_corners(&[mj1, mj2]).unwrap();
+        multi.slant_open_sides(&msq1).unwrap();
+        multi.slant_open_sides(&msq2).unwrap();
+        multi.clear_of_neighbours(&[mj1, mj2]).unwrap();
+        multi.build().unwrap();
+        let m_before_joints = multi.sheet.joints.len();
+        let m_before_panels = multi.sheet.panels.len();
+        let me3 = multi.free_edge_at(Vec3::new(100.0, 75.0, 2.0)).unwrap().unwrap();
+        assert!(
+            multi
+                .flanges_on(
+                    me3,
+                    &[(0.0, 0.98, 45.0, std::f64::consts::FRAC_PI_2, true), (0.98, 1.0, 45.0, std::f64::consts::FRAC_PI_2, true)],
+                    2.0,
+                    "inside",
+                    super::HeightFrom::Outer,
+                )
+                .is_err()
+        );
+        assert_eq!(multi.sheet.joints.len(), m_before_joints);
+        assert_eq!(multi.sheet.panels.len(), m_before_panels);
     }
 }
