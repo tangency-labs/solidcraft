@@ -3737,7 +3737,9 @@ pub fn cleanup_noise(uv: Point2) -> Point2 {
 /// does not (reversed when the surfaces run in opposite directions; end points only
 /// when the rows differ in length) and rebuilds the adjusted surface's rails as its
 /// iso-curves. Only cubic-or-higher B-spline fillet surfaces are examined; nothing is
-/// done when neither surface needs adjusting.
+/// done when neither surface needs adjusting. Not upstream (#23151): a round kept as its
+/// definition needs none either where both vertices lie on it within `dist_tol`, inside
+/// its domain: the shared section then runs across it.
 ///
 /// # Errors
 ///
@@ -3781,6 +3783,7 @@ pub fn examine_n_fix_fillet_geoms(
         dist_tol,
         [solver1.map(|s| &s.solver), solver2.map(|s| &s.solver)],
     )
+    .map(|_| ())
 }
 
 /// [`examine_n_fix_fillet_geoms`] with the geometries' `SmFilletSolver` bases
@@ -3789,9 +3792,15 @@ pub fn examine_n_fix_fillet_geoms(
 /// offset distance set to `0` (upstream sets it on the solver's surface and restores it
 /// after the drop, which itself runs on a copy here).
 ///
+/// Returns the round the shared section runs across short of its end, if there is one
+/// (not upstream, #23151): a round kept as its definition that holds both vertices away
+/// from its end row. It is not adjusted; its trim there is the section lifted onto it
+/// ([`crate::blend::blend_corner::proved_trim::lifted_trim`]), which the caller makes.
+///
 /// # Errors
 ///
-/// As [`examine_n_fix_fillet_geoms`].
+/// As [`examine_n_fix_fillet_geoms`]; `Unsupported` where the section runs across one
+/// round and is not the other's end row either.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub fn examine_n_fix_fillet_geoms_with_solvers(
     k: &Kernel,
@@ -3804,7 +3813,9 @@ pub fn examine_n_fix_fillet_geoms_with_solvers(
     end_fv: VertexId,
     dist_tol: f64,
     solvers: [Option<&FilletSolver>; 2],
-) -> Result<()> {
+) -> Result<Option<FilletGeomId>> {
+    // the round the shared section runs across, short of its end
+    let mut crossed = None;
     let start_pnt = fb.vertex_point(start_fv)?;
     let end_pnt = fb.vertex_point(end_fv)?;
 
@@ -3827,7 +3838,7 @@ pub fn examine_n_fix_fillet_geoms_with_solvers(
             || !surface2.is_kind_of(BSplineSurface::TYPE)?
         {
             // Can only fix non-analytic nurb fillets
-            return Ok(());
+            return Ok(crossed);
         }
     }
 
@@ -3858,23 +3869,62 @@ pub fn examine_n_fix_fillet_geoms_with_solvers(
         let mut start_dist = start_pnt.distance(pnt1);
         let dist2 = start_pnt.distance(pnt2);
         let end_dist;
+        // the corner of the end row each vertex is matched with
+        let (start_uv, end_uv);
         if start_dist < dist2 {
             end_dist = end_pnt.distance(pnt2);
+            (start_uv, end_uv) = (uv1, uv2);
         } else {
             start_dist = dist2;
             end_dist = end_pnt.distance(pnt1);
             *orient_i = OrientType::Opposite;
+            (start_uv, end_uv) = (uv2, uv1);
         }
 
         if start_dist < dist_tol && end_dist < dist_tol {
             *adjust = false;
+        } else if matches!(surface.kind(), SurfaceKind::ProceduralBlend(_)) {
+            // Not upstream (#23151): a round by its definition that holds both vertices is
+            // not adjusted either. Two rounds meeting at a slight angle `a` share the first
+            // one's section (a Join over the second, `blend_corner::join_gap`): the second
+            // round's own end row stands its reach times `sin a` from that section along
+            // its rail on the face they share, while the section lies on its surface to
+            // second order in `a`. The section is then a curve across the round, lifted
+            // onto it and proved against the edge by the cross section's step; moving the
+            // end row onto it would move the round off its definition by the first-order
+            // distance.
+            let mut held = true;
+            for (pnt, uv, dist) in [
+                (start_pnt, start_uv, start_dist),
+                (end_pnt, end_uv, end_dist),
+            ] {
+                held = held
+                    && (dist < dist_tol
+                        || crate::blend::blend_corner::foot_on_surface(k, surface, pnt, uv)?
+                            .filter(|&foot| domain.contains_point(foot, 0.0))
+                            .map(|foot| surface.evaluate_point(k, foot))
+                            .transpose()?
+                            .is_some_and(|on| pnt.distance(on) < dist_tol));
+            }
+            if held {
+                *adjust = false;
+                crossed = Some(geom);
+            }
         }
     }
 
     let [adjust0, adjust1] = adjust_surf;
+    if crossed.is_some() && (adjust0 || adjust1) {
+        // the section is the end row of neither round: there is no row to share
+        return Err(SolidError::Unsupported {
+            operation: OP_EXAMINE,
+            reason: "two rounds that meet at a corner apart by more than the tolerance: \
+                     the section they would share is the end of neither",
+        });
+    }
     if !adjust0 && !adjust1 {
         // Nothing need to be adjusted
-        return Ok(());
+        return Ok(crossed);
     }
     if adjust0 && adjust1 {
         // Can not adjust both surfaces
@@ -3894,7 +3944,7 @@ pub fn examine_n_fix_fillet_geoms_with_solvers(
             .fillet_surface_mut(None)?
             .ok_or_else(|| broken_link(OP_EXAMINE, GEOM_NO_SURFACE))?;
         let Some(bs) = b_spline_net_mut(from_surface) else {
-            return Ok(());
+            return Ok(crossed);
         };
         let gw = bs.get_or_create_gw_nurb()?;
         let row_index = if from_at_start { 0 } else { gw.n() };
@@ -3930,7 +3980,7 @@ pub fn examine_n_fix_fillet_geoms_with_solvers(
             **pb = edited;
         } else {
             let Some(bs) = b_spline_net_mut(to_surface) else {
-                return Ok(());
+                return Ok(crossed);
             };
             write_end_row(bs, &from_row, to_at_start, orient)?;
         }
@@ -3980,7 +4030,7 @@ pub fn examine_n_fix_fillet_geoms_with_solvers(
         drop_rail_onto_offset_surface(k, fb, adjust_solver, kk, rail, dist_tol)?;
     }
 
-    Ok(())
+    Ok(crossed)
 }
 
 /// `sm_ExamineNFixFilletGeoms`'s copy of the good fillet's end row (`from_row`) into the

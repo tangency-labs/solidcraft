@@ -531,7 +531,7 @@ pub const SECTIONS: &[Section] = &[
         ids: &[
             "drawing.dimension",
             "drawing.dimension.from_model.planned",
-            "drawing.hole_callout",
+            "drawing.hole_callout.planned",
             "drawing.dimension.chain",
             "drawing.dimension.suggest",
         ],
@@ -596,7 +596,15 @@ pub const SECTIONS: &[Section] = &[
         tab: "MODEL",
         panel: "ARRANGE",
         promoted: 3,
-        ids: &["solid.move", "solid.mirror", "solid.pattern.rectangular", "solid.align", "solid.pattern.circular", "solid.pattern.path"],
+        ids: &[
+            "solid.move",
+            "solid.mirror",
+            "solid.pattern.rectangular",
+            "solid.align",
+            "scan.align",
+            "solid.pattern.circular",
+            "solid.pattern.path",
+        ],
     },
     Section { tab: "MODEL", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
     // Plane, Axis and Point work out the method from the picks; the methods follow in the menu.
@@ -625,7 +633,12 @@ pub const SECTIONS: &[Section] = &[
         promoted: 4,
         ids: &["surface.trim", "surface.untrim", "surface.extend", "surface.stitch", "solid.split_body"],
     },
-    Section { tab: "SURFACE", panel: "MESH", promoted: 2, ids: &["mesh.reduce", "mesh.convert", "file.insert_mesh", "file.save_mesh"] },
+    Section {
+        tab: "SURFACE",
+        panel: "MESH",
+        promoted: 2,
+        ids: &["mesh.reduce", "mesh.convert", "mesh.section_stack", "file.insert_mesh", "file.save_mesh"],
+    },
     Section {
         tab: "ASSEMBLE",
         panel: "COMPONENTS",
@@ -844,7 +857,7 @@ pub const SECTIONS: &[Section] = &[
 const LEGACY_SURFACE_CREATE: Section =
     Section { tab: "SURFACE", panel: "CREATE", promoted: 4, ids: &["surface.extrude", "surface.revolve", "surface.sweep", "surface.loft"] };
 const LEGACY_SURFACE_CONVERT: Section =
-    Section { tab: "SURFACE", panel: "CONVERT", promoted: 2, ids: &["surface.thicken", "mesh.convert", "mesh.reduce"] };
+    Section { tab: "SURFACE", panel: "CONVERT", promoted: 2, ids: &["surface.thicken", "mesh.convert", "mesh.reduce", "mesh.section_stack"] };
 
 // Migration data only: Render commands remain registered, but have no live ribbon sections.
 const LEGACY_RENDER_SECTIONS: &[Section] = &[
@@ -942,7 +955,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("drawing.dimension", "Dimension"),
     ("drawing.dimension.from_model.planned", "Model Dims."),
     ("drawing.export", "Export"),
-    ("drawing.hole_callout", "Hole Callout"),
+    ("drawing.hole_callout.planned", "Hole Callout"),
     ("drawing.image", "Image"),
     ("drawing.leader", "Leader Note"),
     ("drawing.note", "Note"),
@@ -1670,6 +1683,7 @@ mod tests {
         h.app.home.open = false;
         let mut plugin = workspace_plugin();
         plugin.entries[0].slots.push(solidcraft_engine::plugin::UiSlot::Menu { name: "Pocket Milling".into(), label: None });
+        plugin.entries[0].input_schema = json!({"type":"object","title":"Usinage"});
         h.app.plugin_menu.listed = vec![plugin.clone()];
         h.app.plugin_menu.loaded = true;
         crate::plugin_workspaces::discovered(&mut h.app, &[plugin]);
@@ -1688,8 +1702,8 @@ mod tests {
         );
         output.textures_delta.clear();
         let shown: Vec<String> = crate::test_support::text_shapes(&output).map(|shape| shape.galley.text().to_owned()).collect();
-        assert!(shown.iter().any(|text| text.contains("Pocket")), "the button carries the entry's title, not its raw name: {shown:?}");
-        assert!(!shown.iter().any(|text| text == "pocket"), "{shown:?}");
+        assert!(shown.iter().any(|text| text.contains("Usinage")), "the schema title takes precedence over the slot name: {shown:?}");
+        assert!(!shown.iter().any(|text| text == "pocket" || text.contains("Pocket")), "{shown:?}");
         let point = crate::scenario::handle_at("button:plugin_entry:manufacture:pocket").unwrap();
         let frame = |h: &mut crate::scenario::Harness, events: Vec<egui::Event>| {
             let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0));
@@ -2356,6 +2370,22 @@ mod tests {
         assert!(h.app.params.is_some());
         assert_eq!(h.app.ui.tab, "INSPECT", "its tabs stay hidden");
         h.call("ui.prefs", json!({"hidden_toolbar_tabs": []}));
+    }
+
+    /// Inspect on the ribbon (#20662) opens a window with the design's summary; it used to run
+    /// `document.inspect` for nobody to see.
+    #[test]
+    fn the_inspect_button_opens_a_window() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.ui.tab = "INSPECT".into();
+        h.frames(3);
+        let at = crate::scenario::handle_at("toolbar:document.inspect").expect("Inspect is on the ribbon");
+        h.step(&json!({"click": [at.x, at.y]})).unwrap();
+        h.frames(2);
+        let windows = h.call("ui.inspect", json!({}))["result"]["windows"].clone();
+        assert!(windows.as_array().is_some_and(|w| w.iter().any(|x| x == "document.inspect")), "{windows}");
     }
 
     #[test]

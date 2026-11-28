@@ -3215,3 +3215,59 @@ fn relink_placement_refuses_incompatible_face_fallback() {
     assert_eq!(result["moved_occurrences"], json!([]), "failed joint must not move CapBlock: {result}");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// #22615: A between-two-faces midplane joint origin with a hole-circle snap keeps its persistent
+/// face names across `component.relink` and automatically re-centers the joined shaft when the
+/// relinked part's wall spacing changes.
+#[test]
+fn between_faces_midplane_origin_survives_component_relink() {
+    let dir = folder("between-faces-midplane-relink");
+    let clevis_v1 = dir.join("clevis_v1.sc");
+    let clevis_v2 = dir.join("clevis_v2.sc");
+
+    let save_clevis = |path: &Path, upper_z: f64| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "corner": [0, 0, 0], "body_name": "LowerEar"}));
+        run(&mut s, "solid.hole", json!({"position": [16, 20, 5], "diameter": 8}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "corner": [0, 0, upper_z], "body_name": "UpperEar"}));
+        run(&mut s, "file.save", json!({"path": path}));
+    };
+    save_clevis(&clevis_v1, 25.0);
+    save_clevis(&clevis_v2, 35.0);
+
+    let mut asm = Session::default();
+    let inserted = run(&mut asm, "component.insert_design", json!({"path": clevis_v1, "name": "Clevis"}));
+    let comp = inserted["component"].as_u64().unwrap();
+    let clevis_occ = inserted["occurrence"].as_u64().unwrap();
+    run(&mut asm, "occurrence.ground", json!({"occurrence": clevis_occ, "grounded": true}));
+
+    run(&mut asm, "component.create", json!({"name": "Pin"}));
+    run(&mut asm, "solid.cylinder", json!({"base": [0, 0, 0], "radius": 4, "height": 16, "body_name": "Pin"}));
+    run(&mut asm, "component.activate", json!({"component": "root"}));
+    let pin_occ = asm.doc.occurrences.iter().find(|o| o.name.starts_with("Pin")).unwrap().id;
+
+    let created = run(
+        &mut asm,
+        "joint.create",
+        json!({
+            "name": "CenterPin",
+            "type": "revolute",
+            "a": {"occurrence": clevis_occ, "faces": [[2, 2, 5], [2, 2, 25]], "snap": {"circle": [20, 20, 2.5]}},
+            "b": {"occurrence": pin_occ, "faces": [[0, 0, 0], [0, 0, 16]], "snap": {"circle": [4, 0, 8]}},
+        }),
+    );
+    assert_eq!(created["errors"], json!([]), "{created}");
+
+    let pin_mid = |s: &Session| {
+        let t = solidcraft_doc::joints::occurrence_world(&s.doc, pin_occ);
+        solidcraft_doc::apply_point(&t, solidcore_record::Vec3::new(0.0, 0.0, 8.0))
+    };
+    let before = pin_mid(&asm);
+    assert!((before.x - 16.0).abs() < 1e-6 && (before.y - 20.0).abs() < 1e-6 && (before.z - 15.0).abs() < 1e-6, "{before:?}");
+
+    let relink = run(&mut asm, "component.relink", json!({"component": comp, "path": clevis_v2}));
+    assert_eq!(relink["joint_errors"], json!([]), "{relink}");
+    let after = pin_mid(&asm);
+    assert!((after.x - 16.0).abs() < 1e-6 && (after.y - 20.0).abs() < 1e-6 && (after.z - 20.0).abs() < 1e-6, "{after:?}");
+    let _ = std::fs::remove_dir_all(dir);
+}

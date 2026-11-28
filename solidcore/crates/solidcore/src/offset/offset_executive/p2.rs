@@ -3099,31 +3099,37 @@ pub fn local_operation_simple(
     result
 }
 
-/// Carries the selected face's own attributes onto a static local operation's
-/// swept wall, using the normal Copy handlers and disjoint source/result identities.
+/// Carries the own attributes of each entity of `source` in `pairs` (the selected face, and
+/// its rims on the ends the sweep caps) onto its partner of a static local operation's swept
+/// tool (its wall, and the wall's rims on those ends), using the normal Copy handlers and
+/// disjoint source/result identities. The tool's attributes become the copies, all written
+/// back at once.
 pub(crate) fn copy_local_sweep_attributes(
     kernel: &mut Kernel,
     source: &Brep,
-    face: FaceId,
+    pairs: &[(EntityRef, EntityRef)],
     target: &mut Brep,
-    wall: FaceId,
 ) -> Result<()> {
     let mut store = AttributeStore::default();
     attributes::seed_attributes(source, &attributes::original_key, &mut store)?;
-    let from = attributes::original_key(EntityRef::Face(face));
-    let to = attributes::result_key(EntityRef::Face(wall));
     let mut records = attributes::simple_records(source);
-    records.insert(to.key, Topology::new());
-    crate::topology::topology::notify(
-        &mut records,
-        &mut store,
-        Some(&mut kernel.context),
-        NotifyOperation::Copy,
-        from,
-        Some(to),
-        None,
-        None,
-    )?;
+    for &(entity, onto) in pairs {
+        let from = attributes::original_key(entity);
+        let to = attributes::result_key(onto);
+        if !records.contains_key(&to.key) {
+            records.insert(to.key, Topology::new());
+        }
+        crate::topology::topology::notify(
+            &mut records,
+            &mut store,
+            Some(&mut kernel.context),
+            NotifyOperation::Copy,
+            from,
+            Some(to),
+            None,
+            None,
+        )?;
+    }
     attributes::write_back_attributes(target, &attributes::result_key, &store)
 }
 
@@ -3682,7 +3688,9 @@ fn collapse_offset_status<T>(result: Result<T>) -> Result<T> {
 /// the walls are the faces other than the sheet's own (`sheet_faces`, the sheet's copies)
 /// along an edge of the sheet; every topological edge between two walls goes (the others,
 /// and every topological vertex, are kept), each wall it bounds first going onto its plane
-/// ([`put_planar_face_on_its_plane`]). Editing is enabled meanwhile.
+/// ([`put_planar_face_on_its_plane`]). Editing is enabled meanwhile. Whether there is such
+/// an edge is asked on a trial copy (WR-792): no face of the shell is prepared for a merge
+/// that does not follow.
 ///
 /// Not upstream (WR-564, #1599; the fork's tangency-labs/smlib#62): every wall goes onto
 /// its plane first, in the shell's face order, and its old surface's seams are deleted;
@@ -3690,7 +3698,8 @@ fn collapse_offset_status<T>(result: Result<T>) -> Result<T> {
 ///
 /// # Errors
 ///
-/// Those of the plane replacement and of `RemoveTopologicalEdgesAndVertices`.
+/// Those of the plane replacement, of `RemoveTopologicalEdgesAndVertices` and of the trial
+/// copy (a trimmed surface cache in use: not asked from inside a solve).
 fn merge_sheet_side_walls(
     kernel: &mut Kernel,
     shell: &mut Brep,
@@ -3712,24 +3721,38 @@ fn merge_sheet_side_walls(
         }
     }
 
-    // keep every topological edge but those between two walls, and every topological vertex
-    let topo_edges = bp1::topological_edges(kernel, shell)?;
-    let keep_vertices = bp1::topological_vertices(kernel, shell)?;
+    // With `merge`: keep every edge not between two walls, and every topological vertex.
+    // Whether any edge between two walls is topological (else there is nothing to merge) is
+    // asked on a trial copy of the shell, never on the shell (WR-792, #23077): the test
+    // prepares a merge, expanding the covering face's surface in place and dropping that
+    // face's UV trims, and only the merge sets the face's domain anew. An edge asked about
+    // and then kept left its face on the expanded surface under its old domain (the seam
+    // piece between two offset faces of a sphere patch cut across its seam: one face's
+    // surface turned the whole way round, on another parameterisation). The removal asks
+    // again, on the shell, after the walls go onto their planes, and merges what it accepts.
+    // Without `merge` nothing is asked.
     let mut keep_edges = Vec::new();
-    let mut merging: Vec<FaceId> = Vec::new();
-    for e in topo_edges {
-        let edge_faces = crate::topology::edge::faces(shell, e, None)?;
-        let between_walls = edge_faces.len() == 2 && edge_faces.iter().all(|f| walls.contains(f));
-        if !between_walls {
-            keep_edges.push(e);
-            continue;
-        }
-        for f in edge_faces {
-            if !merging.contains(&f) {
-                merging.push(f);
+    let mut any_topological = false;
+    if merge {
+        let mut trial = shell.clone_for_trial_keeping_definitions()?;
+        for e in bp1::edges(shell, None)? {
+            let edge_faces = crate::topology::edge::faces(shell, e, None)?;
+            let between_walls =
+                edge_faces.len() == 2 && edge_faces.iter().all(|f| walls.contains(f));
+            if !between_walls {
+                keep_edges.push(e);
+            } else if !any_topological {
+                any_topological =
+                    crate::topology::edge::is_topological(kernel, &mut trial, e, 1.0)?
+                        .is_topological;
             }
         }
     }
+    let keep_vertices = if any_topological {
+        bp1::topological_vertices(kernel, shell)?
+    } else {
+        Vec::new()
+    };
     // SmTemporaryChangeValue<SmBoolean> sEditing(pBrepShell->m_bEditingEnabled, TRUE)
     let editing = shell.editing_enabled();
     shell.set_editing_enabled(true);
@@ -3740,7 +3763,7 @@ fn merge_sheet_side_walls(
                 put_planar_face_on_its_plane(kernel, shell, f, notifications)?;
             }
         }
-        if !merge || merging.is_empty() {
+        if !any_topological {
             return Ok(());
         }
         crate::topology::brep::p5::remove_topological_edges_and_vertices(

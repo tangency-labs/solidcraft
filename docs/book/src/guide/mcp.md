@@ -8,3 +8,8 @@ references for scripts. When creating a body, pass `body_name` to commands such 
 `solid.extrude` or `solid.box`, then use that name in later commands. For example, use
 `"body_name": "Mounting plate"` and refer to it as `"body": "Mounting plate"`.
 See [solid features](features.md) for body creation tools.
+
+## See also
+
+- [Agent chat](agent-chat.md) for the in-app Assistant panel (ACP coding agents and API endpoints).
+- [Local models with the Assistant](local-models.md) for running Ollama or LM Studio with the in-app Assistant.
