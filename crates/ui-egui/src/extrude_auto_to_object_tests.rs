@@ -297,7 +297,6 @@ fn to_and_from_object_take_a_snap_point() {
     assert_eq!(commands[0].1["to"], json!([5.0, 5.0, 30.0]));
     assert!((solidcraft_engine::extrude_reach(&h.app.session, &commands[0].1).unwrap() - 30.0).abs() < 1e-9);
 
-    h.step(&json!({"click": {"handle": "dialog:section:Advanced"}})).unwrap();
     h.step(&json!({"click": {"handle": "dialog:Start"}})).unwrap();
     h.step(&json!({"click": {"handle": "dialog:Start:From Object"}})).unwrap();
     assert_eq!(dialog(&h).active_input().unwrap().label, "From Object");
@@ -310,7 +309,6 @@ fn to_and_from_object_take_a_snap_point() {
 fn manual_from_object_accepts_parallel_and_coplanar_planes() {
     for automatic in [false, true] {
         let mut h = scene_with(automatic);
-        h.step(&json!({"click": {"handle": "dialog:section:Advanced"}})).unwrap();
         h.step(&json!({"click": {"handle": "dialog:Start"}})).unwrap();
         h.step(&json!({"click": {"handle": "dialog:Start:From Object"}})).unwrap();
         assert_eq!(dialog(&h).active_input().unwrap().label, "From Object");
@@ -349,7 +347,6 @@ fn manual_from_object_accepts_parallel_and_coplanar_planes() {
 fn manual_from_object_keeps_the_selected_end_plane() {
     let mut h = scene();
     assert!(click(&mut h, |_| Hit::Plane { name: "Lid".into(), point: Vec3::ZERO }));
-    h.step(&json!({"click": {"handle": "dialog:section:Advanced"}})).unwrap();
     h.step(&json!({"click": {"handle": "dialog:Start"}})).unwrap();
     h.step(&json!({"click": {"handle": "dialog:Start:From Object"}})).unwrap();
     assert!(click(&mut h, |_| Hit::Plane { name: "Under".into(), point: Vec3::ZERO }));

@@ -542,6 +542,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         egui::ScrollArea::vertical().id_salt("loft_rails").max_height(rail_list_height).show(ui, |ui| {
             input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 1..d.inputs.len());
         });
+    } else if matches!(d.kind, Kind::Extrude { .. }) {
+        // Where the extrude starts is a main row under Profiles (#21620).
+        enter |= extrude_start_rows(app, d, ui);
+        crate::command_sketch::offer_row(app, d, ui);
     } else {
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
         crate::command_sketch::offer_row(app, d, ui);
@@ -663,9 +667,6 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             taper,
             taper_present,
             to_offset,
-            start,
-            offset_start,
-            symmetric_offset,
             all,
             all2,
             to_offset2,
@@ -673,6 +674,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             wall,
             wall_side,
             wall2,
+            ..
         } => {
             // The feature's name (#18668): what it is called, or will be. Blank is the default name.
             let mut name = d.extra.get("name").and_then(Value::as_str).unwrap_or_default().to_string();
@@ -794,30 +796,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                     }
                 }
             });
-            let advanced = *offset_start || object_on(&d.inputs, FROM_OBJECT) || *taper_present;
-            ui_kit::section(ui, "extrude_advanced", "Advanced", advanced, |ui| {
-                let old = if object_on(&d.inputs, FROM_OBJECT) { 2 } else { usize::from(*offset_start) };
-                let mut st = old;
-                form_row(ui, "Start", |ui| {
-                    combo(ui, "ex_start", &["Profile Plane", "Offset", "From Object"], &mut st);
-                    if st != old {
-                        *offset_start = st == 1;
-                        set_object(&mut d.inputs, &mut d.active, FROM_OBJECT, st == 2);
-                        if st == 1 && start.is_empty() {
-                            *start = length_default(&app.session, "5");
-                        }
-                        if st == 0 {
-                            start.clear();
-                        }
-                    }
-                });
-                if st != 0 {
-                    enter |= expr_row(ui, "Offset", start);
-                    if *direction == 2 && st == 1 {
-                        form_row(ui, "Symmetric Offset", |ui| check(ui, symmetric_offset));
-                    }
-                }
-                if *direction < 2 {
+            // Start and its Offset show under Profiles (`extrude_start_rows`); Advanced keeps the
+            // taper, which a one-sided extrude takes.
+            if *direction < 2 {
+                ui_kit::section(ui, "extrude_advanced", "Advanced", *taper_present, |ui| {
                     form_row(ui, "Taper Angle", |ui| {
                         let before = taper.clone();
                         enter |= ui_kit::stepped_field(ui, taper, "", "1 deg", |text, delta| angle_step(text, delta, 1.0, None));
@@ -825,8 +807,8 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                             *taper_present = !taper.trim().is_empty();
                         }
                     });
-                }
-            });
+                });
+            }
         }
         Kind::Fillet { radius, chamfer, chain, ctype, distance2, angle, flip, setback } => {
             if *chamfer {
@@ -1028,6 +1010,55 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     }
     enter |= body_name_row(d, ui);
     error_rows(app, ctx, d, ui);
+    enter
+}
+
+/// Extrude's picks with Start among them (#21620): Profiles, then Start, the From Object pick and
+/// the Offset when Start takes them, then the other picks (To Object, Target Bodies).
+fn extrude_start_rows(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
+    let names = app.preferences.origin_plane_names;
+    input_rows_range(d, ui, &app.session, names, 0..1);
+    let from_object = object_on(&d.inputs, FROM_OBJECT);
+    let Kind::Extrude { start, offset_start, direction, .. } = &mut d.kind else {
+        return false;
+    };
+    let old = if from_object { 2 } else { usize::from(*offset_start) };
+    let mut st = old;
+    form_row(ui, "Start", |ui| {
+        combo(ui, "ex_start", &["Profile Plane", "Offset", "From Object"], &mut st);
+        if st != old {
+            *offset_start = st == 1;
+            set_object(&mut d.inputs, &mut d.active, FROM_OBJECT, st == 2);
+            if st == 1 && start.is_empty() {
+                *start = length_default(&app.session, "5");
+            }
+            if st == 0 {
+                start.clear();
+            }
+        }
+    });
+    let symmetric = *direction == 2 && st == 1;
+    let from = d.inputs.iter().position(|i| i.label == FROM_OBJECT);
+    if let Some(at) = from {
+        input_rows_range(d, ui, &app.session, names, at..at + 1);
+    }
+    let mut enter = false;
+    if st != 0
+        && let Kind::Extrude { start, symmetric_offset, .. } = &mut d.kind
+    {
+        enter |= expr_row(ui, "Offset", start);
+        if symmetric {
+            form_row(ui, "Symmetric Offset", |ui| check(ui, symmetric_offset));
+        }
+    }
+    let n = d.inputs.len();
+    match from {
+        Some(at) => {
+            input_rows_range(d, ui, &app.session, names, 1..at);
+            input_rows_range(d, ui, &app.session, names, at + 1..n);
+        }
+        None => input_rows_range(d, ui, &app.session, names, 1..n),
+    }
     enter
 }
 

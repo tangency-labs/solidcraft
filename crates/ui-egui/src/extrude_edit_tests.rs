@@ -57,7 +57,6 @@ fn new_extrude_keeps_empty_offset_until_profile_plane_is_selected() {
     h.app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch, index: 0 }];
     h.app.start("solid.extrude");
     h.frames(8);
-    h.step(&json!({"click":{"handle":"dialog:section:Advanced"}})).unwrap();
     h.step(&json!({"click":{"handle":"dialog:Start"}})).unwrap();
     h.step(&json!({"widget":"Offset"})).unwrap();
     h.step(&json!({"click":{"handle":"dialog:Offset"}})).unwrap();
@@ -74,6 +73,27 @@ fn new_extrude_keeps_empty_offset_until_profile_plane_is_selected() {
     let FeatureKind::Extrude { extent, .. } = &h.app.session.doc.features.last().unwrap().kind else { panic!("extrude") };
     assert!(extent.start_offset.is_none());
     assert!(extent.from.is_none());
+}
+
+/// Start is a main row under Profiles, above Direction, while Advanced stays folded; picking
+/// From Object shows its pick and the Offset right under Start (#21620).
+#[test]
+fn start_is_a_main_row_under_profiles_with_its_pick_and_offset_under_it() {
+    let mut h = make(json!({}));
+    h.app.run("timeline.delete", json!({"feature":"Depth"})).unwrap();
+    let sketch = h.app.session.doc.find_feature("Base").unwrap().id;
+    h.app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch, index: 0 }];
+    h.app.start("solid.extrude");
+    h.frames(8);
+    let top = |row: &str| crate::scenario::rect_of(&format!("dialog:row:{row}")).unwrap_or_else(|| panic!("no {row} row")).top();
+    assert!(top("Profiles") < top("Start") && top("Start") < top("Direction"));
+    assert!(crate::scenario::rect_of("dialog:row:Taper Angle").is_none(), "Advanced stays folded");
+    h.step(&json!({"click":{"handle":"dialog:Start"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Start:From Object"}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().unwrap().active_input().unwrap().label, "From Object");
+    assert!(top("Start") < top("From Object") && top("From Object") < top("Offset") && top("Offset") < top("Direction"));
+    assert!(crate::scenario::rect_of("dialog:row:Taper Angle").is_none(), "Advanced stays folded");
 }
 
 #[test]
