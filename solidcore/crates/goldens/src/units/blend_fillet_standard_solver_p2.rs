@@ -77,6 +77,7 @@ use super::topology_edgeuse_p2::{inexact_geometry, put_eu_state, Setup};
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// The upstream routine run by the shim.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2002,7 +2003,7 @@ fn gen_corner(rng: &mut Rng) -> (SrfIn, SrfIn, Vec3, Vec3) {
     let y = perp(x, rng);
     let z = x.cross(y);
     let phi = rng.uniform(40.0, 140.0) * DEG;
-    let w = y * phi.cos() + z * phi.sin();
+    let w = y * det::cos(phi) + z * det::sin(phi);
     let o = Vec3::new(
         rng.uniform(-2.0, 2.0),
         rng.uniform(-2.0, 2.0),

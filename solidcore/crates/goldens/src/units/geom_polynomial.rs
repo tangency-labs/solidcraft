@@ -17,6 +17,7 @@ use solidcore::geom::polynomial::{solve_cubic, solve_quadratic, solve_quartic, R
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 6000;
@@ -59,7 +60,7 @@ fn tolerance(rng: &mut Rng, degree: usize) -> f64 {
         6 => 1.0e-10,
         7 => 1.0e-6,
         8 => 0.0,
-        9 => 10f64.powi(rng.range_i64(-14, -3) as i32),
+        9 => det::powi(10f64, rng.range_i64(-14, -3) as i32),
         10 => 1.0e-3,
         // Large tolerances (quartics stay <= 1: above that upstream is UB).
         _ if degree < 4 => rng.uniform(0.0, 2.0),
@@ -123,7 +124,7 @@ fn from_roots(rng: &mut Rng, degree: usize) -> Vec<f64> {
             // (x - m)^2 + s^2 with s maybe tiny (near-double root)
             let m = root(rng);
             let s = if rng.chance(0.3) {
-                10f64.powi(rng.range_i64(-9, -3) as i32)
+                det::powi(10f64, rng.range_i64(-9, -3) as i32)
             } else {
                 rng.uniform(0.1, 3.0)
             };
@@ -167,7 +168,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
     }
     // Scale.
     if rng.chance(0.2) {
-        let s = 10f64.powi(rng.range_i64(-6, 6) as i32) * rng.uniform(0.5, 2.0);
+        let s = det::powi(10f64, rng.range_i64(-6, 6) as i32) * rng.uniform(0.5, 2.0);
         for x in &mut c {
             *x *= s;
         }

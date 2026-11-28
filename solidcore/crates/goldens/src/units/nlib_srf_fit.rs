@@ -40,6 +40,7 @@ use solidcore::{Result as SolidResult, SolidError};
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 1500;
@@ -500,7 +501,7 @@ fn gen_grid(rng: &mut Rng, ptp: i32, rows: usize, cols: usize) -> GridIn {
             let mut p: Vec<f64> = (0..3)
                 .map(|k| origin[k] + fi * du[k] + fj * dv[k] + rng.uniform(-noise, noise))
                 .collect();
-            p[2] += amp * (0.7 * fi).sin() * (0.5 * fj).cos();
+            p[2] += amp * det::sin(0.7 * fi) * det::cos(0.5 * fj);
             if flat {
                 p[2] = 0.0;
             }

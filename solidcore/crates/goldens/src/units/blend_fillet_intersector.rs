@@ -57,6 +57,7 @@ use crate::cases::blend::solver::{self, MAX_COORD, POINT_LEN};
 use crate::runner::default_cases;
 use crate::util::{flag, p2, v3};
 use crate::{Case, CaseSource, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Most points per program.
 const MAX_POINTS: usize = 16;
@@ -912,7 +913,7 @@ fn rot(v: [f64; 3], ang: f64) -> [f64; 3] {
     let n = cross(v, w);
     let ln = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-300);
     let n = [n[0] / ln, n[1] / ln, n[2] / ln];
-    let (c, s) = (ang.cos(), ang.sin());
+    let (c, s) = (det::cos(ang), det::sin(ang));
     [
         v[0] * c + n[0] * s,
         v[1] * c + n[1] * s,
@@ -979,8 +980,8 @@ fn gen_case(k: &Kernel, rng: &mut Rng) -> Option<Inputs> {
             _ => 0.3,
         };
         *d = [
-            mag * (n[2] - n[0]) * ang.cos(),
-            mag * (n[3] - n[1]) * ang.sin(),
+            mag * (n[2] - n[0]) * det::cos(ang),
+            mag * (n[3] - n[1]) * det::sin(ang),
         ];
     }
     let t1 = match rng.below(5) {

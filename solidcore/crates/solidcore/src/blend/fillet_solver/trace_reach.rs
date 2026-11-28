@@ -319,6 +319,7 @@ impl FilletSolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
     use crate::nurbs::b_spline_surface::BSplineSurface;
 
     fn plane(_k: &Kernel) -> Surface {
@@ -369,7 +370,7 @@ mod tests {
         use crate::nurbs::b_spline_curve::KnotType;
         use crate::nurbs::b_spline_surface::{BSplineSurfaceForm, CanonicalSurfaceData};
         let step = (turn / spans as f64).to_radians();
-        let mid_weight = (0.5 * step).cos();
+        let mid_weight = det::cos(0.5 * step);
         let mut points = Vec::new();
         let mut weights = Vec::new();
         for i in 0..=2 * spans {
@@ -380,7 +381,7 @@ mod tests {
                 (radius / mid_weight, mid_weight)
             };
             for z in [0.0, 4.0] {
-                points.push(Point3::new(r * angle.cos(), r * angle.sin(), z));
+                points.push(Point3::new(r * det::cos(angle), r * det::sin(angle), z));
                 weights.push(w);
             }
         }
@@ -418,7 +419,7 @@ mod tests {
         }
         let p = continued.evaluate_point(k, Point2::new(u, 0.5)).unwrap();
         // the low side is on the x axis and the arc runs anticlockwise from it
-        (-p.y).atan2(p.x).to_degrees().rem_euclid(360.0)
+        det::atan2(-p.y, p.x).to_degrees().rem_euclid(360.0)
     }
 
     #[test]
@@ -480,7 +481,7 @@ mod tests {
         let domain = arc.natural_uv_domain_with_nurb(&k).unwrap();
         // the tangent lines of the sides meet 10 tan 30 from each, and a span of 75 degrees
         // over a quarter of the domain leaves its end at 8 sin 37.5 radians per unit of u
-        let meeting = 30.0_f64.to_radians().tan() / (8.0 * 37.5_f64.to_radians().sin());
+        let meeting = det::tan(30.0_f64.to_radians()) / (8.0 * det::sin(37.5_f64.to_radians()));
         let size = s.domain_extension(&k, Some(&arc), &domain).unwrap();
         assert!((size.x - meeting).abs() < 1e-13, "{} {meeting}", size.x);
         // along the axis the cylinder is straight: the factor's

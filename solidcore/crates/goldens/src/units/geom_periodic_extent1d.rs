@@ -23,6 +23,7 @@ use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::util::flag;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// One `SmPeriodicExtent1d` operation on extents `a`, `b` and scalars `s`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -197,7 +198,7 @@ fn period(rng: &mut Rng) -> f64 {
         3 | 4 => 2.0 * PI,
         5 => 360.0,
         6 => rng.uniform(1e-3, 1e3),
-        7 => 10f64.powi(rng.range_i64(-12, 8) as i32) * rng.uniform(1.0, 9.0),
+        7 => det::powi(10f64, rng.range_i64(-12, 8) as i32) * rng.uniform(1.0, 9.0),
         8 => 0.0,
         _ => f64::from(rng.range_i64(1, 20) as i32),
     }

@@ -4,6 +4,7 @@
 //! Only consumed numbers are parsed; arbitrary trailing tokens are ignored.
 
 use crate::HarnessError;
+use solidcore::math::det;
 use solidcore::nurbs::math::NOW;
 
 /// Stored (not dehomogenized) surface data, with the v index varying fastest.
@@ -34,7 +35,7 @@ pub fn parse_sms(text: &str, path: &str) -> Result<ParsedSms, HarnessError> {
     };
     let count = |value: f64| {
         // usize::MAX rounds up on 64-bit targets, so this bound is exclusive.
-        let exclusive = 2.0_f64.powi(usize::BITS as i32);
+        let exclusive = det::powi(2.0_f64, usize::BITS as i32);
         if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value >= exclusive {
             Err(error(&format!("bad count {value}")))
         } else {

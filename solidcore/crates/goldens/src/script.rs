@@ -45,6 +45,7 @@
 //! once (the call takes it over).
 
 use crate::flat::{decode_curve, decode_surface, encode_curve, encode_surface};
+use solidcore::math::det;
 use solidcore_record::step::model::{Body, BodyKind, Bound, Curve, Surface, P3};
 use step_export::geom::{bspline_point, dot, scale, sub};
 
@@ -769,7 +770,7 @@ fn conic(f: &solidcore_record::step::model::Frame, a: f64, b: f64, deg: f64) -> 
     let r = deg.to_radians();
     add(
         f.origin,
-        add(scale(f.x, a * r.cos()), scale(f.y, b * r.sin())),
+        add(scale(f.x, a * det::cos(r)), scale(f.y, b * det::sin(r))),
     )
 }
 
@@ -796,15 +797,18 @@ pub fn step_uv_domain(body: &Body, face: &solidcore_record::step::model::Face) -
             let f = *frame;
             Box::new(move |p| {
                 let d = sub(p, f.origin);
-                (dot(d, f.y).atan2(dot(d, f.x)).to_degrees(), dot(d, f.z))
+                (
+                    det::atan2(dot(d, f.y), dot(d, f.x)).to_degrees(),
+                    dot(d, f.z),
+                )
             })
         }
         Surface::Sphere { frame, radius } => {
             let (f, r) = (*frame, *radius);
             Box::new(move |p| {
                 let d = sub(p, f.origin);
-                let lat = (dot(d, f.z) / r).clamp(-1.0, 1.0).asin().to_degrees();
-                (dot(d, f.y).atan2(dot(d, f.x)).to_degrees(), lat)
+                let lat = det::asin((dot(d, f.z) / r).clamp(-1.0, 1.0)).to_degrees();
+                (det::atan2(dot(d, f.y), dot(d, f.x)).to_degrees(), lat)
             })
         }
         Surface::Torus { frame, major, .. } => {
@@ -814,8 +818,8 @@ pub fn step_uv_domain(body: &Body, face: &solidcore_record::step::model::Face) -
                 let (x, y) = (dot(d, f.x), dot(d, f.y));
                 let rho = (x * x + y * y).sqrt();
                 (
-                    y.atan2(x).to_degrees(),
-                    dot(d, f.z).atan2(rho - big).to_degrees(),
+                    det::atan2(y, x).to_degrees(),
+                    det::atan2(dot(d, f.z), rho - big).to_degrees(),
                 )
             })
         }
@@ -870,7 +874,7 @@ pub fn step_uv_domain(body: &Body, face: &solidcore_record::step::model::Face) -
         ..
     } = &face.surface
     {
-        let tan = semi_angle_deg.to_radians().tan();
+        let tan = det::tan(semi_angle_deg.to_radians());
         if tan != 0.0 {
             let apex = -radius / tan;
             v0 = v0.max(apex);
@@ -965,7 +969,7 @@ pub fn step_face_area(
                 Box::new(move |_| r),
                 Box::new(move |p| {
                     let d = sub(p, fr.origin);
-                    (dot(d, fr.y).atan2(dot(d, fr.x)), dot(d, fr.z))
+                    (det::atan2(dot(d, fr.y), dot(d, fr.x)), dot(d, fr.z))
                 }),
             )
         }
@@ -976,21 +980,21 @@ pub fn step_face_area(
         } => {
             let (fr, r, a) = (*frame, *radius, semi_angle_deg.to_radians());
             (
-                Box::new(move |v| (r + v * a.tan()) / a.cos()),
+                Box::new(move |v| (r + v * det::tan(a)) / det::cos(a)),
                 Box::new(move |p| {
                     let d = sub(p, fr.origin);
-                    (dot(d, fr.y).atan2(dot(d, fr.x)), dot(d, fr.z))
+                    (det::atan2(dot(d, fr.y), dot(d, fr.x)), dot(d, fr.z))
                 }),
             )
         }
         Surface::Sphere { frame, radius } => {
             let (fr, r) = (*frame, *radius);
             (
-                Box::new(move |v| r * r * v.cos()),
+                Box::new(move |v| r * r * det::cos(v)),
                 Box::new(move |p| {
                     let d = sub(p, fr.origin);
-                    let lat = (dot(d, fr.z) / r).clamp(-1.0, 1.0).asin();
-                    (dot(d, fr.y).atan2(dot(d, fr.x)), lat)
+                    let lat = det::asin((dot(d, fr.z) / r).clamp(-1.0, 1.0));
+                    (det::atan2(dot(d, fr.y), dot(d, fr.x)), lat)
                 }),
             )
         }
@@ -1001,12 +1005,12 @@ pub fn step_face_area(
         } => {
             let (fr, big, r) = (*frame, *major, *minor);
             (
-                Box::new(move |v| r * (big + r * v.cos())),
+                Box::new(move |v| r * (big + r * det::cos(v))),
                 Box::new(move |p| {
                     let d = sub(p, fr.origin);
                     let (x, y) = (dot(d, fr.x), dot(d, fr.y));
                     let rho = (x * x + y * y).sqrt();
-                    (y.atan2(x), dot(d, fr.z).atan2(rho - big))
+                    (det::atan2(y, x), det::atan2(dot(d, fr.z), rho - big))
                 }),
             )
         }

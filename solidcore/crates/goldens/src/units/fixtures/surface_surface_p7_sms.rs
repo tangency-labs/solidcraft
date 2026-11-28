@@ -4,6 +4,7 @@
 //! bound. Knot additions are checked at their original processing positions:
 //! net first, then u sizing/consumption, then v sizing/consumption. These formerly
 //! overflowing sizes now return errors. Geometry validation remains downstream.
+use solidcore::math::det;
 
 /// Text payload, before the adapter supplies the B-spline form and oob defaults.
 #[derive(Debug, PartialEq)]
@@ -17,7 +18,7 @@ pub(crate) struct Parsed {
 
 fn count(path: &str, value: f64) -> Result<usize, String> {
     // Unlike usize::MAX as f64, this is exclusive even when MAX rounds upward.
-    let exclusive = 2.0_f64.powi(usize::BITS as i32);
+    let exclusive = det::powi(2.0_f64, usize::BITS as i32);
     if !value.is_finite() || value.fract() != 0.0 || value < 0.0 || value >= exclusive {
         return Err(format!("{path}: bad count {value}"));
     }

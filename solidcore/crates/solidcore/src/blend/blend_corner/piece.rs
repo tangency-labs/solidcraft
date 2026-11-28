@@ -49,6 +49,7 @@ use crate::blend::blend_setback::{Face, FaceKind, FacePlane, Hom2};
 use crate::error::Result;
 use crate::geom::vector3d::sqrt;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, Vec3, EFF_ZERO};
 use crate::nurbs::math::gamma;
 
@@ -518,7 +519,7 @@ fn winding(k: &Kernel, sides: &[Side], z: [f64; 2], z_off: f64) -> Result<Option
                 u[0] * r[0] + u[1] * r[1] > margin
             });
         if ahead {
-            turn += (ra[0] * rb[1] - ra[1] * rb[0]).atan2(ra[0] * rb[0] + ra[1] * rb[1]);
+            turn += det::atan2(ra[0] * rb[1] - ra[1] * rb[0], ra[0] * rb[0] + ra[1] * rb[1]);
             continue;
         }
         if arc.depth == 0 {
@@ -577,10 +578,10 @@ mod tests {
         let mut pieces = Vec::new();
         for q in 0..4 {
             let a = f64::from(q) * 0.5 * std::f64::consts::PI;
-            let (c0, s0) = (a.cos(), a.sin());
+            let (c0, s0) = (det::cos(a), det::sin(a));
             let (c1, s1) = (
-                (a + 0.5 * std::f64::consts::PI).cos(),
-                (a + 0.5 * std::f64::consts::PI).sin(),
+                det::cos(a + 0.5 * std::f64::consts::PI),
+                det::sin(a + 0.5 * std::f64::consts::PI),
             );
             pieces.push(vec![
                 [cx + r * c0, cy + r * s0, 0.0, 1.0],
@@ -717,7 +718,7 @@ mod tests {
         let t = 0.4f64;
         let n = Vec3::new(0.3, -0.2, 1.0).unitize().unwrap();
         // the point of the section at angle t: solve n . (x - e) = 0 for its height
-        let x = Vec3::new(10.0 * t.cos(), 10.0 * t.sin(), 0.0);
+        let x = Vec3::new(10.0 * det::cos(t), 10.0 * det::sin(t), 0.0);
         let s = Vec3::new(x.x, x.y, -(n.x * (x.x - e.x) + n.y * (x.y - e.y)) / n.z);
         let (net, _) = section_trace(&cyl, n, e, s, 1e-6).unwrap();
         assert_eq!(net.len(), 3);
@@ -731,7 +732,7 @@ mod tests {
                 }
             }
             let p = Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]);
-            assert!((p.x.hypot(p.y) - 10.0).abs() < 1e-12, "{i}");
+            assert!((det::hypot(p.x, p.y) - 10.0).abs() < 1e-12, "{i}");
             assert!((p - e).dot(n).abs() < 1e-12, "{i}");
         }
     }

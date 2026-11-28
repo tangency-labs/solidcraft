@@ -69,6 +69,7 @@ use super::station::{surface_partials, vec3, STATION_STEP};
 use crate::error::Result;
 use crate::geom::krawczyk::{inverse_of_columns2, NEWTON_STEPS};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point2, Point3, Vec3};
 use crate::surface::surface::Surface;
 
@@ -280,8 +281,8 @@ pub fn chord_setback(
         return Ok(None);
     }
     let [t1, t2] = tangents;
-    let half = 0.5 * t1.dot(t2).clamp(-1.0, 1.0).acos();
-    let mut d = chord / (2.0 * half.sin());
+    let half = 0.5 * det::acos(t1.dot(t2).clamp(-1.0, 1.0));
+    let mut d = chord / (2.0 * det::sin(half));
     let mut starts = [Point2::ZERO; 2];
     for ((start, (support, uv)), t) in starts
         .iter_mut()
@@ -416,7 +417,7 @@ mod tests {
 
     /// The rim `C(s) = R (cos s, sin s, 0)`.
     fn rim(s: f64) -> EdgeJet {
-        let (sn, cs) = s.sin_cos();
+        let (sn, cs) = det::sin_cos(s);
         EdgeJet {
             point: Point3::new(R * cs, R * sn, 0.0),
             d1: Vec3::new(-R * sn, R * cs, 0.0),
@@ -426,7 +427,7 @@ mod tests {
 
     /// The foot on a circle (or line, k = 0) section, in closed form.
     fn section_foot(c: Point3, t: Vec3, w: Vec3, k: f64, d: f64) -> Point3 {
-        let (sb, cb) = (0.5 * d * k).asin().sin_cos();
+        let (sb, cb) = det::sin_cos(det::asin(0.5 * d * k));
         c + (t * cb + w * sb) * d
     }
 
@@ -442,7 +443,7 @@ mod tests {
         let (fl, bl) = (flat(), ball(&k));
         for s in [0.0_f64, 0.3, 0.75, 1.2] {
             let e = rim(s);
-            let out = Vec3::new(s.cos(), s.sin(), 0.0);
+            let out = Vec3::new(det::cos(s), det::sin(s), 0.0);
             let flat_foot = out * 3.0;
             let ball_foot = out * 4.9 + Vec3::Z * (3.0 * 11.0_f64.sqrt() / 10.0);
             for (support, into, d, want) in
@@ -475,7 +476,7 @@ mod tests {
         let (fl, bl) = (flat(), ball(&k));
         for s in [0.0_f64, 0.9] {
             let e = rim(s);
-            let out = Vec3::new(s.cos(), s.sin(), 0.0);
+            let out = Vec3::new(det::cos(s), det::sin(s), 0.0);
             let uvs = [uv_of(&k, &fl, e.point), uv_of(&k, &bl, e.point)];
             let t1 = setback_tangent(&k, &fl, uvs[0], &e, -out).unwrap().unwrap();
             let t2 = setback_tangent(&k, &bl, uvs[1], &e, Vec3::Z)
@@ -512,7 +513,7 @@ mod tests {
         let k = Kernel::default();
         // a 60 degree wedge along the x axis: z = 0 (into +y) and the plane through x at 60
         let a = std::f64::consts::FRAC_PI_3;
-        let dir = Vec3::new(0.0, a.cos(), a.sin());
+        let dir = Vec3::new(0.0, det::cos(a), det::sin(a));
         let p1 = flat();
         let p2 = Surface::from(Plane::new(
             Vec3::ZERO,

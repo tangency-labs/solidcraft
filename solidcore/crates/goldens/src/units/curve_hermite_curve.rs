@@ -45,6 +45,7 @@ use crate::runner::default_cases;
 use crate::util::assert_reports::put_assert_reports;
 use crate::util::flag;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 2000;
@@ -602,7 +603,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
                     b.dim = *rng.choose(&[2u32, 3]).unwrap_or(&3);
                 }
                 if rng.chance(0.7) {
-                    let eps = 10f64.powi(-(rng.range_i64(9, 15) as i32));
+                    let eps = det::powi(10f64, -(rng.range_i64(9, 15) as i32));
                     let (vi, ci) = (rng.below(4) as usize, rng.below(3) as usize);
                     if let Some(c) = b.v.get_mut(vi).and_then(|v| v.get_mut(ci)) {
                         *c += eps * rng.uniform(-1.0, 1.0);

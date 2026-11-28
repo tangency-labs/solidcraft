@@ -5,6 +5,7 @@
 //! geometry incrementally. No geometry-validity or degree restrictions are added.
 
 use crate::HarnessError;
+use solidcore::math::det;
 use solidcore::nurbs::math::NOW;
 
 pub(super) struct ParsedSurface {
@@ -31,7 +32,7 @@ pub(super) fn parse_sms(text: &str, path: &str) -> Result<ParsedSurface, Harness
     };
     let count = |v: f64| {
         // Unlike usize::MAX as f64, this bound is exact on both 32 and 64 bits.
-        let exclusive = 2.0_f64.powi(usize::BITS as i32);
+        let exclusive = det::powi(2.0_f64, usize::BITS as i32);
         if !v.is_finite() || v.fract() != 0.0 || v < 0.0 || v >= exclusive {
             Err(HarnessError::new(format!("{path}: bad count {v}")))
         } else {

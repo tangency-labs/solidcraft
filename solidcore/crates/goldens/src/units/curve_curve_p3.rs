@@ -53,6 +53,7 @@ use crate::case::CaseContext;
 use crate::cases::contract::{self as contract, Limits};
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 3000;
@@ -1259,7 +1260,7 @@ fn gen_polygon(rng: &mut Rng, k: usize) -> Vec<[f64; 3]> {
                 a = -a;
             }
             let rr = r * rng.uniform(0.7, 1.3);
-            add(c, add(scale3(x, rr * a.cos()), scale3(y, rr * a.sin())))
+            add(c, add(scale3(x, rr * det::cos(a)), scale3(y, rr * det::sin(a))))
         })
         .collect()
 }

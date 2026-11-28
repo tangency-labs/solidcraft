@@ -1,6 +1,7 @@
 //! Lazy SMS surface decoding shared by the runner and non-C++ regression tests.
 
 use crate::HarnessError;
+use solidcore::math::det;
 use solidcore::nurbs::math::NOW;
 
 /// Raw SMS data; geometry validation remains the surface constructor's job.
@@ -31,7 +32,7 @@ fn count(it: &mut std::str::SplitWhitespace<'_>, path: &str) -> Result<usize, Ha
     if !value.is_finite()
         || value.fract() != 0.0
         || value < 0.0
-        || value >= 2.0_f64.powi(usize::BITS as i32)
+        || value >= det::powi(2.0_f64, usize::BITS as i32)
     {
         return Err(HarnessError::new(format!("{path}: bad count {value}")));
     }

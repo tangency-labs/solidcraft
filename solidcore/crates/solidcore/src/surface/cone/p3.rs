@@ -2334,7 +2334,7 @@ mod tests {
     #[test]
     fn coaxial_steep_coaxial_cone_cylinder_keeps_deviation_within_tol() {
         let k = Kernel::default();
-        let slope = 89.99_f64.to_radians().tan();
+        let slope = det::tan(89.99_f64.to_radians());
         let origin = Vec3::new(1e5, 1e5, 1e5);
         let mut cone = Cone::new_bounded(
             origin,

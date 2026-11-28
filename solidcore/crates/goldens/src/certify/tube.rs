@@ -48,6 +48,7 @@ use solidcore::blend::fillet_section::tay::wide;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::kernel::Kernel;
+use solidcore::math::det;
 use solidcore::math::Point2;
 use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::nurbs::math::NOW;
@@ -464,7 +465,7 @@ impl ConeForm {
         let (o, x, y, z) = (f.origin(), f.x_axis(), f.y_axis(), f.z_axis());
         let [x, y, z] = [x, y, z].map(|a| v3([a.x, a.y, a.z]));
         let rows = [cross(y, z), cross(z, x), cross(x, y)];
-        let t = canonical.semi_angle_deg.to_radians().tan();
+        let t = det::tan(canonical.semi_angle_deg.to_radians());
         // the domain's ends in STEP parameters (degrees, height); each end within a few
         // roundings of its conversion, ARGUED
         let at = |uv: Point2| {
@@ -1292,7 +1293,7 @@ fn nearest_exit(sys: &System, y: &[f64]) -> (Exit, f64) {
     if let Some((ay, ax, _)) = ev.seam {
         let (ay, ax) = (ay.mid(), ax.mid());
         if ax > 0.0 {
-            let r = ay.atan2(ax).abs() / std::f64::consts::TAU;
+            let r = det::atan2(ay, ax).abs() / std::f64::consts::TAU;
             if r < best.1 {
                 best = (Exit::Seam, r);
             }
@@ -2047,8 +2048,10 @@ mod tests {
                     let p = Point2::new(y[at], y[at + 1]);
                     let q = s[si].evaluate_point(k, p).unwrap();
                     let m = mid3(sys.sides[si].jet(pt(p.x), pt(p.y), [None; 2]).s);
-                    let d =
-                        ((m[0] - q.x).powi(2) + (m[1] - q.y).powi(2) + (m[2] - q.z).powi(2)).sqrt();
+                    let d = (det::powi(m[0] - q.x, 2)
+                        + det::powi(m[1] - q.y, 2)
+                        + det::powi(m[2] - q.z, 2))
+                    .sqrt();
                     assert!(
                         d <= 1e-12 * (1.0 + q.length()),
                         "side {si} at {p:?}: {m:?}, the kernel's {q:?}"

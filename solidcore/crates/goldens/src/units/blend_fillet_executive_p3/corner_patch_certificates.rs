@@ -22,6 +22,7 @@ use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::topology_traverser::face_edges;
 use solidcore::topology::Brep;
+use solidcore::math::det;
 
 /// A row with corner-patch sides on plane faces.
 struct Row {
@@ -38,10 +39,10 @@ struct Row {
 fn angle_rounding_bounds_acos() {
     // the floor is the half-order loss of acos next to 1
     let c = 1.0 - SEAM_DOT_ROUNDING;
-    assert!(c.acos() <= seam_angle_rounding(0.0));
+    assert!(det::acos(c) <= seam_angle_rounding(0.0));
     // away from 0 it is the first-order bound, and smaller
     assert!(seam_angle_rounding(6.8e-4) < 5e-12);
-    assert!(seam_angle_rounding(6.8e-4) >= SEAM_DOT_ROUNDING / (6.8e-4_f64).sin());
+    assert!(seam_angle_rounding(6.8e-4) >= SEAM_DOT_ROUNDING / det::sin(6.8e-4_f64));
 }
 
 /// The row's input, read as the goldens gate reads it (upstream file paths resolved).

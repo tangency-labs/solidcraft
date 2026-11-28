@@ -9615,6 +9615,7 @@ mod tests {
     use crate::curve::curve::Curve;
     use crate::curve::line::Line;
     use crate::geom::tol::USE_DEFAULT;
+    use crate::math::det;
     use crate::math::Point3;
     use crate::topology::brep::p2::ArenaNotifyState;
     use crate::topology::brep::p8::{create_planar_face_with_3d_curves, FaceBuildEnv};
@@ -9730,7 +9731,7 @@ mod tests {
         let base: Vec<Point3> = (0..5)
             .map(|ii| {
                 let angle = std::f64::consts::TAU * f64::from(ii) / 5.0;
-                Point3::new(10.0 * angle.cos(), 10.0 * angle.sin(), 0.0)
+                Point3::new(10.0 * det::cos(angle), 10.0 * det::sin(angle), 0.0)
             })
             .collect();
         let apex = Point3::new(0.0, 0.0, 15.0);
@@ -10588,6 +10589,7 @@ mod rails_fit_seam_tests {
     use crate::boolean::api_brep::boolean_difference;
     use crate::curve::curve::Curve;
     use crate::kernel::{KernelOptions, UpstreamFixes};
+    use crate::math::det;
     use crate::math::{Point3, Vec3};
     use crate::primitive::api_curves::{create_arc, create_line_segment};
     use crate::primitive::api_primitives::create_sphere;
@@ -10616,7 +10618,7 @@ mod rails_fit_seam_tests {
     /// (`tests/issue_2175_chamfer_rail_past_tangent_rim_end.rs` builds the same).
     fn body(k: &mut Kernel) -> Brep {
         let (c, r) = ((24.0625, 11.25), 26.5625);
-        let a = |p: (f64, f64)| (p.1 - c.1).atan2(p.0 - c.0);
+        let a = |p: (f64, f64)| det::atan2(p.1 - c.1, p.0 - c.0);
         let (s, mut e) = (a((0.0, 22.5)), a((0.0, 0.0)));
         while e < s {
             e += 2.0 * PI;
@@ -10797,7 +10799,7 @@ mod rails_fit_seam_tests {
         let axis = n.unitize().unwrap();
         let q = at(&curve, turn);
         let (u, v) = (p0 - centre, q - centre);
-        let angle = axis.dot(u.cross(v)).atan2(u.dot(v));
+        let angle = det::atan2(axis.dot(u.cross(v)), u.dot(v));
         let mut turned = crate::geom::axis2_placement::Axis2Placement::default();
         turned.init();
         turned.rotate_about_axis_at_point(angle, centre, axis);

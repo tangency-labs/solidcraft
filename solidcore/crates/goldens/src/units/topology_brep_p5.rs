@@ -27,6 +27,7 @@ use solidcore::{Result as SolidResult, SolidError};
 
 use super::boolean_merge_p1::graph_owned;
 use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Part 5's runner.
 pub struct Runner;
@@ -636,7 +637,7 @@ impl UnitDiff for Runner {
         Self::run(case, #[cfg(test)] &mut transform_certificate::Fired::default())
     }
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-        let scale = 10f64.powi(rng.range_i64(-6, 6) as i32);
+        let scale = det::powi(10f64, rng.range_i64(-6, 6) as i32);
         let mut i = Inputs {
             fixture: [
                 0.,

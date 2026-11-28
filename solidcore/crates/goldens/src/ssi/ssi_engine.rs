@@ -195,6 +195,7 @@ mod tests {
     use super::*;
     use crate::ssi::geom::P3;
     use crate::ssi::score::score_case;
+    use solidcore::math::det;
 
     /// The unit sphere cut by the plane z = 0.5: one circle of radius sqrt(3)/2.
     fn sphere_plane() -> SsiCase {
@@ -202,7 +203,7 @@ mod tests {
         let pts: Vec<P3> = (0..4001)
             .map(|i| {
                 let t = std::f64::consts::TAU * f64::from(i) / 4000.0;
-                [r * t.cos(), r * t.sin(), 0.5]
+                [r * det::cos(t), r * det::sin(t), 0.5]
             })
             .collect();
         let v = json!({

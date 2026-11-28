@@ -31,6 +31,7 @@ use solidcore::topology::{Brep, VertexId};
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
@@ -244,7 +245,7 @@ fn tolerance(rng: &mut Rng) -> f64 {
         4 => 0.1,
         5 => 1.0,
         6 => 1.0e3,
-        _ => 10f64.powi(rng.range_i64(-10, 2) as i32) * rng.uniform(0.5, 2.0),
+        _ => det::powi(10f64, rng.range_i64(-10, 2) as i32) * rng.uniform(0.5, 2.0),
     }
 }
 

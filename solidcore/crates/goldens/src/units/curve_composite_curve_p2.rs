@@ -49,6 +49,7 @@ use solidcore::SolidError;
 
 use crate::case::CaseContext;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 600;
@@ -1168,7 +1169,7 @@ fn polygon(rng: &mut Rng, o: [f64; 3], k: usize, r: f64) -> Vec<[f64; 3]> {
         .map(|i| {
             let ang = std::f64::consts::TAU * (i as f64 + rng.uniform(-0.25, 0.25)) / k as f64;
             let rr = r * rng.uniform(0.6, 1.0);
-            add(o, [rr * ang.cos(), rr * ang.sin(), 0.0])
+            add(o, [rr * det::cos(ang), rr * det::sin(ang), 0.0])
         })
         .collect()
 }

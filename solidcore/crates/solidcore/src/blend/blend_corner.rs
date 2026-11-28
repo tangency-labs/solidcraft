@@ -59,6 +59,7 @@ use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::global_solver::SolverOperation;
 use crate::intersect::surface_intersector::p1::SrfIndex;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -529,7 +530,7 @@ pub fn join_within_xsect_tolerance_deg(size: f64, xsect_tol: f64, tangency_tol_d
     let eps = f64::EPSILON;
     let budget = xsect_tol * (1.0 - 16.0 * eps) - 8.0 * eps * size;
     if budget > 0.0 {
-        crate::math::rad_to_deg(2.0 * (budget / (2.0 * size)).atan()).min(tangency_tol_deg)
+        crate::math::rad_to_deg(2.0 * det::atan(budget / (2.0 * size))).min(tangency_tol_deg)
     } else {
         0.0
     }
@@ -1026,7 +1027,7 @@ pub fn exact_mitre_curve(
     };
     let w = a.cross(u);
     let s_off = s_pnt - c;
-    let dt = s_off.dot(w).atan2(s_off.dot(u));
+    let dt = det::atan2(s_off.dot(w), s_off.dot(u));
     if dt.abs() <= EFF_ZERO || dt.abs() >= 0.99 * core::f64::consts::PI {
         return Ok(false);
     }
@@ -1036,8 +1037,8 @@ pub fn exact_mitre_curve(
     // curve runs as the edge does
     let mut arc = [
         (1.0, 0.0, 1.0),
-        (1.0, (0.5 * dt).tan(), (0.5 * dt).cos()),
-        (dt.cos(), dt.sin(), 1.0),
+        (1.0, det::tan(0.5 * dt), det::cos(0.5 * dt)),
+        (det::cos(dt), det::sin(dt), 1.0),
     ];
     if from_s {
         arc.reverse();
@@ -1239,11 +1240,11 @@ mod tests {
     #[test]
     fn blends_join_only_below_the_intersection_tolerance() {
         let deg = join_within_xsect_tolerance_deg(1.0, 2e-5, 10.0);
-        let bound = crate::math::rad_to_deg(2.0 * 1e-5_f64.atan());
+        let bound = crate::math::rad_to_deg(2.0 * det::atan(1e-5_f64));
         assert!(deg < bound, "{deg} not below {bound}");
         let a = deg.to_radians();
         assert!(
-            2.0 * (a / 2.0).tan() < 2e-5,
+            2.0 * det::tan(a / 2.0) < 2e-5,
             "{a}: the gap reaches the tolerance"
         );
         assert!(deg > bound * (1.0 - 1e-9), "{deg} far below {bound}");

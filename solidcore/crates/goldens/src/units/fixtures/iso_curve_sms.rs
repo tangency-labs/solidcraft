@@ -7,6 +7,7 @@
 use solidcore::nurbs::math::NOW;
 
 use crate::HarnessError;
+use solidcore::math::det;
 
 /// Decoded surface storage, with the v index fastest.
 pub(super) struct ParsedSrf {
@@ -32,7 +33,7 @@ pub(super) fn parse_sms(text: &str, path: &str) -> Result<ParsedSrf, HarnessErro
     };
     let int = |value: f64, name: &str| -> Result<usize, HarnessError> {
         // usize::MAX rounds up on 64-bit hosts; use the exclusive power-of-two bound.
-        let upper = 2.0_f64.powi(usize::BITS as i32);
+        let upper = det::powi(2.0_f64, usize::BITS as i32);
         if !value.is_finite() || value.fract() != 0.0 || value < 0.0 || value >= upper {
             return Err(error(&format!("bad {name} count {value}")));
         }

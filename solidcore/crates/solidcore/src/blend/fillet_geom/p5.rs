@@ -150,6 +150,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, Vec3, EFF_ZERO, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
@@ -425,7 +426,7 @@ fn may_meet_tangentially(
         return Ok(true);
     }
     let cos = (n1.dot(n2) / (l1 * l2)).abs().min(1.0);
-    Ok(crate::math::rad_to_deg(cos.acos()) <= bound_deg)
+    Ok(crate::math::rad_to_deg(det::acos(cos)) <= bound_deg)
 }
 const OP_MAKE_EDGE: &str = "blend::fillet_geom::p5::FilletBrep::make_fillet_edge";
 const OP_COPY: &str = "blend::fillet_geom::p5::FilletBrep::copy_fillet_geom";
@@ -4526,8 +4527,8 @@ mod tests {
         let t = seam_deg.to_radians();
         let frame = Axis2Placement::new(
             Point3::new(0.0, 0.0, 0.0),
-            Vec3::new(t.cos(), t.sin(), 0.0),
-            Vec3::new(-t.sin(), t.cos(), 0.0),
+            Vec3::new(det::cos(t), det::sin(t), 0.0),
+            Vec3::new(-det::sin(t), det::cos(t), 0.0),
         );
         let mut cylinder = Cone::create_canonical_cylinder(k, &frame, 10.0).unwrap();
         let mut domain = Extent2d::default();
@@ -4548,7 +4549,7 @@ mod tests {
     /// The point at `deg` degrees on the circle of [`boss_and_floor`].
     fn on_foot(deg: f64) -> Point3 {
         let t = deg.to_radians();
-        Point3::new(10.0 * t.cos(), 10.0 * t.sin(), 5.0)
+        Point3::new(10.0 * det::cos(t), 10.0 * det::sin(t), 5.0)
     }
 
     /// A turned-back rail's cap edge (`turned_back_arc`, not upstream) continues the foot edge
@@ -4606,7 +4607,7 @@ mod tests {
                             let p = curve
                                 .evaluate_point(&k, ivl.evaluate(f64::from(i) / f64::from(n)))
                                 .unwrap();
-                            let off = (p.x.hypot(p.y) - 10.0).abs().max((p.z - 5.0).abs());
+                            let off = (det::hypot(p.x, p.y) - 10.0).abs().max((p.z - 5.0).abs());
                             assert!(off <= 1e-9, "{what}: {p:?} off the circle by {off}");
                             length += p.distance(last);
                             last = p;

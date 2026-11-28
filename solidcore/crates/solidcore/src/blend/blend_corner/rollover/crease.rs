@@ -489,6 +489,7 @@ pub fn fit_certified(k: &Kernel, piece: &Piece, radii: Radii, target: f64) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     const UNIT: Radii = Radii { r1: 1.0, r2: 1.0 };
 
@@ -547,16 +548,19 @@ mod tests {
         let to_local = |x: f64, z: f64| [z - a1.1, a1.0 - x];
         let cb = (0.0, 33.0);
         let rb = 12.0;
-        let d = ((a1.0 - cb.0).powi(2) + (a1.1 - cb.1).powi(2)).sqrt();
+        let d = (det::powi(a1.0 - cb.0, 2) + det::powi(a1.1 - cb.1, 2)).sqrt();
         assert!((d - 12.5).abs() < 1e-12);
         let ua = ((a1.0 - cb.0) / d, (a1.1 - cb.1) / d);
         let qa = (cb.0 + rb * ua.0, cb.1 + rb * ua.1);
         // to D = (12, 33): the arc's angles about the bore's centre
-        let (ta, tb) = (ua.1.atan2(ua.0), 0.0_f64);
+        let (ta, tb) = (det::atan2(ua.1, ua.0), 0.0_f64);
         let half = 0.5 * (tb - ta);
-        let w1 = half.cos();
+        let w1 = det::cos(half);
         let mid = 0.5 * (ta + tb);
-        let p1 = (cb.0 + rb / w1 * mid.cos(), cb.1 + rb / w1 * mid.sin());
+        let p1 = (
+            cb.0 + rb / w1 * det::cos(mid),
+            cb.1 + rb / w1 * det::sin(mid),
+        );
         let piece = Piece::Arc {
             a: to_local(qa.0, qa.1),
             p1: to_local(p1.0, p1.1),
@@ -572,7 +576,7 @@ mod tests {
         let h0 = piece.height(radii, Tay2::var(Ivl::from(0.0))).v.mid();
         assert!(h0.abs() < 1e-15);
         let h1 = piece.height(radii, Tay2::var(Ivl::from(1.0))).v.mid();
-        let rho = ((a1.0 - 12.0).powi(2) + 0.25_f64).sqrt();
+        let rho = (det::powi(a1.0 - 12.0, 2) + 0.25_f64).sqrt();
         let want = ((rho - 0.5) * (0.5 + 1.0 - rho)).sqrt();
         assert!((h1 - want).abs() < 1e-14, "{h1} {want}");
     }

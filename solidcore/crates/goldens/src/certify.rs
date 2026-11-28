@@ -10,6 +10,7 @@
 //!
 //! The goldens WR-56 moved (#17467) are certified with it: each moved drop answer is enclosed,
 //! and an old answer outside the enclosure was wrong.
+use solidcore::math::det;
 
 pub(crate) mod tube;
 
@@ -137,7 +138,7 @@ fn extrapolation(knots: &[f64], p: usize, t: f64) -> Option<f64> {
         return None;
     }
     let ratio = (1.0 + 2.0 * d / span) * (1.0 + gamma(4));
-    let grow = ratio.powi(i32::try_from(p).ok()?) * (1.0 + gamma(p + 1));
+    let grow = det::powi(ratio, i32::try_from(p).ok()?) * (1.0 + gamma(p + 1));
     grow.is_finite().then_some(grow)
 }
 

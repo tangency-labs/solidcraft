@@ -4,6 +4,7 @@
 //! the numeric payload before building geometry. All tokens are parsed eagerly,
 //! including ignored numeric tails, preserving float-error precedence.
 
+use solidcore::math::det;
 use solidcore::nurbs::math::{NOW, NOZ};
 
 #[derive(Debug, PartialEq)]
@@ -48,7 +49,11 @@ impl<'a> Numbers<'a> {
     fn count(&mut self) -> Result<usize, String> {
         let v = self.num()?;
         // usize::MAX rounds up on 64-bit targets; the upper bound is exclusive.
-        if !v.is_finite() || v.fract() != 0.0 || v < 0.0 || v >= 2.0_f64.powi(usize::BITS as i32) {
+        if !v.is_finite()
+            || v.fract() != 0.0
+            || v < 0.0
+            || v >= det::powi(2.0_f64, usize::BITS as i32)
+        {
             return Err(format!("{}: bad count {v}", self.path));
         }
         Ok(v as usize)

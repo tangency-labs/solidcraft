@@ -28,6 +28,7 @@ use solidcore::surface::b_spline_volume::BSplineVolume;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::Surface;
 use solidcore::surface::volume::{Volume, VolumeKind};
+use solidcore::math::det;
 
 /// Runner for curve classification part 8.
 pub struct Runner;
@@ -318,7 +319,7 @@ impl UnitDiff for Runner {
         let nv = 2 + rng.below(3);
         let a = rng.point3(-2., 2.);
         let b = rng.point3(-2., 2.);
-        let scale = 10f64.powi(rng.below(9) as i32 - 4);
+        let scale = det::powi(10f64, rng.below(9) as i32 - 4);
         let max = if kind == 1 { 360. } else { 1. };
         let t0 = if rng.below(3) == 0 { max * 0.2 } else { 0. };
         let t1 = if rng.below(3) == 0 { max * 0.8 } else { max };

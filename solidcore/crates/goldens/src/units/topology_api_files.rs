@@ -48,6 +48,7 @@ use super::topology_brep_mirror::FILES as WRITE_FILES;
 use crate::case::{CaseContext, CaseSource};
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated `write_bytes` cases per run.
 pub const WRITE_GENERATED: usize = 200;
@@ -940,7 +941,7 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-        let scale = 10f64.powi(rng.range_i64(-2, 2) as i32);
+        let scale = det::powi(10f64, rng.range_i64(-2, 2) as i32);
         let mut size = || rng.uniform(1.0, 20.0) * scale;
         let size = [size(), size(), size()];
         let op = match rng.below(4) {

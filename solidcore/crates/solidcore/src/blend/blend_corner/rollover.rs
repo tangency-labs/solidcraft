@@ -53,6 +53,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::tol::zone_tol3d;
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, Vec3};
 use crate::query::face::p1::{point_3d_classify_at, Point3dClassifyOptions};
 use crate::surface::step_seam::seam_into_widest_gap;
@@ -296,7 +297,7 @@ pub fn seam_end(
         return Ok(None);
     };
     // the seam at W: F against a plane parallel to A1, not E, tangential at W
-    let sin_tol = (tol_deg * (crate::math::PI / 180.0)).sin();
+    let sin_tol = det::sin(tol_deg * (crate::math::PI / 180.0));
     let mut wall = None;
     for x in crate::topology::vertex::edges(b, w, None)? {
         if x == side_edge || edge::is_closed(b, x)? {

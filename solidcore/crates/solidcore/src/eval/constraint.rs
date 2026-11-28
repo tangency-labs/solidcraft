@@ -352,7 +352,7 @@ pub fn corner_round(
         return Err(NoCorner::NoLength);
     }
     let (u, v) = (a.scale(1.0 / la), b.scale(1.0 / lb));
-    let angle = u.cross(v).len().atan2(u.dot(v));
+    let angle = det::atan2(u.cross(v).len(), u.dot(v));
     if angle > std::f64::consts::PI - NO_CORNER {
         return Err(NoCorner::Straight);
     }
@@ -366,8 +366,8 @@ pub fn corner_round(
     // The sum is 2 cos(θ/2) long: at least 1e-6 after the checks above, so it has a direction.
     let sum = u + v;
     let bisector = sum.scale(1.0 / sum.len());
-    let setback = radius / half.tan();
-    let centre = corner + bisector.scale(radius / half.sin());
+    let setback = radius / det::tan(half);
+    let centre = corner + bisector.scale(radius / det::sin(half));
     let arc = [
         (corner + u.scale(setback)).xyz(),
         (centre - bisector.scale(radius)).xyz(),

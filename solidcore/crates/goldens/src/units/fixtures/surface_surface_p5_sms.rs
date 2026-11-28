@@ -5,6 +5,7 @@
 //! and the original net, U-knot, V-knot processing/error order.
 
 use crate::HarnessError;
+use solidcore::math::det;
 use solidcore::nurbs::math::NOW;
 
 pub(crate) struct ParsedSurface {
@@ -24,7 +25,7 @@ pub(crate) fn read_sms(path: &str) -> Result<ParsedSurface, HarnessError> {
 fn count(path: &str, value: f64) -> Result<usize, HarnessError> {
     // usize::MAX rounds up on 64-bit hosts. Use the exclusive power-of-two
     // bound instead, so a saturating cast can never accept that rounded value.
-    let exclusive_bound = 2.0_f64.powi(usize::BITS as i32);
+    let exclusive_bound = det::powi(2.0_f64, usize::BITS as i32);
     if !value.is_finite() || value.fract() != 0.0 || value < 0.0 || value >= exclusive_bound {
         return Err(HarnessError::new(format!("{path}: bad count {value}")));
     }

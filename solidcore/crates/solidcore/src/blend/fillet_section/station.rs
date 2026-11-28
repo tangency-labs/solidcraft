@@ -2867,6 +2867,7 @@ mod tests {
     use super::*;
     use crate::blend::fillet_section::interval::Ivl;
     use crate::geom::extent2d::Extent2d;
+    use crate::math::det;
     use crate::math::Vec2;
     use crate::surface::plane::Plane;
 
@@ -3608,7 +3609,7 @@ mod tests {
             // coefficient is the face's own, scaled by k in x and y
             let w00 = offset_at(&w, deg, 0, 0);
             let p00 = pf.at(0, 0);
-            let kk = w00.x.hypot(w00.y) / p00.x.hypot(p00.y);
+            let kk = det::hypot(w00.x, w00.y) / det::hypot(p00.x, p00.y);
             assert!(
                 (kk - 0.001).abs() < 1e-12 || (kk - 1.999).abs() < 1e-12,
                 "d0 {d0}: k {kk}"
@@ -3652,7 +3653,7 @@ mod tests {
                 for a in 0..=deg {
                     for b in 0..=(deg - a) {
                         let c = offset_at(&w, deg, a, b);
-                        let m = du.powi(a as i32) * dv.powi(b as i32);
+                        let m = det::powi(du, a as i32) * det::powi(dv, b as i32);
                         p[0] += c.x * m;
                         p[1] += c.y * m;
                         p[2] += c.z * m;
@@ -3662,7 +3663,7 @@ mod tests {
                 for (pc, qc) in p.iter().zip(&q) {
                     assert!((pc - qc).abs() < 1e-11, "d0 {d0}: {p:?} against {q:?}");
                 }
-                let radius = p[0].hypot(p[1]);
+                let radius = det::hypot(p[0], p[1]);
                 let near = |r: f64| (radius - r).abs() < 1e-11;
                 assert!(near(0.01) || near(19.99), "d0 {d0}: radius {radius}");
             }

@@ -1821,7 +1821,7 @@ mod tests {
     #[test]
     fn a_plane_brought_onto_a_line_tilts_the_least_and_holds_it() {
         let near = |a: Vec3, b: Vec3| (a - b).length() < 1e-12;
-        let (c, s) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+        let (c, s) = (det::cos(30f64.to_radians()), det::sin(30f64.to_radians()));
         let (at, dir) = (Point3::new(1.0, 2.0, 3.0), Vec3::new(0.0, c, s));
         let (o, x, y) = plane_onto_line(Point3::ZERO, Vec3::X, Vec3::Y, at, dir).unwrap();
         let n = x.cross(y);

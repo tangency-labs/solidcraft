@@ -33,6 +33,7 @@
 
 use crate::error::blend::{BlendFailure, MixedStep};
 use crate::error::{Result, SolidError};
+use crate::math::det;
 use crate::math::{Point3, Vec3, BIG_DOUBLE};
 use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -584,13 +585,13 @@ pub fn c1(c: &mut Crv, companions: &mut [&mut Crv]) -> Result<()> {
                 f *= k;
             }
         }
-        let kn = k.powf(n as f64);
+        let kn = det::powf(k, n as f64);
         for t in s + 1..c.seg.len() {
             for q in gm(&mut c.seg, t)?.iter_mut() {
                 *q = mul(*q, kn);
             }
             for comp in companions.iter_mut() {
-                let kd = k.powf(comp.deg().ok_or_else(out_of_table)? as f64);
+                let kd = det::powf(k, comp.deg().ok_or_else(out_of_table)? as f64);
                 for q in gm(&mut comp.seg, t)?.iter_mut() {
                     *q = mul(*q, kd);
                 }
@@ -983,9 +984,9 @@ fn solve(a: &[Vec<f64>], b: &[f64]) -> Result<(Vec<f64>, f64)> {
                 if at(&nn, p, q)?.abs() < 1e-300 {
                     continue;
                 }
-                let th = 0.5 * (2.0 * at(&nn, p, q)?).atan2(at(&nn, q, q)? - at(&nn, p, p)?);
-                let c = th.cos();
-                let s = th.sin();
+                let th = 0.5 * det::atan2(2.0 * at(&nn, p, q)?, at(&nn, q, q)? - at(&nn, p, p)?);
+                let c = det::cos(th);
+                let s = det::sin(th);
                 for k in 0..n {
                     let x = at(&nn, k, p)?;
                     let d = at(&nn, k, q)?;

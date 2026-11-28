@@ -51,6 +51,7 @@ use solidcore::SolidError;
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 500;
@@ -849,7 +850,7 @@ fn gen_curve(k: &Kernel, rng: &mut Rng, surface: &Surface, d: [f64; 4], lift: f6
         lifted(k, surface, uv, lift * rng.uniform(-1.0, 1.0))
     };
     let segment = |a: [f64; 3], bb: [f64; 3]| {
-        let l = ((bb[0] - a[0]).powi(2) + (bb[1] - a[1]).powi(2) + (bb[2] - a[2]).powi(2)).sqrt();
+        let l = (det::powi(bb[0] - a[0], 2) + det::powi(bb[1] - a[1], 2) + det::powi(bb[2] - a[2], 2)).sqrt();
         let m = a
             .iter()
             .chain(bb.iter())

@@ -41,6 +41,7 @@ use solidcore::SolidError;
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 500;
@@ -842,7 +843,7 @@ fn gen_plane(rng: &mut Rng, t: &TorusIn, exact: bool) -> PlaneIn {
     if exact {
         let (origin, normal, px) = if rng.chance(0.5) {
             let a = rng.uniform(0.0, 360.0).to_radians();
-            let dir = add(add([0.0; 3], t.x, a.cos()), t.y, a.sin());
+            let dir = add(add([0.0; 3], t.x, det::cos(a)), t.y, det::sin(a));
             (t.origin, normalize(cross3(axis, dir)), axis)
         } else {
             let h = if rng.chance(0.2) {
@@ -864,8 +865,8 @@ fn gen_plane(rng: &mut Rng, t: &TorusIn, exact: bool) -> PlaneIn {
                     0.0
                 };
             let a = ang.to_radians();
-            let dir = add([0.0; 3], t.x, a.cos());
-            let dir = add(dir, t.y, a.sin());
+            let dir = add([0.0; 3], t.x, det::cos(a));
+            let dir = add(dir, t.y, det::sin(a));
             let n = normalize(cross3(axis, dir));
             let shift = if rng.chance(0.2) {
                 rng.uniform(-0.5, 0.5) * r
@@ -1516,13 +1517,13 @@ mod tests {
             for v in [a, m, b] {
                 res.check("net: control point in the arc's plane", name, v.dot(nrm).abs(), tol);
             }
-            let signed = a.cross(b).dot(nrm).atan2(a.dot(b));
+            let signed = det::atan2(a.cross(b).dot(nrm), a.dot(b));
             if sense == 0.0 {
                 sense = signed.signum();
             }
             assert!(signed * sense > 0.0, "{name}: an arc turns back ({signed} rad)");
             let theta = signed.abs();
-            let half = (theta / 2.0).cos();
+            let half = det::cos(theta / 2.0);
             assert!(half > 0.0, "{name}: arc of {theta} rad");
             res.check("net: middle point at rho / cos(theta / 2)", name, (m.length() - rho / half).abs(), tol / half);
             let bis = a + b;
@@ -1699,8 +1700,8 @@ mod tests {
             let v = x - origin;
             let h = v.dot(a_hat);
             let rho = (v - h * a_hat).length();
-            let near = ((rho - big).powi(2) + h * h).sqrt() - small;
-            let far = ((rho + big).powi(2) + h * h).sqrt() - small;
+            let near = (det::powi(rho - big, 2) + h * h).sqrt() - small;
+            let far = (det::powi(rho + big, 2) + h * h).sqrt() - small;
             near.abs().min(far.abs())
         };
         let src = t.base().base();
@@ -1711,7 +1712,7 @@ mod tests {
         for (a, b) in grid.iter().flat_map(|a| grid.iter().map(move |b| (*a, *b))) {
             let uv = nd.evaluate(a, b);
             let v = t.convert_uv_from_nurbs_to_step(k, uv).expect("to step").y;
-            if t.major_radius() + t.minor_radius() * v.to_radians().cos() <= 1e-6 * t.major_radius() {
+            if t.major_radius() + t.minor_radius() * det::cos(v.to_radians()) <= 1e-6 * t.major_radius() {
                 continue;
             }
             let d = src.evaluate_simple(uv, 1, 1, false, false, false).expect("derivatives");

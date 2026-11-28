@@ -48,6 +48,7 @@ use crate::geom::krawczyk::{inverse_of_columns3, newton, Linearised};
 use crate::geom::tol::within_contact_tol;
 use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::p2::ControlPointForm;
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -347,7 +348,7 @@ pub(super) struct Standoff {
 impl Standoff {
     /// `lambda(t)`.
     fn at(&self, t: f64) -> f64 {
-        self.lambda0 * (1.0 - t.powi(self.power))
+        self.lambda0 * (1.0 - det::powi(t, self.power))
     }
 
     /// `lambda(t) n`.
@@ -1350,7 +1351,7 @@ mod tests {
         };
         let mut worst: f64 = 0.0;
         for i in 1..=48 {
-            let t = ivl.min() + (ivl.max() - ivl.min()) * 0.5_f64.powi(i);
+            let t = ivl.min() + (ivl.max() - ivl.min()) * det::powi(0.5_f64, i);
             let x = exact(t);
             for y in [
                 rib.curve_3d.evaluate_point(t).unwrap(),

@@ -955,6 +955,7 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
     use solidcore::curve::curve::p8::{curves_meet_at_most_once, curves_stay_within};
+    use solidcore::math::det;
 
     #[test]
     fn coincidence_splits_stop_at_the_call_bound() {
@@ -1532,7 +1533,7 @@ mod tests {
             )
             .unwrap(),
         );
-        let x = 10.0 * 30.0_f64.to_radians().cos();
+        let x = 10.0 * det::cos(30.0_f64.to_radians());
         let mut cur = allocate_nurb_curve(1, 1, 3).unwrap();
         for (d, s) in cur.cpts_mut().iter_mut().zip([[x, -5.0], [x, 5.0]]) {
             d.x = s[0];

@@ -377,6 +377,7 @@ pub(super) fn coincident_opposites(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     fn plane(id: u32, x: f64, normal_x: f64) -> PlanarFace {
         PlanarFace {
@@ -388,8 +389,8 @@ mod tests {
 
     #[test]
     fn opposite_planes_cancel_only_within_the_booleans_bound() {
-        let near = 2f64.powi(30);
-        let gap = 2f64.powi(-20);
+        let near = det::powi(2f64, 30);
+        let gap = det::powi(2f64, -20);
         let tolerance = 1e-7;
         // Within the roundoff cutoff at this magnitude, but beyond twice the tolerance.
         assert!(!opposite(

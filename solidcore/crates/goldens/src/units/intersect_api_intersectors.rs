@@ -46,6 +46,7 @@ use solidcore::topology::Brep;
 use solidcore::{Result as SolidResult, SolidError};
 
 use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// The runner of the four `SM_API` intersectors.
 pub struct Runner;
@@ -943,7 +944,7 @@ fn gen_analytic(rng: &mut Rng, scale: f64) -> SurfaceIn {
 /// Two analytic surfaces: independent, or the second a copy of the first moved by a
 /// tiny or a tolerance-sized offset (coincident, near-tangent and touching pairs).
 fn gen_ssi(rng: &mut Rng) -> Option<Value> {
-    let scale = 10f64.powi(rng.range_i64(-1, 2) as i32);
+    let scale = det::powi(10f64, rng.range_i64(-1, 2) as i32);
     let surface1 = gen_analytic(rng, scale);
     let surface2 = if rng.chance(0.3) {
         let mut s = surface1.clone();
@@ -1074,7 +1075,7 @@ fn gen_body_curve(rng: &mut Rng, scale: f64, body: &BodyIn) -> CurveIn {
 
 /// A curve/surface, curve/face or curve/B-rep case.
 fn gen_hit(rng: &mut Rng) -> Option<Value> {
-    let scale = 10f64.powi(rng.range_i64(-1, 2) as i32);
+    let scale = det::powi(10f64, rng.range_i64(-1, 2) as i32);
     let i = match rng.below(3) {
         0 => {
             if rng.chance(0.4) {
@@ -1168,7 +1169,7 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-        let scale = 10f64.powi(rng.range_i64(-1, 2) as i32);
+        let scale = det::powi(10f64, rng.range_i64(-1, 2) as i32);
         let i = match rng.below(4) {
             0 => {
                 let curve1 = gen_curve(rng, scale);
@@ -1392,7 +1393,7 @@ mod tests {
             }
             let q = at(0.5 * (lo + hi));
             let rho = (p.x * p.x + p.y * p.y).sqrt();
-            ((rho - q.x).powi(2) + (p.z - q.z).powi(2)).sqrt()
+            (det::powi(rho - q.x, 2) + det::powi(p.z - q.z, 2)).sqrt()
         }
     }
 
@@ -1437,7 +1438,7 @@ mod tests {
                     let turn: f64 = pts
                         .windows(2)
                         .map(|w| {
-                            let d = w[1].y.atan2(w[1].x) - w[0].y.atan2(w[0].x);
+                            let d = det::atan2(w[1].y, w[1].x) - det::atan2(w[0].y, w[0].x);
                             (d + PI).rem_euclid(2.0 * PI) - PI
                         })
                         .sum();

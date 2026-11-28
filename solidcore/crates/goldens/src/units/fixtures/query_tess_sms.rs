@@ -3,6 +3,7 @@
 //! Counts are bounded by usize's exclusive upper limit. Payload checks are staged:
 //! net truncation precedes U arithmetic, and U consumption precedes V arithmetic.
 
+use solidcore::math::det;
 use solidcore::nurbs::math::NOW;
 
 /// Surface data in the original homogeneous, v-fastest storage order.
@@ -27,7 +28,7 @@ fn number(it: &mut std::vec::IntoIter<f64>) -> Result<f64, String> {
 fn count(it: &mut std::vec::IntoIter<f64>) -> Result<usize, String> {
     let value = number(it)?;
     // usize::MAX rounds UP on 64-bit, so comparison with MAX as f64 is unsafe.
-    let exclusive = 2.0_f64.powi(usize::BITS as i32);
+    let exclusive = det::powi(2.0_f64, usize::BITS as i32);
     if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value >= exclusive {
         return Err(format!("bad count {value}"));
     }

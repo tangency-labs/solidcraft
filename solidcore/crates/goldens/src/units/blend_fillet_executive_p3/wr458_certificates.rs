@@ -30,6 +30,7 @@ use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::FaceId;
 use std::cell::RefCell;
 use std::rc::Rc;
+use solidcore::math::det;
 
 /// A moved row: name, whether the result is closed (else open), and its status and counts
 /// (the same on main).
@@ -271,7 +272,7 @@ fn surface_surface_row_is_a_certified_definition() {
         let u = d.u_interval().min() + f * (d.u_interval().max() - d.u_interval().min());
         let v = 0.5 * (d.v_interval().min() + d.v_interval().max());
         let p = surface.evaluate_point(&k, solidcore::math::Point2::new(u, v)).unwrap();
-        let far = ((p.x - (5.0 + 2f64.sqrt())).powi(2) + (p.z + 2f64.sqrt()).powi(2)).sqrt();
+        let far = (det::powi(p.x - (5.0 + 2f64.sqrt()), 2) + det::powi(p.z + 2f64.sqrt(), 2)).sqrt();
         assert!(far <= input.tolerance, "{name}: the middle of the section at u = {u} is {far:e} off the arc's far point");
     }
 }

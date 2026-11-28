@@ -90,6 +90,7 @@ use crate::error::blend::CornerStep;
 use crate::error::Result;
 use crate::geom::vector3d::sqrt;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, PI};
 use crate::nurbs::b_spline_surface::BSplineSurface;
 
@@ -777,7 +778,7 @@ fn line_spine(a: &Face, b: &Face, ends: [Point3; 2], row: &[Hom], tol: f64) -> R
                 quadric.kind = QuadricKind::Cone;
                 quadric.point = face.point - face.axis * (face.radius / face.slope);
                 quadric.dir = face.axis * if face.slope > 0.0 { 1.0 } else { -1.0 };
-                quadric.angle = face.slope.abs().atan();
+                quadric.angle = det::atan(face.slope.abs());
                 quadric.side = face.side;
             }
         }
@@ -836,7 +837,7 @@ fn round_row_k(
         for (j, hj) in j0.iter().enumerate() {
             h = axpy(
                 &h,
-                binomial(q, j)? * t.powf(j as f64) * (1.0 - t).powf((q - j) as f64),
+                binomial(q, j)? * det::powf(t, j as f64) * det::powf(1.0 - t, (q - j) as f64),
                 hj,
             );
         }
@@ -2000,7 +2001,7 @@ pub(super) fn graph_g1_curved(
             let sig = el_ref(&side0, q)?.d;
             let a = (sig.x * dt.y - sig.y * dt.x) / det;
             let b = (ds.x * sig.y - ds.y * sig.x) / det;
-            let mut th = b.atan2(a);
+            let mut th = det::atan2(b, a);
             if th < 0.0 {
                 th += PI;
             }
@@ -2385,7 +2386,7 @@ mod tests {
     /// not negative, NaN included, is invalid input.
     #[test]
     fn no_more_concave_accepts_the_equality_and_refuses_a_smaller_k_on_quadrics() {
-        let (c45, t22, c22) = (0.5f64.sqrt(), (PI / 8.0).tan(), (PI / 8.0).cos());
+        let (c45, t22, c22) = (0.5f64.sqrt(), det::tan(PI / 8.0), det::cos(PI / 8.0));
         // Each face's least normal curvature, from its geometry, II taken with the unit normal
         // into the material (away from the axis or centre), so a concave face curves away
         // from that normal and its normal curvatures are <= 0:
@@ -2402,8 +2403,8 @@ mod tests {
         //   surface normal, so by Meusnier its normal curvature is -cos(alpha) / rho =
         //   -1 / (rho sqrt(1 + slope^2)). It is most negative where rho is least: on the
         //   patch (z 0 to 3) at z = 0, rho = 4: -1 / (4 sqrt 2).
-        let alpha = cone.slope.atan();
-        let k_cone = -alpha.cos() / cone.radius;
+        let alpha = det::atan(cone.slope);
+        let k_cone = -det::cos(alpha) / cone.radius;
         assert!((k_cone + 1.0 / (4.0 * 2f64.sqrt())).abs() <= 1e-15);
         // The smaller k (of less size): -1/10, half the bore's and cavity's, and 0.9 x the
         // cone's. Each face reaches its own least curvature on the patch, below that k, so

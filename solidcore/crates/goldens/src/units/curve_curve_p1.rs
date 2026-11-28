@@ -1487,6 +1487,7 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+    use solidcore::math::det;
 
     /// Bernstein signs prove a single at-distance root; the discarded endpoint is off target.
     #[test]
@@ -1536,10 +1537,10 @@ mod tests {
         assert_eq!(values.len(), 7);
         let t = values[6];
         assert!((0.0..=1.0).contains(&t));
-        let point = cp[0] * (1.0 - t).powi(3)
-            + cp[1] * (3.0 * t * (1.0 - t).powi(2))
+        let point = cp[0] * det::powi(1.0 - t, 3)
+            + cp[1] * (3.0 * t * det::powi(1.0 - t, 2))
             + cp[2] * (3.0 * t * t * (1.0 - t))
-            + cp[3] * t.powi(3);
+            + cp[3] * det::powi(t, 3);
         assert!((point.distance(v3(p)) - target).abs() < 1e-12);
         assert!((cp[3].distance(v3(p)) - target).abs() > 1.0);
     }

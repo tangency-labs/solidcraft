@@ -57,6 +57,7 @@ use crate::error::blend::BlendFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -438,8 +439,8 @@ pub fn surface_plane_curve(
     };
     let (_, su0, sv0, _) = tr.eval(start_uv)?;
     let steep = |rate: Point2, (out_u, out_v): (bool, bool)| {
-        (out_u && (rate.x * su0.length()).abs() > ang_tol.sin())
-            || (out_v && (rate.y * sv0.length()).abs() > ang_tol.sin())
+        (out_u && (rate.x * su0.length()).abs() > det::sin(ang_tol))
+            || (out_v && (rate.y * sv0.length()).abs() > det::sin(ang_tol))
     };
     let flipped = Point2::new(-r0.x, -r0.y);
     if steep(r0, leaves(r0)) && leaves(flipped) == (false, false) {

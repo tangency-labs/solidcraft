@@ -38,6 +38,7 @@ use solidcore::SolidError;
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 800;
@@ -610,8 +611,8 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
 /// A length scale: mostly moderate, sometimes tiny or huge.
 fn gen_scale(rng: &mut Rng) -> f64 {
     match rng.below(10) {
-        0 => 10f64.powi(-(rng.range_i64(3, 6) as i32)),
-        1 => 10f64.powi(rng.range_i64(3, 6) as i32),
+        0 => det::powi(10f64, -(rng.range_i64(3, 6) as i32)),
+        1 => det::powi(10f64, rng.range_i64(3, 6) as i32),
         _ => rng.uniform(0.2, 20.0),
     }
 }

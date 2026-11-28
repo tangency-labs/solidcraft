@@ -1608,6 +1608,7 @@ pub fn create_ball_patch(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     /// A sphere of centre `c` and radius `r`, as `x . x + 2 b . x + c` ([`BallImplicit`]).
     fn sphere(c: [f64; 3], r: f64) -> BallImplicit {
@@ -1682,11 +1683,11 @@ mod tests {
 
     /// Three unit directions each `angle` from the other two, about +z.
     fn equal_sides(angle: f64) -> [Vec3; 3] {
-        let z = ((1.0 + 2.0 * angle.cos()) / 3.0).sqrt();
+        let z = ((1.0 + 2.0 * det::cos(angle)) / 3.0).sqrt();
         let r = (1.0 - z * z).sqrt();
         [0.0_f64, 120.0, 240.0].map(|a| {
             let a = a.to_radians();
-            Vec3::new(r * a.cos(), r * a.sin(), z)
+            Vec3::new(r * det::cos(a), r * det::sin(a), z)
         })
     }
 
@@ -1699,7 +1700,7 @@ mod tests {
     /// the triangle is one patch from any pole; over it, from none.
     #[test]
     fn a_triangle_is_one_patch_up_to_a_regular_tetrahedrons_corner() {
-        let limit = (-1.0_f64 / 3.0).acos();
+        let limit = det::acos(-1.0_f64 / 3.0);
         for (angle, one) in [
             (90.0_f64.to_radians(), true),
             (limit - 1e-3, true),
@@ -1761,7 +1762,7 @@ mod tests {
     fn a_fan_centre_outside_its_triangle_is_not_taken() {
         let on_equator = |degrees: f64| {
             let a = degrees.to_radians();
-            Vec3::new(a.cos(), a.sin(), 0.0)
+            Vec3::new(det::cos(a), det::sin(a), 0.0)
         };
         let lifted = (on_equator(40.0) + Vec3::new(0.0, 0.0, 0.05))
             .unitize()

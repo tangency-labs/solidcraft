@@ -61,6 +61,7 @@
 //! for each span over the full turn.
 
 use solidcore::kernel::Kernel;
+use solidcore::math::det;
 use solidcore::math::Vec3;
 use solidcore::nurbs::math::{gamma, CPoint, NOW, NOZ};
 use solidcore::nurbs::srf_basic::Surface as NlSurface;
@@ -258,7 +259,7 @@ fn arc_on_circle(
     if sense == 0.0 {
         return Err(format!("{what}: no sense of turn"));
     }
-    let angle = (p0 - c).cross(p2 - c).length().atan2((p0 - c).dot(p2 - c));
+    let angle = det::atan2((p0 - c).cross(p2 - c).length(), (p0 - c).dot(p2 - c));
     Ok((sense.signum(), angle))
 }
 
@@ -625,11 +626,13 @@ mod tests {
             let (a, b) = (pw(c[n - 3][0]).0, pw(c[n - 1][0]).0);
             let (ra, rb) = (radial(a), radial(b));
             let (sin, cos) = (ra.cross(rb).dot(z), ra.dot(rb));
-            let t = sin.atan2(cos);
+            let t = det::atan2(sin, cos);
             let turn = |p: Vec3| {
                 let r = radial(p);
                 let f = p - r;
-                f + r * t.cos() + z.cross(r) * t.sin() + z * (z.dot(r) * (1.0 - t.cos()))
+                f + r * det::cos(t)
+                    + z.cross(r) * det::sin(t)
+                    + z * (z.dot(r) * (1.0 - det::cos(t)))
             };
             for i in [n - 2, n - 1] {
                 let row = c[i]

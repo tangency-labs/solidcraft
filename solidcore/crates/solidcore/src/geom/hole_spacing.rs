@@ -12,6 +12,7 @@
 //! compared to the kernel's zone tolerance for a model of the pattern's size
 //! ([`size_estimate_to_zone_tol_3d`]).
 
+use crate::math::det;
 use std::f64::consts::TAU;
 
 use crate::error::{Result, SolidError};
@@ -247,16 +248,20 @@ pub fn spacing(items: &[([f64; 3], [f64; 3])]) -> Result<Spacing> {
         // The circumcircle of (0, 0), (size, 0) and the point farthest off their line.
         let x0 = 0.5 * size;
         let y0 = (cx * cx + cy * cy - size * cx) / (2.0 * cy);
-        let radius = x0.hypot(y0);
+        let radius = det::hypot(x0, y0);
         // The circle of centres within the limit can be larger than the limit.
         let on_circle = radius.is_finite()
             && planar
                 .iter()
-                .all(|(x, y)| ((x - x0).hypot(y - y0) - radius).abs() <= tol);
+                .all(|(x, y)| (det::hypot(x - x0, y - y0) - radius).abs() <= tol);
         if on_circle {
             pattern = Pattern::Circle;
             // Round the axis from the item given first.
-            let angle = |k: &usize| planar.get(*k).map_or(0.0, |(x, y)| (y - y0).atan2(x - x0));
+            let angle = |k: &usize| {
+                planar
+                    .get(*k)
+                    .map_or(0.0, |(x, y)| det::atan2(y - y0, x - x0))
+            };
             let start = angle(&0);
             let turn = |k: &usize| (angle(k) - start).rem_euclid(TAU);
             order.sort_by(|p, q| turn(p).total_cmp(&turn(q)));
@@ -375,7 +380,10 @@ mod tests {
         // Six holes on a 80 mm pitch circle about (10, -5), given out of order.
         let hole = |k: u32| {
             let t = (f64::from(k) * 60.0 + 15.0).to_radians();
-            ([10.0 + 40.0 * t.cos(), -5.0 + 40.0 * t.sin(), 3.0], Z)
+            (
+                [10.0 + 40.0 * det::cos(t), -5.0 + 40.0 * det::sin(t), 3.0],
+                Z,
+            )
         };
         let s = spacing(&[hole(0), hole(3), hole(1), hole(5), hole(2), hole(4)]).unwrap();
         assert_eq!(s.pattern, Pattern::Circle);
@@ -401,7 +409,7 @@ mod tests {
     fn part_of_a_bolt_circle_has_an_odd_closing_gap() {
         let hole = |deg: f64| {
             let t = deg.to_radians();
-            ([40.0 * t.cos(), 40.0 * t.sin(), 0.0], Z)
+            ([40.0 * det::cos(t), 40.0 * det::sin(t), 0.0], Z)
         };
         let s = spacing(&[hole(0.0), hole(60.0), hole(120.0), hole(180.0)]).unwrap();
         assert_eq!(s.pattern, Pattern::Circle);

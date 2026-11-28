@@ -66,6 +66,7 @@ use super::topology_edgeuse_p1::{domain, gen_surface, SrfIn, FILES};
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 400;
@@ -1177,7 +1178,7 @@ pub(super) fn gen_seam_face(rng: &mut Rng) -> BrepIn {
                 scale,
                 a,
                 b: semi,
-                c: rng.uniform(0.1, 0.45) * a / semi.to_radians().tan(),
+                c: rng.uniform(0.1, 0.45) * a / det::tan(semi.to_radians()),
                 swap,
             }
         }

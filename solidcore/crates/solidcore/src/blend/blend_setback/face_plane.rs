@@ -27,6 +27,7 @@ use super::{bern_elevate, bern_mul, corner_step, el, Face, FaceKind, Hom};
 use crate::error::blend::CornerStep;
 use crate::error::Result;
 use crate::geom::vector3d::sqrt;
+use crate::math::det;
 use crate::math::{Point3, Vec3, EFF_ZERO, PI};
 
 /// A point in homogeneous plane coordinates `(x w, y w, w)`.
@@ -131,13 +132,13 @@ impl FacePlane {
                 if !(rho > EFF_ZERO) {
                     return Err(corner_step(CornerStep::SetbackSpringPointOnAxis));
                 }
-                let theta = u2.atan2(u1);
+                let theta = det::atan2(u2, u1);
                 if theta.abs() >= 0.5 * PI {
                     // more than a half turn between P and Q
                     return Err(corner_step(CornerStep::SetbackSpringEndsHalfTurnApart));
                 }
-                let tt = (0.5 * theta).tan();
-                let dtheta = (-theta.sin() * d1 + theta.cos() * d2) / rho;
+                let tt = det::tan(0.5 * theta);
+                let dtheta = (-det::sin(theta) * d1 + det::cos(theta) * d2) / rho;
                 Ok(([tt, u3], [0.5 * (1.0 + tt * tt) * dtheta, d3]))
             }
         }
@@ -300,13 +301,13 @@ mod tests {
             match f.kind {
                 FaceKind::Plane => Vec3::new(a, h, 1.0),
                 FaceKind::Sphere => Vec3::new(
-                    10.0 * h.cos() * a.cos(),
-                    10.0 * h.cos() * a.sin(),
-                    10.0 * h.sin(),
+                    10.0 * det::cos(h) * det::cos(a),
+                    10.0 * det::cos(h) * det::sin(a),
+                    10.0 * det::sin(h),
                 ),
                 FaceKind::Cylinder | FaceKind::Cone => {
                     let rho = f.radius + f.slope * h;
-                    Vec3::new(rho * a.cos(), rho * a.sin(), h)
+                    Vec3::new(rho * det::cos(a), rho * det::sin(a), h)
                 }
             }
         };

@@ -953,6 +953,7 @@ mod tight_box_certificate {
     use solidcore::query::face::p3 as qf3;
     use solidcore::topology::edgeuse::{p1 as eu1, p3 as eu3};
     use solidcore::topology::{Brep, FaceId};
+    use solidcore::math::det;
 
     /// A piece of the boundary: a pcurve walked forward (`dir` 1) or backward.
     struct Piece {
@@ -1099,7 +1100,7 @@ mod tight_box_certificate {
         let p = [u.mid(), v.mid()];
         let angle = |a: [f64; 2], z: [f64; 2]| {
             let (ax, ay, zx, zy) = (a[0] - p[0], a[1] - p[1], z[0] - p[0], z[1] - p[1]);
-            (ax * zy - ay * zx).atan2(ax * zx + ay * zy)
+            det::atan2(ax * zy - ay * zx, ax * zx + ay * zy)
         };
         let mut total = 0.0;
         for lp in &face.loops {

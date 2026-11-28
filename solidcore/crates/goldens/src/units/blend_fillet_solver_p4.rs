@@ -62,6 +62,7 @@ use crate::cases::blend::solver::POINT_LEN;
 use crate::runner::default_cases;
 use crate::util::{p2, v3};
 use crate::{Case, CaseSource, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// An offset the solver does not have.
 const UNSET: f64 = -777.0;
@@ -791,7 +792,7 @@ fn frame(rng: &mut Rng) -> ([f64; 3], [f64; 3], [f64; 3]) {
 /// `e` turned by `ang` about `axis` (unit, perpendicular to `e`).
 fn turn(e: [f64; 3], axis: [f64; 3], ang: f64) -> [f64; 3] {
     let w = cross(axis, e);
-    add(scale3(e, ang.cos()), w, ang.sin())
+    add(scale3(e, det::cos(ang)), w, det::sin(ang))
 }
 
 fn gen_plane(rng: &mut Rng, s: f64) -> SurfaceIn {

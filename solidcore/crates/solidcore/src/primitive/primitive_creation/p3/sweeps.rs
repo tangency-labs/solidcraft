@@ -1122,12 +1122,12 @@ mod tests {
         }
 
         let e = 0.4_f64.to_radians();
-        let tilted = Vec3::new(e.sin(), 0.0, e.cos());
+        let tilted = Vec3::new(det::sin(e), 0.0, det::cos(e));
         let mut body = create_rotational_sweep(&mut k, &curves, origin, tilted, 90.0, true)
             .unwrap_or_else(|e| panic!("axis tilted 0.4 degrees: {e}"));
         assert!(crate::topology::brep::p2::is_manifold_solid(&body).unwrap());
         // signed: an inward-facing solid fails too
-        let want = 2.0 * std::f64::consts::PI * e.sin();
+        let want = 2.0 * std::f64::consts::PI * det::sin(e);
         let volume = brep_volume_default(&k, &mut body, 1e-8).unwrap();
         assert!(
             (volume - want).abs() < 1e-6 * want,

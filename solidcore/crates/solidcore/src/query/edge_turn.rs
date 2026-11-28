@@ -311,7 +311,7 @@ pub fn frame_z_deviation(before: &[[f64; 4]; 4], after: &[[f64; 4]; 4]) -> (f64,
     let shift = Vec3::new(at0 - bt0, at1 - bt1, at2 - bt2).length();
     let bz = Vec3::new(bz0, bz1, bz2);
     let az = Vec3::new(az0, az1, az2);
-    let angle_deg = bz.cross(az).length().atan2(bz.dot(az)).to_degrees();
+    let angle_deg = det::atan2(bz.cross(az).length(), bz.dot(az)).to_degrees();
     (shift, angle_deg)
 }
 
@@ -337,6 +337,6 @@ pub fn rigid_pose_delta(a: &[[f64; 4]; 4], b: &[[f64; 4]; 4]) -> (f64, f64) {
     let c01 = ax.dot(by);
     let c10 = ay.dot(bx);
     let sin2 = Vec3::new(c12 - c21, c20 - c02, c01 - c10).length();
-    let angle_deg = sin2.atan2(c00 + c11 + c22 - 1.0).to_degrees();
+    let angle_deg = det::atan2(sin2, c00 + c11 + c22 - 1.0).to_degrees();
     (t, angle_deg)
 }

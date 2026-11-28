@@ -530,12 +530,13 @@ pub fn signature(curves: &[Vec<P3>], points: &[P3], join_tol: f64) -> Vec<String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore::math::det;
 
     fn circle(n: usize, r: f64, z: f64) -> Vec<P3> {
         (0..n)
             .map(|i| {
                 let t = std::f64::consts::TAU * i as f64 / (n - 1) as f64;
-                [r * t.cos(), r * t.sin(), z]
+                [r * det::cos(t), r * det::sin(t), z]
             })
             .collect()
     }

@@ -3866,6 +3866,7 @@ mod wr459_sphere_rows {
     use solidcore::surface::surface::SurfaceKind;
     use solidcore::topology::brep::validation::{check_brep, CheckLevel};
     use solidcore::topology::{vertex, FaceId, VertexId};
+    use solidcore::math::det;
 
     /// A Level 2 failure: its label and its reporter's key (the object space in the high
     /// 32 bits, the arena index in the low).
@@ -4114,7 +4115,7 @@ mod wr459_sphere_rows {
             let r = (d - n * h).length();
             (h * h + (r - radius) * (r - radius)).sqrt()
         };
-        let angle = |p: Vec3, q: Vec3| (p - c).cross(q - c).length().atan2((p - c).dot(q - c));
+        let angle = |p: Vec3, q: Vec3| det::atan2((p - c).cross(q - c).length(), (p - c).dot(q - c));
         for (e, iv, tol, _) in &arcs {
             for p in sample(target, *e, iv) {
                 let d = off_circle(p);
@@ -4400,6 +4401,7 @@ mod issue_21421_round_ends_on_the_sphere_seam {
     use solidcore::topology::brep::p1::HealLoopHandle;
     use solidcore::topology::face::p4::{has_seam_problem_in_brep_mut, HasSeamProblemOptions};
     use solidcore::topology::vertex;
+    use solidcore::math::det;
 
     /// The rows, whose golden status and vertex, edge and face counts (`[0, 29, 46, 11]`, WR-459's kept target faces)
     /// placing the vertex on the seam leaves as they were.
@@ -4462,8 +4464,8 @@ mod issue_21421_round_ends_on_the_sphere_seam {
             let frame = rev.position();
             let (centre, x, y) = (frame.origin(), frame.x_axis(), frame.y_axis());
             let u0 = rev.step_uv_domain().min().x.to_radians();
-            let out = x * u0.cos() + y * u0.sin();
-            let across = y * u0.cos() - x * u0.sin();
+            let out = x * det::cos(u0) + y * det::sin(u0);
+            let across = y * det::cos(u0) - x * det::sin(u0);
             for v in p1::vertices(&body, None).unwrap() {
                 if !vertex::faces(&body, v).unwrap().contains(&f) {
                     continue;

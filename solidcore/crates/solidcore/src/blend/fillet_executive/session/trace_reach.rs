@@ -29,6 +29,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, Vec3, EFF_ZERO_RAD, EFF_ZERO_SQRT, PI};
 use crate::nurbs::knots::Side;
 use crate::surface::surface::p4::NoObject;
@@ -224,7 +225,7 @@ pub(crate) fn extend_trace_to_its_rails(
         }
         let [n0, n1] = normals;
         let cos = smos_min(1.0, n0.dot(n1).abs());
-        angle = smos_min(angle, cos.acos());
+        angle = smos_min(angle, det::acos(cos));
     }
     angle = smos_max(angle, PI / 180.0);
 
@@ -262,7 +263,7 @@ pub(crate) fn extend_trace_to_its_rails(
     if !positive {
         return Ok(());
     }
-    let reach = (2.0 / (angle / 2.0).tan() + 1.0) * radius;
+    let reach = (2.0 / det::tan(angle / 2.0) + 1.0) * radius;
     let [eu0, eu1] = edgeuses;
     let edge_faces = [
         match eu0 {
@@ -279,7 +280,7 @@ pub(crate) fn extend_trace_to_its_rails(
         target,
         edge_id,
         edge_faces,
-        radius / (angle / 2.0).tan(),
+        radius / det::tan(angle / 2.0),
         radius,
     )?;
 
@@ -574,7 +575,7 @@ mod tests {
         //    positive `trace_reach_along`.
         let half_deg = 0.5_f64.to_radians();
         let shallow_pts = [
-            Point3::new(-10.0 * half_deg.cos(), 10.0 * half_deg.sin(), 0.0),
+            Point3::new(-10.0 * det::cos(half_deg), 10.0 * det::sin(half_deg), 0.0),
             Point3::new(0.0, 0.0, 0.0),
             Point3::new(4.0, 0.0, 0.0),
             Point3::new(4.0, 20.0, 0.0),
@@ -582,7 +583,7 @@ mod tests {
         ];
         let shallow = sweep_poly(&mut k, &shallow_pts);
         let reach_shallow = eval_along_reach(&mut k, shallow, Point3::new(2.0, 0.0, 50.0), 1.0);
-        let want_shallow = 2.0 / half_deg.tan() + 1.0;
+        let want_shallow = 2.0 / det::tan(half_deg) + 1.0;
         assert!(
             reach_shallow.is_finite() && (reach_shallow - want_shallow).abs() < 1e-3,
             "got {reach_shallow}, want {want_shallow}"

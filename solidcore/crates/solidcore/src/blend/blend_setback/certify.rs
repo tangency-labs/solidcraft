@@ -724,6 +724,7 @@ pub(super) fn certified_convex(
 mod tests {
     use super::super::graph::GRAPH_DEPTH;
     use super::*;
+    use crate::math::det;
     use crate::math::Point3;
     use std::cell::Cell;
 
@@ -988,7 +989,7 @@ mod tests {
     /// rounding, and the saddle is refused at either plane (#13775).
     #[test]
     fn a_side_only_near_its_plane_keeps_its_curvature() {
-        let a = 2f64.powi(-42);
+        let a = det::powi(2f64, -42);
         let u = [0.0, 0.5, 2.0];
         let v = [0.0, 0.0, 1.0];
         let mut pts = Vec::new();

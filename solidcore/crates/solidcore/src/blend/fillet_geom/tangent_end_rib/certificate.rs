@@ -47,6 +47,7 @@
 //! less `lambda n`) gain its terms, enclosed over the piece, and the Jacobian is unchanged.
 //! Near the tangent end the separation is compared with `lambda` at its section, not 0.
 
+use crate::math::det;
 use core::cell::RefCell;
 
 use crate::blend::fillet_section::certificate::{
@@ -896,7 +897,7 @@ impl Rib<'_, '_> {
             let lo_t = 0.5 * hi_t;
             let mut guess = p;
             for (g, &h) in guess.iter_mut().zip(&hi_y) {
-                *g += (h - *g) * 0.5_f64.powi(i32::try_from(m).unwrap_or(1));
+                *g += (h - *g) * det::powi(0.5_f64, i32::try_from(m).unwrap_or(1));
             }
             let Some(lo_y) = solve(lo_t, guess)? else {
                 break;

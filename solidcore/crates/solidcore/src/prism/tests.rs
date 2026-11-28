@@ -1887,7 +1887,7 @@ mod recognition {
     /// apex `a + b - c`.
     fn sketch_ellipse_quarters(c: Vec2, m: Vec2, r: f64) -> Loop2 {
         let u = m - c;
-        let v = Vec2::new(-u.y, u.x) / u.x.hypot(u.y) * r;
+        let v = Vec2::new(-u.y, u.x) / det::hypot(u.x, u.y) * r;
         let corners = [c + u, c + v, c - u, c - v];
         Loop2 {
             segs: (0..4)
@@ -1917,7 +1917,7 @@ mod recognition {
             ];
             ends.extend((0..48).map(|i| {
                 let angle = f64::from(i) * TAU / 48.0 + 0.1;
-                center + Vec2::new(angle.cos(), angle.sin()) * 32.0
+                center + Vec2::new(det::cos(angle), det::sin(angle)) * 32.0
             }));
             for end in ends {
                 assert_turned_sketch_quarters_are_one_ellipse(center, end, 8.0);
@@ -1936,9 +1936,9 @@ mod recognition {
         );
         // The control a + b - c also rounds the sum a + b. Here the corners are exact and
         // the first control is 3 * 2^-43 off, more than the corners' and its own rounding.
-        let c = Vec2::new(1020.0 + 3.0 * 2.0_f64.powi(-43), 0.0);
-        let u = Vec2::new(12.0 + 3.0 * 2.0_f64.powi(-43), 0.0);
-        let v = Vec2::new(12.0 + 2.0_f64.powi(-43), 8.0);
+        let c = Vec2::new(1020.0 + 3.0 * det::powi(2.0_f64, -43), 0.0);
+        let u = Vec2::new(12.0 + 3.0 * det::powi(2.0_f64, -43), 0.0);
+        let v = Vec2::new(12.0 + det::powi(2.0_f64, -43), 8.0);
         let corners = [c + u, c + v, c - u, c - v];
         let rounded = Loop2 {
             segs: (0..4)
@@ -2022,19 +2022,19 @@ mod recognition {
     #[test]
     fn profile_ellipse_quarters_need_points_the_ellipse_resolves() {
         // At (2^40, 2^40) the corners are rounded to 2^-12, far above sqrt(EPSILON) * 8.
-        let far = Vec2::new(2.0_f64.powi(40), 2.0_f64.powi(40));
+        let far = Vec2::new(det::powi(2.0_f64, 40), det::powi(2.0_f64, 40));
         let turned = sketch_ellipse_quarters(far, far + Vec2::new(-25.0, -20.0), 8.0);
         assert_eq!(turned.as_ellipse(), None);
         // An exact turned ellipse thinner than sqrt(EPSILON) keeps its answer.
-        let u = Vec2::new(2.0_f64.powi(26), 2.0_f64.powi(26));
+        let u = Vec2::new(det::powi(2.0_f64, 26), det::powi(2.0_f64, 26));
         let thin = ellipse_quarters(Vec2::ZERO, u, Vec2::new(-1.0, 1.0));
         assert_eq!(
             thin.as_ellipse(),
-            Some((Vec2::ZERO, u, 2.0_f64.powi(-26))),
+            Some((Vec2::ZERO, u, det::powi(2.0_f64, -26))),
             "{thin:?}"
         );
         // An exact turned circle at 2^52 keeps its answer: its points need no widening.
-        let c = Vec2::new(2.0_f64.powi(52) + 2.0, 0.0);
+        let c = Vec2::new(det::powi(2.0_f64, 52) + 2.0, 0.0);
         let circle = ellipse_quarters(c, Vec2::new(1.0, 1.0), Vec2::new(-1.0, 1.0));
         assert_eq!(
             circle.as_ellipse(),
@@ -2052,8 +2052,8 @@ mod recognition {
                 .collect(),
         };
         // A sliver one ULP wide at 2^28, every control at its parallelogram corner.
-        let c = Vec2::new(2.0_f64.powi(28) + 64.0, 2.0_f64.powi(28) + 64.0);
-        let q = 2.0_f64.powi(-24);
+        let c = Vec2::new(det::powi(2.0_f64, 28) + 64.0, det::powi(2.0_f64, 28) + 64.0);
+        let q = det::powi(2.0_f64, -24);
         let corners = [
             Vec2::new(32.0, 32.0),
             Vec2::new(16.0, 16.0),
@@ -2062,12 +2062,12 @@ mod recognition {
         ];
         let controls = [0, 1, 2, 3].map(|i| corners[i] + corners[(i + 1) % 4]);
         // A spike: the first quarter starts and ends at the same corner.
-        let c2 = Vec2::new(2.0_f64.powi(27) + 10.0, 2.0_f64.powi(27) + 10.0);
+        let c2 = Vec2::new(det::powi(2.0_f64, 27) + 10.0, det::powi(2.0_f64, 27) + 10.0);
         let spike = [
             Vec2::new(4.0, 4.0),
             Vec2::new(4.0, 4.0),
             Vec2::new(-4.0, -4.0),
-            Vec2::new(-4.0, -4.0 + 2.0_f64.powi(-25)),
+            Vec2::new(-4.0, -4.0 + det::powi(2.0_f64, -25)),
         ];
         let spike_controls = [
             Vec2::new(8.0, 8.0),
@@ -2077,7 +2077,7 @@ mod recognition {
         ];
         // A first quarter that goes out and back near the origin, thinner than even the
         // local cell resolves.
-        let q = 3.0 * 2.0_f64.powi(-55);
+        let q = 3.0 * det::powi(2.0_f64, -55);
         let fold = [
             Vec2::new(1.0, 1.0),
             Vec2::new(1.0, 1.0),
@@ -2087,7 +2087,7 @@ mod recognition {
         let fold_controls = [
             Vec2::new(1.5, 1.5),
             Vec2::new(0.5, 0.5),
-            Vec2::new(-0.5, -0.5 + 2.0_f64.powi(-54)),
+            Vec2::new(-0.5, -0.5 + det::powi(2.0_f64, -54)),
             Vec2::new(0.5, 0.5),
         ];
         for ellipse in [
@@ -3685,7 +3685,7 @@ mod arc_conversion_regressions {
         let arc_end = arc.end();
         let arc_p1 = Vec2::new(arc_end.x + 1e-4, arc_end.y);
         let arc_p2 = Vec2::new(arc_end.x + 2e-4, arc_end.y);
-        let expected_bulge = (FRAC_PI_2 * 0.25).tan();
+        let expected_bulge = det::tan(FRAC_PI_2 * 0.25);
 
         let after_arc = [
             arc,

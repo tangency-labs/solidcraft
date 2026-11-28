@@ -588,6 +588,7 @@ mod tests {
     use crate::curve::line::BoundedLineOptions;
     use crate::geom::extent1d::Extent1d;
     use crate::geom::extent2d::Extent2d;
+    use crate::math::det;
     use crate::math::Vec2;
 
     #[test]
@@ -640,7 +641,7 @@ mod tests {
 
     #[test]
     fn a_long_edge_does_not_hide_an_offset_across_a_cardinal_cap() {
-        let length = 2.0_f64.powi(20);
+        let length = det::powi(2.0_f64, 20);
         let line = Line::bounded(
             Point3::new(1.0, 0.0, 0.0),
             Vec3::new(0.0, 0.6, 0.8),
@@ -649,7 +650,7 @@ mod tests {
         );
         let axis = Axis::new(Vec3::new(1.0, 0.0, 0.0)).expect("finite cap normal");
         let anchor = Point3::new(1.0, 0.0, 0.0);
-        let offset = 2.0_f64.powi(-35);
+        let offset = det::powi(2.0_f64, -35);
         assert!(line.point_error(length).expect("finite end error") > offset);
         for t in [0.0, length] {
             let (spatial, error) = axis
@@ -662,8 +663,8 @@ mod tests {
 
     #[test]
     fn tangential_travel_and_translation_do_not_hide_a_shift_across_the_cap() {
-        let length = 2.0_f64.powi(20);
-        let offset = 2.0_f64.powi(-35);
+        let length = det::powi(2.0_f64, 20);
+        let offset = det::powi(2.0_f64, -35);
         let diagonal = std::f64::consts::FRAC_1_SQRT_2;
         let normal = Vec3::new(0.6, 0.8, 0.0);
         for (origin, normal, tangent, parameters) in [
@@ -705,7 +706,7 @@ mod tests {
 
     #[test]
     fn a_nearly_tangential_spatial_edge_cannot_overrun_an_unchanged_uv_cap() {
-        let length = 2.0_f64.powi(20);
+        let length = det::powi(2.0_f64, 20);
         let normal = Vec3::new(0.6, 0.8, 0.0);
         let tangent = Vec3::new(-0.8, 0.6, 0.0);
         let line = Line::bounded(

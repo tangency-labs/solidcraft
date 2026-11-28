@@ -45,6 +45,7 @@ use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::util::{contact_codes, p2, v3};
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 2000;
@@ -1632,7 +1633,7 @@ fn gen_curve(rng: &mut Rng, scale: f64, lines: bool) -> (CrvIn, [f64; 2]) {
         if rng.chance(0.1) {
             bb = [a[0] + scale, a[1], a[2]];
         }
-        let len = ((bb[0] - a[0]).powi(2) + (bb[1] - a[1]).powi(2) + (bb[2] - a[2]).powi(2)).sqrt();
+        let len = (det::powi(bb[0] - a[0], 2) + det::powi(bb[1] - a[1], 2) + det::powi(bb[2] - a[2], 2)).sqrt();
         let hi = if rng.chance(0.5) { len } else { len * rng.uniform(0.2, 1.0) };
         return (CrvIn::Line { a, b: bb }, [0.0, hi.max(1e-3)]);
     }

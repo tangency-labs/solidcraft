@@ -258,12 +258,13 @@ fn chain_path(b: &Brep, edges: &[EdgeId], start: Vec3) -> Result<Option<Vec<(usi
 mod tests {
     use super::*;
     use crate::geom::extent1d::Extent1d;
+    use crate::math::det;
 
     #[test]
     fn chain_radius_maps_reject_collapsed_normalization() {
         // 56 shares 1, 1/2, ... are individually positive, but their running sum
         // rounds to the total before the last two shares in binary64.
-        let shares: Vec<f64> = (0..56).map(|i| 2.0_f64.powi(-i)).collect();
+        let shares: Vec<f64> = (0..56).map(|i| det::powi(2.0_f64, -i)).collect();
         let total: f64 = shares.iter().sum();
         let mut run = 0.0;
         let mut refused = 0;

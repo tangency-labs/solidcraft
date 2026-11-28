@@ -55,6 +55,7 @@ use super::topology_edgeuse_p1::{
     surface_of, BrepIn, CrvIn, ImportTypes, FILES,
 };
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// The unit runner.
 pub struct Runner;
@@ -2185,7 +2186,7 @@ fn gen_op(rng: &mut Rng) -> OpIn {
         3 => {
             let value = match rng.below(6) {
                 0 => tol::USE_DEFAULT,
-                1 => 10f64.powf(rng.uniform(-8.0, 8.0)),
+                1 => det::powf(10f64, rng.uniform(-8.0, 8.0)),
                 2 => -rng.uniform(0.0, 100.0),
                 3 => 0.0,
                 4 => rng.uniform(0.5, 500.0),
@@ -2208,7 +2209,7 @@ fn gen_op(rng: &mut Rng) -> OpIn {
             },
         },
         5 => OpIn::Degenerate {
-            tol: 10f64.powf(rng.uniform(-9.0, 9.0)),
+            tol: det::powf(10f64, rng.uniform(-9.0, 9.0)),
         },
         6 => OpIn::AddDeleted {
             n: rng.below(5) as u8,
@@ -2268,7 +2269,7 @@ fn gen_op(rng: &mut Rng) -> OpIn {
             let tol = match rng.below(3) {
                 0 => 0.0,
                 1 => 1e-6,
-                _ => 10f64.powf(rng.uniform(-9.0, 0.0)),
+                _ => det::powf(10f64, rng.uniform(-9.0, 0.0)),
             };
             OpIn::FindSide { curve, p, dir, tol }
         }
@@ -2295,12 +2296,12 @@ fn gen_op(rng: &mut Rng) -> OpIn {
             eu_new: gen_sel(rng),
             p: rng.point3(-2.0, 2.0),
             t: rng.uniform(-0.2, 1.2),
-            scaled_zero: 10f64.powf(rng.uniform(-9.0, -1.0)),
+            scaled_zero: det::powf(10f64, rng.uniform(-9.0, -1.0)),
             orient: rng.below(3) as u8,
             for_tess: rng.chance(0.5),
         },
         22 => OpIn::BrepIntersect {
-            tol: 10f64.powf(rng.uniform(-6.0, -2.0)),
+            tol: det::powf(10f64, rng.uniform(-6.0, -2.0)),
             ang: rng.uniform(5.0, 30.0),
             want_points: rng.chance(0.5),
         },
@@ -2311,7 +2312,7 @@ fn gen_op(rng: &mut Rng) -> OpIn {
                 tangent: rng
                     .chance(0.5)
                     .then(|| (0..n).map(|_| rng.chance(0.7)).collect()),
-                tol: 10f64.powf(rng.uniform(-6.0, -2.0)),
+                tol: det::powf(10f64, rng.uniform(-6.0, -2.0)),
                 ang: rng.uniform(0.0, 0.1),
             }
         }
@@ -2329,7 +2330,7 @@ fn gen_op(rng: &mut Rng) -> OpIn {
                 _ => rng.point3(-1.0, 1.0),
             },
             dist: rng.chance(0.3).then(|| rng.uniform(0.5, 20.0)),
-            tol: rng.chance(0.7).then(|| 10f64.powf(rng.uniform(-6.0, -2.0))),
+            tol: rng.chance(0.7).then(|| det::powf(10f64, rng.uniform(-6.0, -2.0))),
             ang: rng.chance(0.5).then(|| rng.uniform(0.05, 0.5)),
             want_3d: rng.chance(0.8),
             want_uv: rng.chance(0.8),

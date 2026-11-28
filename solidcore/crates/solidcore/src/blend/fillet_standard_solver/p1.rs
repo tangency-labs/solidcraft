@@ -3550,6 +3550,7 @@ pub struct RailSurface<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     /// Fork 66b02de (the rail end-span knots: `SER( pRail2->InsertOneKnot(..) )`): the
     /// second rail runs over another parameter range, so the first rail's span middle
@@ -3824,20 +3825,20 @@ mod tests {
         let setback = 0.2;
         let angle = 2.0_f64.to_radians();
         // At mid-arc one normal has rotated 45 degrees from the station normal.
-        let reference = PI - (angle.cos() * std::f64::consts::FRAC_1_SQRT_2).acos();
+        let reference = PI - det::acos(det::cos(angle) * std::f64::consts::FRAC_1_SQRT_2);
         let chamfer = ChamferDefinition::new(ChamferSize::Distances([setback; 2]), reference)
             .unwrap()
             .at_every_station()
             .unwrap();
         let distance = chamfer.offsets().unwrap()[0] * std::f64::consts::SQRT_2;
-        let expected = setback / (0.5 * angle).tan();
+        let expected = setback / det::tan(0.5 * angle);
         assert!(expected > 10.0 * distance);
 
         let domain = Extent2d::from_bounds(-1.0, -1.0, 1.0, 1.0);
         let mut solver = FilletSolver::new(1e-7, 0.35, 0.175);
         solver.chamfer = Some(chamfer);
         solver.orientations = [1.0; 2];
-        for (i, x) in [Vec3::X, Vec3::new(angle.cos(), 0.0, -angle.sin())]
+        for (i, x) in [Vec3::X, Vec3::new(det::cos(angle), 0.0, -det::sin(angle))]
             .into_iter()
             .enumerate()
         {

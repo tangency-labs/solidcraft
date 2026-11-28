@@ -51,6 +51,7 @@ use super::surface_surf_of_revolution_p1::{
 use super::surface_offset_surface::revolution_ok;
 use crate::case::CaseContext;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 900;
@@ -615,7 +616,7 @@ pub(crate) fn other_surf(rng: &mut Rng, s: &SurfOfRevolution, coaxial: bool) -> 
     }
     // rotate the X axis about the axis, maybe flip the axis
     let ang = rng.uniform(-180.0, 180.0).to_radians();
-    let (c, sn) = (ang.cos(), ang.sin());
+    let (c, sn) = (det::cos(ang), det::sin(ang));
     let x2 = add([x[0] * c, x[1] * c, x[2] * c], y, sn);
     let flip = rng.chance(0.3);
     let z2 = if flip { [-z[0], -z[1], -z[2]] } else { z };

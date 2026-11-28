@@ -135,6 +135,7 @@ pub fn cut_away(step: Vec3, direction: Vec3, eps: f64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
     use std::f64::consts::{FRAC_PI_2, FRAC_PI_3, FRAC_PI_6};
 
     #[test]
@@ -170,10 +171,10 @@ mod tests {
     #[test]
     fn an_arc_leaning_in_folds_past_its_axis() {
         let strip = |l: f64| {
-            let r = 10.0 - l * FRAC_PI_3.sin();
+            let r = 10.0 - l * det::sin(FRAC_PI_3);
             strip_folds(|f| {
                 let phi = f * FRAC_PI_2;
-                let t = Vec3::new(-phi.sin(), phi.cos(), 0.0);
+                let t = Vec3::new(-det::sin(phi), det::cos(phi), 0.0);
                 Some((t * 10.0, t * r))
             })
         };

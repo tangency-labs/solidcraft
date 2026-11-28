@@ -48,6 +48,7 @@ use crate::geom::tol::{brep_zone_tol_3d, SmallTopoType};
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::intersect::surface_intersector::p1::{SrfIndex, TsectPnt};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{rad_to_deg, Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::query::brep::BrepQuery;
@@ -367,7 +368,7 @@ fn keeps_material_behind(
         let rho = aa.sqrt();
         let e1 = a / rho;
         let e2 = (b - a * (ab / aa)).unitize()?;
-        let phi = b.dot(e2).atan2(b.dot(e1));
+        let phi = det::atan2(b.dot(e2), b.dot(e1));
         let circle = Ellipse::new_circle(
             k,
             centre,
@@ -380,7 +381,7 @@ fn keeps_material_behind(
                 ..EllipseOptions::default()
             },
         )?;
-        let middle = centre + e1 * (rho * (0.5 * phi).cos()) + e2 * (rho * (0.5 * phi).sin());
+        let middle = centre + e1 * (rho * det::cos(0.5 * phi)) + e2 * (rho * det::sin(0.5 * phi));
         (Curve::from(circle), middle)
     };
     let zone = brep_zone_tol_3d(k, body, SmallTopoType::default());
@@ -701,9 +702,9 @@ fn least_on_arc(a: f64, b: f64, c: f64, t0: f64, t1: f64) -> f64 {
             x.min(y)
         }
     };
-    let f = |t: f64| a + b * t.cos() + c * t.sin();
+    let f = |t: f64| a + b * det::cos(t) + c * det::sin(t);
     let mut least = lesser(f(t0), f(t1));
-    let at = (-c).atan2(-b);
+    let at = det::atan2(-c, -b);
     let turn = 2.0 * std::f64::consts::PI;
     for t in [at - turn, at, at + turn] {
         if t > t0 && t < t1 {
@@ -1007,7 +1008,7 @@ impl ConcaveFill {
             } => {
                 let angle = |q: Point3| {
                     let v = q - centre;
-                    v.dot(e2).atan2(v.dot(e1))
+                    det::atan2(v.dot(e2), v.dot(e1))
                 };
                 let (a0, a1) = (angle(q0), angle(q1));
                 let (t0, t1) = (a0.min(a1), a0.max(a1));
@@ -1112,7 +1113,7 @@ impl Band {
         let rho = aa.sqrt();
         let e1 = a / rho;
         let e2 = (b - a * (ab / aa)).unitize().ok()?;
-        let phi = b.dot(e2).atan2(b.dot(e1));
+        let phi = det::atan2(b.dot(e2), b.dot(e1));
         Some(Self {
             shape: SectionShape::Arc {
                 centre,
@@ -1189,8 +1190,8 @@ impl Band {
                 if radial(middle) - reach - rho > tol {
                     return true;
                 }
-                let m = e1 * (0.5 * self.phi).cos() + e2 * (0.5 * self.phi).sin();
-                let floor = rho * (0.5 * self.phi).cos();
+                let m = e1 * det::cos(0.5 * self.phi) + e2 * det::sin(0.5 * self.phi);
+                let floor = rho * det::cos(0.5 * self.phi);
                 all_above(&|c| floor - self.across(c - centre).dot(m), tol)
             }
             SectionShape::Chord => {
@@ -1222,7 +1223,7 @@ impl Band {
             return false;
         };
         let v = self.across(x - centre);
-        let theta = v.dot(e2).atan2(v.dot(e1));
+        let theta = det::atan2(v.dot(e2), v.dot(e1));
         let slack = tol / rho;
         theta >= -slack && theta <= self.phi + slack
     }
@@ -1406,9 +1407,10 @@ impl Band {
                     }
                     return true;
                 }
-                let at_angle = |theta: f64| centre + (e1 * theta.cos() + e2 * theta.sin()) * rho;
+                let at_angle =
+                    |theta: f64| centre + (e1 * det::cos(theta) + e2 * det::sin(theta)) * rho;
                 let pi = std::f64::consts::PI;
-                let turn = c.atan2(b);
+                let turn = det::atan2(c, b);
                 for theta in [0.0, self.phi, turn - pi, turn, turn + pi] {
                     if theta >= 0.0 && theta <= self.phi {
                         out.push(onto(at_angle(theta)));
@@ -1540,7 +1542,7 @@ fn section_breaks_through(
         let rho = aa.sqrt();
         let e1 = a / rho;
         let e2 = (b - a * (ab / aa)).unitize()?;
-        let phi = b.dot(e2).atan2(b.dot(e1));
+        let phi = det::atan2(b.dot(e2), b.dot(e1));
         shape = SectionShape::Arc {
             centre,
             e1,
@@ -2230,6 +2232,7 @@ pub(crate) fn band_breaks_through_the_part_cached(
 #[cfg(test)]
 mod tests {
     use super::{least_on_arc, segment_enters_triangle, Band, ConcaveFill, SectionShape};
+    use crate::math::det;
     use crate::math::{Point3, Vec3};
     use crate::topology::FaceId;
 
@@ -2262,7 +2265,7 @@ mod tests {
         };
         let tol = 1e-6;
         assert!(fill(dir).covers(&band, &[-50.0, 50.0], 0.0, tol));
-        let (c, s) = (1e-6_f64.cos(), 1e-6_f64.sin());
+        let (c, s) = (det::cos(1e-6_f64), det::sin(1e-6_f64));
         let skew = Vec3::new(c * dir.x - s * dir.y, s * dir.x + c * dir.y, 0.0);
         assert!(!fill(skew).covers(&band, &[-50.0, 50.0], 0.0, tol));
     }

@@ -63,6 +63,7 @@ use solidcore::blend::fillet_section::series::V3;
 use solidcore::blend::fillet_section::station::{as_b_spline, Nurbs};
 use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::kernel::Kernel;
+use solidcore::math::det;
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::{Brep, EdgeId, EdgeuseId};
 use std::cell::Cell;
@@ -471,10 +472,10 @@ pub(crate) fn certify_edgeuse(
     let dist = |s: f64| -> Result<f64, String> {
         let (c, _) = pieces.curve_over(Ivl::from(s))?;
         let c = mid(c);
-        Ok(
-            ((c[0] - start[0]).powi(2) + (c[1] - start[1]).powi(2) + (c[2] - start[2]).powi(2))
-                .sqrt(),
-        )
+        Ok((det::powi(c[0] - start[0], 2)
+            + det::powi(c[1] - start[1], 2)
+            + det::powi(c[2] - start[2], 2))
+        .sqrt())
     };
     let (to_s0, to_s1) = (dist(pieces.s0)?, dist(pieces.s1)?);
     let reversed = if (to_s0 - to_s1).abs() <= erec.tolerance {
@@ -482,7 +483,10 @@ pub(crate) fn certify_edgeuse(
         let q = pieces.image(t0 + 0.25 * (t1 - t0))?;
         let near = |s: f64| -> Result<f64, String> {
             let c = mid(pieces.curve_over(Ivl::from(s))?.0);
-            Ok(((c[0] - q[0]).powi(2) + (c[1] - q[1]).powi(2) + (c[2] - q[2]).powi(2)).sqrt())
+            Ok(
+                (det::powi(c[0] - q[0], 2) + det::powi(c[1] - q[1], 2) + det::powi(c[2] - q[2], 2))
+                    .sqrt(),
+            )
         };
         let quarter = 0.25 * (pieces.s1 - pieces.s0);
         near(pieces.s1 - quarter)? < near(pieces.s0 + quarter)?

@@ -58,6 +58,7 @@ use solidcore::SolidError;
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+use solidcore::math::det;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 3000;
@@ -898,7 +899,7 @@ fn gen_best(rng: &mut Rng, d: f64, signed: bool) -> f64 {
             }
         }
         4 => 0.0,
-        _ => (d * rng.uniform(0.5, 1.5)).powi(2),
+        _ => det::powi(d * rng.uniform(0.5, 1.5), 2),
     }
 }
 

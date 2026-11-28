@@ -74,6 +74,7 @@
 //!
 //! [`FilletCorner::setback`]: crate::blend::fillet_corner::p3::FilletCorner::setback
 
+use crate::math::det;
 use std::sync::Arc;
 
 use crate::blend::blend_corner::ball::{
@@ -704,7 +705,7 @@ fn quadric_face(
             kind: FaceKind::Cone,
             axis: q.dir,
             radius: 0.0,
-            slope: q.angle.tan(),
+            slope: det::tan(q.angle),
             ..Face::default()
         },
         QuadricKind::Sphere => Face {

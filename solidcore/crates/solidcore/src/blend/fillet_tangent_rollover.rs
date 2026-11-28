@@ -41,6 +41,7 @@ use crate::error::blend::BlendFailure;
 use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR};
 use crate::geom::global_solver::SolverOperation;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::nurbs::knots::Side as KnotSide;
 use crate::surface::surface::p4::NoObject;
@@ -373,9 +374,9 @@ impl Profile {
                 (s.abs() > tol).then(|| s.signum() * (q.0 * u.0 + q.1 * u.1))
             }
             Self::Circle { c, radius, .. } => {
-                let angle = |p: (f64, f64)| (p.1 - c.1).atan2(p.0 - c.0);
+                let angle = |p: (f64, f64)| det::atan2(p.1 - c.1, p.0 - c.0);
                 let origin = angle((0.0, 0.0));
-                let s = (angle(towards) - origin).sin();
+                let s = det::sin(angle(towards) - origin);
                 (s.abs() * radius > tol).then(|| {
                     radius
                         * (s.signum() * (angle(q) - origin)).rem_euclid(2.0 * std::f64::consts::PI)
@@ -399,9 +400,9 @@ impl Profile {
                 (u.0 * s.signum(), u.1 * s.signum())
             }
             Self::Circle { c, radius, .. } => {
-                let angle = |p: (f64, f64)| (p.1 - c.1).atan2(p.0 - c.0);
+                let angle = |p: (f64, f64)| det::atan2(p.1 - c.1, p.0 - c.0);
                 let origin = angle((0.0, 0.0));
-                let s = (angle(towards) - origin).sin();
+                let s = det::sin(angle(towards) - origin);
                 if s.is_nan() || s.abs() * radius <= tol {
                     return false;
                 }
@@ -1129,6 +1130,7 @@ mod tests {
     use crate::blend::fillet_solver::p1::FilletSolver;
     use crate::curve::curve::Curve;
     use crate::kernel::Kernel;
+    use crate::math::det;
     use crate::math::{Point3, Vec3};
     use crate::primitive::api_curves::{create_arc, create_ellipse, create_line_segment};
     use crate::sweep::api_brep::create_linear_sweep;
@@ -1366,7 +1368,7 @@ mod tests {
         };
         let at = |deg: f64| {
             let a = deg.to_radians();
-            (10.0 * a.cos(), -10.0 + 10.0 * a.sin())
+            (10.0 * det::cos(a), -10.0 + 10.0 * det::sin(a))
         };
         let tol = 1e-9;
         assert!(circle.leads_into(at(60.0), (1.0, 0.0), tol));
