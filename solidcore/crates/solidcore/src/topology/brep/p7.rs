@@ -1674,7 +1674,12 @@ fn make_face_with_curves_transfer_impl(
                     index,
                     distance: 0.0,
                 },
-                _ => find_first_vertex_within_tol_to_pnt(b, &vertices, start_pt, zone_tol)?,
+                // `find_first_vertex_within_tol_to_pnt` adds `vertex_tolerance(v) + tolerance`;
+                // passing `0.0` compares against `vertex_tolerance(v)` (`zone_tol`), matching the
+                // `approx_len < zone_tol` filter above so valid edges in `[zone_tol, 2 * zone_tol)`
+                // do not collapse their endpoints onto adjacent vertices. Genuine loop gaps up to
+                // `zone_tol * LOOP_GAP_ZONES` are still closed by the retry right below.
+                _ => find_first_vertex_within_tol_to_pnt(b, &vertices, start_pt, 0.0)?,
             };
             if !vertices.is_empty() && !m.found {
                 if m.distance < zone_tol * LOOP_GAP_ZONES {
@@ -1723,7 +1728,7 @@ fn make_face_with_curves_transfer_impl(
                     distance: 0.0,
                 }
             } else {
-                find_first_vertex_within_tol_to_pnt(b, &vertices, end_pt, zone_tol)?
+                find_first_vertex_within_tol_to_pnt(b, &vertices, end_pt, 0.0)?
             };
             if jj + 1 == n && !me.found {
                 if me.distance < zone_tol * 100.0 {

@@ -1964,6 +1964,31 @@ pub(crate) fn stitch_faces_with_identity(
     stitch_faces_with_context(k, b, xsect_tol_3d, faces, allow_spine_edges, identity, None)
 }
 
+/// Pass-1 stitch for linear sweeps whose walls and caps are built from identical profile curves:
+/// matches vertices and edges strictly within `xsect_tol_3d` (no widening to `v1.tol + v2.tol`),
+/// without squeezing small profile edges, removing narrow walls, or splitting edges at nearby
+/// vertices. Keeps valid edges and parallel-wall gaps in `(tol, 2 * tol]` intact.
+pub(crate) fn stitch_faces_exact_sweep(
+    k: &mut Kernel,
+    b: &mut Brep,
+    xsect_tol_3d: f64,
+    identity: Option<crate::query::brep::BrepIdentity<'_>>,
+) -> Result<StitchOutcome> {
+    let mut lockit = LockBrepBox::new(k, b)?;
+    let b = lockit.brep();
+    let mut callback = DefaultStitchCallback::new();
+    let mut stitch = Stitch::new(&mut callback, xsect_tol_3d, true, true);
+    stitch.query_identity = identity;
+    stitch.fast_edge_compare = true;
+    stitch.ignore_problems = true;
+    stitch.squeeze_small_edges = false;
+    stitch.split_edges_with_vertices = false;
+    stitch.making_manifold_solid = true;
+    stitch.remove_laminar_slivers = true;
+    stitch.strict_tolerance = true;
+    do_stitching(k, b, &mut stitch, None, None)
+}
+
 /// [`stitch_faces_with_identity`] of every face of a B-rep that holds one solid's faces
 /// and nothing else, of which `outside` is a face use on the solid's outside: the glue
 /// that closes the shell fires no ray ([`crate::heal::stitch::p1::Stitch::outside`]).
