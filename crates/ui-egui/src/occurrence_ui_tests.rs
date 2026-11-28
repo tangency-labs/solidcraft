@@ -950,6 +950,66 @@ fn dragging_an_occurrence_row_onto_another_moves_it_into_that_component() {
     assert_eq!(o.parent, 0, "A's occurrence moved back out to the design");
 }
 
+#[test]
+fn dragging_two_selected_placements_keeps_their_world_positions_and_undoes_both() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    let [first, second, parent] = ["Pin", "Plate", "Fixture"].map(|name| {
+        let out = h.app.run("component.create", json!({"name": name, "activate": false, "grounded": false})).unwrap();
+        out["occurrence"].as_u64().unwrap()
+    });
+    for (id, offset) in [(first, [12, 3, 0]), (second, [-4, 8, 2])] {
+        h.app.run("occurrence.move", json!({"occurrence": id, "translate": offset, "capture": true})).unwrap();
+    }
+    let fixture_frame = [0, -1, 0, 30, 1, 0, 0, -10, 0, 0, 1, 5];
+    h.app.run("occurrence.move", json!({"occurrence": parent, "to_matrix": fixture_frame, "capture": true})).unwrap();
+    let before = [first, second].map(|id| h.app.session.occurrence_placement(&[id]).unwrap().world);
+    let row = |id| json!({"occurrence": [id]});
+    h.settle();
+    h.step(&json!({"click": row(first)})).unwrap();
+    h.step(&json!({"click": row(second), "ctrl": true})).unwrap();
+    assert_eq!(h.app.session.selection.len(), 2);
+
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"drag": [row(first), row(parent)]})).unwrap();
+    for (id, world) in [first, second].into_iter().zip(before) {
+        assert_eq!(h.app.session.occurrence_placement(&[parent, id]).unwrap().world, world);
+    }
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    h.app.run("edit.undo", json!({})).unwrap();
+    for (id, world) in [first, second].into_iter().zip(before) {
+        assert_eq!(h.app.session.occurrence_placement(&[id]).unwrap().world, world);
+    }
+}
+
+#[test]
+fn dragging_a_selected_child_and_its_parent_keeps_the_child_nested() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    let branch = h.app.run("component.create", json!({"name": "Bracket"})).unwrap()["occurrence"].as_u64().unwrap();
+    let child = h.app.run("component.create", json!({"name": "Screw", "activate": false})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let dest = h.app.run("component.create", json!({"name": "Fixture", "activate": false})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("browser.collapse_all", json!({})).unwrap();
+    h.settle();
+    click(&mut h, &[branch], "fold");
+    let selection = [Sel::Occurrence { path: vec![branch, child] }, Sel::Occurrence { path: vec![branch] }];
+    h.app.run("select.set", json!({"items": selection})).unwrap();
+    h.step(&json!({"drag": [{"occurrence": [branch, child]}, {"occurrence": [dest]}]})).unwrap();
+    assert!(h.app.session.occurrence_placement(&[dest, branch, child]).is_ok());
+}
+
+#[test]
+fn shared_child_instances_cannot_be_dragged_to_one_position() {
+    let (mut h, component, first, second) = fixture();
+    let child =
+        h.app.run("component.create", json!({"parent": component, "name": "Pin", "activate": false})).unwrap()["occurrence"].as_u64().unwrap();
+    let mut drag = super::PlacementDrag { paths: vec![vec![first, child]] };
+    assert!(super::occurrence_can_land(&h.app, &drag, 0));
+    drag.paths.push(vec![second, child]);
+    assert!(!super::occurrence_can_land(&h.app, &drag, 0));
+}
+
 /// Dropping a placement row on the top of a sibling's row puts it before that sibling, in the
 /// order saved with the design; the rows follow. (The middle of a row moves it into that
 /// component, as above.)

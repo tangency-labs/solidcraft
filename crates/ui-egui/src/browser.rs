@@ -594,8 +594,8 @@ pub(crate) fn selected_component_bodies(app: &SolveApp, clicked: u64) -> Vec<Str
     bodies
 }
 
-/// A placement row's visibility control also acts on the selected occurrences when the
-/// clicked row belongs to that selection. Paths distinguish independent copies (#18716).
+/// A selected placement row acts on the selected occurrences. An unselected row acts on its
+/// own placement. Full paths distinguish instances.
 pub(crate) fn selected_occurrence_paths(app: &SolveApp, clicked: &[u64]) -> Vec<Vec<u64>> {
     let selected: Vec<Vec<u64>> = app
         .session
@@ -2170,8 +2170,7 @@ fn component_rows_inner(
     if let Some((d, _, source)) = r.dropped_as::<ItemDrag>() {
         acts.drop_from(source, DropAction::Component { to: id, folder: d.folder, keys: d.keys.clone() });
     } else if let Some((d, _, source)) = r.dropped_as::<PlacementDrag>() {
-        let occurrence = d.path.last().copied().unwrap_or(0);
-        acts.drop_from(source, DropAction::Reparent { occurrence, path: d.path.clone(), parent: id, parent_path: None });
+        acts.drop_from(source, DropAction::Reparent { paths: d.paths.clone(), parent: id, parent_path: Vec::new() });
     }
     if !open {
         return;
@@ -2339,10 +2338,13 @@ fn occurrence_rows_inner(
             }
         });
     }
-    // Dragging the row moves the placement it stands for. A press on its fold arrow, eye or radio
-    // is not a drag of the row, so those controls keep their own jobs.
     if r.drag_started {
-        rows.drag_with(vec![node_id(key)], Some(Payload::new(PlacementDrag { path: path.to_vec(), component: placement.component })));
+        let mut paths = selected_occurrence_paths(app, path);
+        paths.sort_unstable();
+        // A selected ancestor carries its whole subtree. Keep only the first path in each subtree.
+        paths.dedup_by(|next, previous| next.starts_with(previous));
+        let ids = paths.iter().map(|p| node_id(&occurrence_key(p))).collect();
+        rows.drag_with(ids, Some(Payload::new(PlacementDrag { paths })));
     }
     if r.fold {
         toggle(app, key, true);
@@ -2394,9 +2396,8 @@ fn occurrence_rows_inner(
     if let Some((d, _, source)) = r.dropped_as::<ItemDrag>() {
         acts.drop_from(source, DropAction::Component { to: placement.component, folder: d.folder, keys: d.keys.clone() });
     } else if let Some((d, zone, source)) = r.dropped_as::<PlacementDrag>() {
-        let dragged = d.path.last().copied().unwrap_or(0);
         match (zone, occurrence_sibling(app, d, placement.occurrence)) {
-            (Zone::Before, Some(parent)) => {
+            (Zone::Before, Some((parent, dragged))) => {
                 let mut order: Vec<u64> =
                     app.session.doc.occurrences.iter().filter(|o| o.parent == parent && o.id != dragged).map(|o| o.id).collect();
                 app.session.doc.sort_placements(parent, &mut order);
@@ -2404,10 +2405,8 @@ fn occurrence_rows_inner(
                 order.insert(at, dragged);
                 acts.drop_from(source, DropAction::OccurrenceOrder { parent, order });
             }
-            _ => acts.drop_from(
-                source,
-                DropAction::Reparent { occurrence: dragged, path: d.path.clone(), parent: placement.component, parent_path: Some(path.to_vec()) },
-            ),
+            (Zone::Into, _) => acts.drop_from(source, DropAction::Reparent { paths: d.paths.clone(), parent: component, parent_path: path.to_vec() }),
+            (Zone::Before, None) => {}
         }
     }
     if !open || !folds {
@@ -3287,14 +3286,10 @@ impl ItemDrag {
     }
 }
 
-/// What a drag of a placement row carries in the panel: the exact path it sits at, and the
-/// component it places.
+/// Selected placements to move, each identified through its exact occurrence path.
 #[derive(Clone, Debug)]
 struct PlacementDrag {
-    /// The placement's path from the design root (its own occurrence id last).
-    path: Vec<u64>,
-    /// The component the placement is an instance of.
-    component: u64,
+    paths: Vec<Vec<u64>>,
 }
 
 /// The items of a component folder, in model order.
@@ -4004,27 +3999,33 @@ fn selected_keys(app: &SolveApp, comp: u64, folder: &str) -> Vec<String> {
     entries(app, comp, folder).into_iter().filter(|e| e.selected).map(|e| e.key).collect()
 }
 
-/// Whether a placement dragged from `d` may land in component `parent`: not where it already is,
-/// and not in itself or a component it holds. The command refuses those too; this keeps the row
-/// from showing a drop mark it would refuse.
+/// At least one placement must change parent, and every move must have an unambiguous source and be cycle-free.
 fn occurrence_can_land(app: &SolveApp, d: &PlacementDrag, parent: u64) -> bool {
-    let Some(id) = d.path.last().copied() else { return false };
-    let Some(o) = app.session.doc.occurrences.iter().find(|o| o.id == id) else { return false };
-    if parent == 0 {
-        // The design row takes any placement not already at the design root: there is no cycle
-        // to make at the top, and everything is inside the design.
-        return o.parent != 0;
+    let doc = &app.session.doc;
+    let mut moving = false;
+    let mut seen = std::collections::BTreeSet::new();
+    for path in &d.paths {
+        let Some(&id) = path.last() else { return false };
+        let Some(o) = doc.occurrences.iter().find(|o| o.id == id) else { return false };
+        if o.parent == parent {
+            continue;
+        }
+        // A shared child seen through two instances has only one editable placement transform.
+        if !seen.insert(id) || (parent != 0 && doc.inside_component(parent, o.component)) {
+            return false;
+        }
+        moving = true;
     }
-    o.parent != parent && !app.session.doc.inside_component(parent, d.component)
+    moving
 }
 
-/// The component a placement shares with the placement under it, when both sit in the same one
-/// (and are two placements): the parent whose sub-components they are ordered among.
-fn occurrence_sibling(app: &SolveApp, d: &PlacementDrag, target: u64) -> Option<u64> {
-    let dragged = d.path.last().copied().filter(|o| *o != target)?;
+/// For a single placement dropped before a sibling, the shared parent and the placement to reorder.
+fn occurrence_sibling(app: &SolveApp, d: &PlacementDrag, target: u64) -> Option<(u64, u64)> {
+    let [path] = d.paths.as_slice() else { return None };
+    let dragged = path.last().copied().filter(|o| *o != target)?;
     let occurrences = &app.session.doc.occurrences;
     let parent = occurrences.iter().find(|o| o.id == dragged)?.parent;
-    occurrences.iter().any(|o| o.id == target && o.parent == parent).then_some(parent)
+    occurrences.iter().any(|o| o.id == target && o.parent == parent).then_some((parent, dragged))
 }
 
 /// A drop, applied after the tree is drawn.
@@ -4056,12 +4057,11 @@ enum DropAction {
         folder: &'static str,
         keys: Vec<String>,
     },
-    /// A placement moved into another component (or the design, `parent` 0).
+    /// Placements moved into another component (or the design, `parent` 0) as one edit.
     Reparent {
-        occurrence: u64,
-        path: Vec<u64>,
+        paths: Vec<Vec<u64>>,
         parent: u64,
-        parent_path: Option<Vec<u64>>,
+        parent_path: Vec<u64>,
     },
 }
 
@@ -4104,19 +4104,12 @@ fn apply_drop(app: &mut SolveApp, d: DropAction) {
                 _ => Ok(serde_json::Value::Null),
             };
         }
-        DropAction::Reparent { occurrence, path, parent, parent_path } => {
-            let mut payload = json!({ "occurrence": occurrence, "path": path, "parent": parent });
-            if let Some(pp) = parent_path {
-                payload["parent_path"] = json!(pp);
-            }
-            match app.run("occurrence.reparent", payload) {
+        DropAction::Reparent { paths, parent, parent_path } => {
+            let params = json!({ "occurrences": paths, "component": parent, "component_path": parent_path });
+            match app.run("browser.reparent", params) {
                 Ok(out) => {
-                    let to: Vec<u64> = out
-                        .get("path")
-                        .and_then(serde_json::Value::as_array)
-                        .map(|a| a.iter().filter_map(serde_json::Value::as_u64).collect())
-                        .unwrap_or_default();
-                    if !to.is_empty() {
+                    for id in out["occurrences"].as_array().into_iter().flatten().filter_map(Value::as_u64) {
+                        let to: Vec<u64> = parent_path.iter().copied().chain([id]).collect();
                         close_placement(app, &to);
                     }
                 }
