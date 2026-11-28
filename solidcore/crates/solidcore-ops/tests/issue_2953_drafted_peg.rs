@@ -4,9 +4,9 @@
 //! split along that generator, so a fourth edge runs on from the seam past the vertex
 //! V = (40, y0, 10), y0 = 10 tan 5 degrees.
 //!
-//! The corner at V is the blend corner's Mixed one. Its faces are Coons patches of their sides,
-//! not a rolling ball's surface, so since #22151 the round is refused there, naming V, until the
-//! Roll-over build takes this corner.
+//! The corner at V is the blend corner's Roll-over at a cusp (#22151). The top's cone is in two
+//! faces, split along the generator through V, so V has a fourth edge: the Roll-over takes the
+//! split out first (#23441), and the corner is the one of three edges the one-face cone has.
 
 #![allow(
     clippy::disallowed_methods, // closed-form oracles, not ops geometry
@@ -24,7 +24,7 @@ mod common;
 use common::edge_at;
 use serde_json::Value;
 use solidcore_ops::blend::{blend, Blend, Corners};
-use solidcore_ops::{session, Body, Error};
+use solidcore_ops::{session, Body, CheckLevel};
 use solidcore_record::brep::Brep as Record;
 use std::io::Read as _;
 
@@ -67,8 +67,13 @@ fn operand() -> Record {
     serde_json::from_value(records[&id].take()).unwrap()
 }
 
+/// The volume the rounds remove from the same peg built with the top's cone in one face (its
+/// end circle extruded and joined on its own, no projected split): the solidcraft-cli fillet
+/// rig's `measured.volume_mm3` before and after, 8291.612193903850 - 8277.104337962608.
+const ONE_FACE_REMOVES: f64 = 14.507_855_941_242;
+
 #[test]
-fn the_rounds_together_are_refused_at_the_cusp() {
+fn the_rounds_together_build_through_the_cusp() {
     session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let (body, _) = Body::from_record(&operand(), true).unwrap();
     let y0 = 10.0 * 5.0_f64.to_radians().tan();
@@ -76,13 +81,16 @@ fn the_rounds_together_are_refused_at_the_cusp() {
         edge_at(&body, [20.0, y0, 10.0]),
         edge_at(&body, [32.0 + y0, 8.0, 10.0]),
     ];
-    let e = blend(&body, Blend::Round, &picks, &[2.0], &[], Corners::Filled).unwrap_err();
-    let Error::CornerUnsupported { why, at } = &e else {
-        panic!("not a corner refusal: {e}");
-    };
-    let why = why.as_deref().unwrap_or_default();
-    assert!(why.contains("narrows to zero width"), "{why}");
-    let [x, y, z] = at.unwrap();
-    let off = (x - 40.0).hypot(y - y0).hypot(z - 10.0);
-    assert!(off < 1e-6, "refused at ({x}, {y}, {z})");
+    let before = body.volume(1e-10).unwrap();
+    blend(&body, Blend::Round, &picks, &[2.0], &[], Corners::Filled).unwrap();
+    assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    let removed = before - body.volume(1e-10).unwrap();
+    // the split taken out at the cusp, the corner is the Roll-over's of three edges, as on the
+    // one-face cone: the same round. The two builds put the cone's seam in different places
+    // and agree to 1.53e-5 (1.1e-6 of what they remove); a corner of four edges, or the Mixed
+    // corner's Coons fill, is a different round
+    assert!(
+        (removed - ONE_FACE_REMOVES).abs() < 2e-5,
+        "removed {removed}, the one-face cone's {ONE_FACE_REMOVES}"
+    );
 }
