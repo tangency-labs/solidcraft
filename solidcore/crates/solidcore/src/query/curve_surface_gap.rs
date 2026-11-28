@@ -827,6 +827,12 @@ impl NetSurface {
             // polynomial piece over the part, so the jump itself is not widened by the
             // part's width in the other direction)
             let mut gap = |ku: usize, kv: usize, kt: usize, across_u: bool, a: [f64; 4]| {
+                // (#23139: from the net's control points where its pieces are polynomials,
+                // which does not grow with the part's length along the line)
+                if let Some(from_net) = self.net_jump([ku, kv], kt, across_u, a)? {
+                    jump = jump.max(from_net);
+                    return Ok(());
+                }
                 let (tu, tv) = if across_u { (kt, kv) } else { (ku, kt) };
                 let mid = |lo: f64, hi: f64| (lo + 0.5 * (hi - lo)).max(lo).min(hi);
                 let (mu, mv) = (mid(a[0], a[1]), mid(a[2], a[3]));
@@ -869,6 +875,181 @@ impl NetSurface {
             }
         }
         Ok((out, slack))
+    }
+
+    /// Not upstream (#23139): `sup |S - S~|` over the part `[a0, a1] x [b0, b1]` past a knot
+    /// line, from the net's control points: `S` the surface on the part's own span (`kt`
+    /// across the line, the other direction's span as `kept`'s) and `S~` the polynomial of
+    /// the spans `kept` continued over it. `None` where this bound does not apply (the
+    /// caller then encloses the two sides apart): a weight other than 1 among the control
+    /// points of either piece, a line where the net itself is not continuous, a part that
+    /// does not touch the line or runs past its span in the other direction, or a normal
+    /// not proved away from zero.
+    ///
+    /// With `t` the parameter across the line `t = x`, `r` the one along it, and `P`, `P~`
+    /// the net's two polynomials, `D = P - P~` is zero on the line (a knot of multiplicity at
+    /// most the degree: both pieces end on the same row of control points there). Its
+    /// derivative across the line there is the jump of the net's own, `E(r) = P_t - P~_t`: a
+    /// B-spline in `r` on the net's basis whose control points are
+    /// `q (R[j+1] - R[j]) / (x[j+q+1] - x[j+1]) - q (R[j] - R[j-1]) / (x[j+q] - x[j])`, `R[j]`
+    /// the row on the line, so `|E| <= e`, the largest of those over the columns of the
+    /// part's span (the basis is non-negative and sums to 1 there); `e = 0` below full
+    /// multiplicity, where the net is `C^1`. Over a part of width `s`:
+    /// `|D_t| <= e + s sup |D_tt|`, `|D_r| <= s sup |D_rt|` and `|D| <= s sup |D_t|`, the
+    /// second partials each at most the two pieces' own bounds added. That is the net's jump.
+    /// An offset's is `D + d (n - n~)`, and for the normals `N = P_r x P_t`,
+    /// `N - N~ = D_r x P_t + P~_r x D_t` and `|n - n~| <= 2 |N - N~| / |N~|`
+    /// (`a/|a| - b/|b| = (a - b)/|b| + a (|b| - |a|) / (|a| |b|)`, each term at most
+    /// `|a - b| / |b|`).
+    ///
+    /// A net that is smooth across the line (a loft through sections of Bézier pieces: a
+    /// knot of full multiplicity at every joint of a section that is `C^2` there) has an
+    /// `e` of the size of its control points' rounding, whatever the part's length along
+    /// the line. The two sides enclosed apart differ by their enclosures' widths, which
+    /// grow with that length, and held a trim along such a line open at every depth
+    /// (#23139: 45,000 pieces a trim, each bisection ending at [`MAX_PIECES`]).
+    fn net_jump(
+        &self,
+        kept: [usize; 2],
+        kt: usize,
+        across_u: bool,
+        a: [f64; 4],
+    ) -> Result<Option<f64>> {
+        let n = &self.net;
+        let [ku, kv] = kept;
+        // (`t` across the line, `r` along it)
+        let (knots_t, q, count_t, k_kept, knots_r, p, count_r, k_r) = if across_u {
+            (&n.u, n.p, n.nu, ku, &n.v, n.q, n.nv, kv)
+        } else {
+            (&n.v, n.q, n.nv, kv, &n.u, n.p, n.nu, ku)
+        };
+        let ([r0, r1], [t0, t1]) = if across_u {
+            ([a[2], a[3]], [a[0], a[1]])
+        } else {
+            ([a[0], a[1]], [a[2], a[3]])
+        };
+        if kt == k_kept || k_r < p || k_r >= count_r || kt < q || kt >= count_t {
+            return Ok(None);
+        }
+        // the line: the own span's end towards the kept one
+        let x = if kt > k_kept {
+            knot(knots_t, kt as isize)
+        } else {
+            knot(knots_t, kt as isize + 1)
+        };
+        if !(t0 <= x && x <= t1 && t0.is_finite() && t1.is_finite()) {
+            return Ok(None);
+        }
+        // (the columns of the part's span carry it only inside that span)
+        if !(knot(knots_r, k_r as isize) <= r0 && r1 <= knot(knots_r, k_r as isize + 1)) {
+            return Ok(None);
+        }
+        let Some(first) = knots_t.iter().position(|&y| y == x) else {
+            return Ok(None);
+        };
+        let m = knots_t.iter().filter(|&&y| y == x).count();
+        if m > q || first == 0 {
+            return Ok(None);
+        }
+        // the control point of column `i` (along the line) and row `j` (across it)
+        let point = |i: usize, j: usize| -> Option<V3<Ivl>> {
+            let at = if across_u {
+                j.checked_mul(n.nv)?.checked_add(i)?
+            } else {
+                i.checked_mul(n.nv)?.checked_add(j)?
+            };
+            let c = n.pw.get(at.checked_mul(4)?..)?;
+            let (&x, &y, &z, &w) = (c.first()?, c.get(1)?, c.get(2)?, c.get(3)?);
+            (w == 1.0).then_some(V3 {
+                x: Ivl::from(x),
+                y: Ivl::from(y),
+                z: Ivl::from(z),
+            })
+        };
+        // (every control point of either piece is a plain point: the pieces are polynomials)
+        let (rows_lo, rows_hi) = (kt.min(k_kept) - q, kt.max(k_kept));
+        for i in (k_r - p)..=k_r {
+            for j in rows_lo..=rows_hi {
+                if point(i, j).is_none() {
+                    return Ok(None);
+                }
+            }
+        }
+        let mut e = 0.0_f64;
+        if m == q {
+            // (the row on the line: the knots `first .. first + q` are the line's)
+            let j = first - 1;
+            if j == 0 || j + 1 >= count_t {
+                return Ok(None);
+            }
+            let above = Ivl::from(knot(knots_t, (j + q + 1) as isize))
+                - Ivl::from(knot(knots_t, (j + 1) as isize));
+            let below =
+                Ivl::from(knot(knots_t, (j + q) as isize)) - Ivl::from(knot(knots_t, j as isize));
+            if !(above.lo > 0.0 && below.lo > 0.0) {
+                return Ok(None);
+            }
+            let deg = Ivl::from(q as f64);
+            for i in (k_r - p)..=k_r {
+                let (Some(lower), Some(on), Some(upper)) =
+                    (point(i, j - 1), point(i, j), point(i, j + 1))
+                else {
+                    return Ok(None);
+                };
+                let d = minus(
+                    scaled(minus(upper, on), deg / above),
+                    scaled(minus(on, lower), deg / below),
+                );
+                let Some(size) = norm_upper(d) else {
+                    return Ok(None);
+                };
+                e = e.max(size);
+            }
+        }
+        let (tu, tv) = if across_u { (kt, kv) } else { (ku, kt) };
+        // (an offset's own side is its formula's only away from a pole: refused there as
+        // the two sides enclosed apart are)
+        self.piece_partials(tu, tv, a[0], a[1], a[2], a[3], 0)?;
+        let own = nurbs_partials_over_piece(n, tu, tv, a[0], a[1], a[2], a[3], 2)?;
+        let cont = nurbs_partials_over_piece(n, ku, kv, a[0], a[1], a[2], a[3], 2)?;
+        // (a partial of order `i` along the line and `j` across it)
+        let at = |part: &Partials<Ivl>, i: usize, j: usize| {
+            if across_u {
+                part.at(j, i)
+            } else {
+                part.at(i, j)
+            }
+        };
+        let size = |v: V3<Ivl>| norm_upper(v).map(Ivl::from);
+        let (Some(own_tt), Some(cont_tt), Some(own_rt), Some(cont_rt), Some(own_t), Some(cont_r)) = (
+            size(at(&own, 0, 2)),
+            size(at(&cont, 0, 2)),
+            size(at(&own, 1, 1)),
+            size(at(&cont, 1, 1)),
+            size(at(&own, 0, 1)),
+            size(at(&cont, 1, 0)),
+        ) else {
+            return Ok(None);
+        };
+        let width = (Ivl::from(t1) - Ivl::from(x))
+            .mag()
+            .max((Ivl::from(x) - Ivl::from(t0)).mag());
+        let s = Ivl::from(width);
+        let d_t = Ivl::from(e) + s * (own_tt + cont_tt);
+        let d_r = s * (own_rt + cont_rt);
+        let mut jump = s * d_t;
+        if let Some(d) = self.offset.filter(|d| !(d.lo == 0.0 && d.hi == 0.0)) {
+            let Some(normal) = norm_lower(cross(at(&cont, 1, 0), at(&cont, 0, 1))) else {
+                return Ok(None);
+            };
+            // (`norm_lower` gives a finite value)
+            if normal <= 0.0 {
+                return Ok(None);
+            }
+            let turned = d_r * own_t + cont_r * d_t;
+            jump = jump + Ivl::from(d.mag()) * Ivl::from(2.0) * turned / Ivl::from(normal);
+        }
+        Ok(jump.hi.is_finite().then_some(jump.hi))
     }
 
     fn slack(p: &Partials<Ivl>, over_u: f64, over_v: f64) -> Result<f64> {
@@ -1523,11 +1704,11 @@ fn bisect_core(
             match piece(a, b) {
                 Ok(Some(p)) => {
                     let bound = (Ivl::from(p.ends) + Ivl::from(p.with_slack)).hi;
+                    if p.ends > over {
+                        return Ok((BisectOutcome::ExceedsOver, evaluated));
+                    }
                     if budget.is_some() {
                         seen = seen.max(p.ends);
-                        if seen > over {
-                            return Ok((BisectOutcome::ExceedsOver, evaluated));
-                        }
                     }
                     let (capped, out_of_pieces) = out_of(seen);
                     let proved = budget.is_some() && bound <= seen;
@@ -2389,18 +2570,29 @@ fn structured_trim_gap_bound_as(
     if let Some(bound) = bilinear_trim_gap_bound(cn, wn, net, [lo, hi]) {
         return Some(bound);
     }
-    // (an iso line along the `u` side of a net of degree 1 in `v`, or along the `v` side of
-    // one of degree 1 in `u`: the same line on the net with `u` and `v` swapped; at equal
-    // parameters also one along the net's first or last row or column, whatever its degree
-    // across it, [`end_row`])
+    // (an iso line along the `u` side of a net of degree 1 in `v`, or along a linear
+    // ruling of one of degree 1 in `v`, or along the `v` side / ruling of one of degree 1
+    // in `u`: the same line on the net with `u` and `v` swapped; at equal parameters also
+    // one along the net's first or last row or column, whatever its degree across it,
+    // [`end_row`])
     if net.q == 1 || same_parameter {
         if let Some(bound) = iso_row_gap_bound(cn, wn, net, [lo, hi], same_parameter) {
             return Some(bound);
         }
+        if net.q == 1 {
+            if let Some(bound) = iso_ruling_gap_bound(cn, wn, net, [lo, hi]) {
+                return Some(bound);
+            }
+        }
     }
     if net.p == 1 || same_parameter {
         let (net, wn) = swapped_uv(net, wn)?;
-        return iso_row_gap_bound(cn, &wn, &net, [lo, hi], same_parameter);
+        if let Some(bound) = iso_row_gap_bound(cn, &wn, &net, [lo, hi], same_parameter) {
+            return Some(bound);
+        }
+        if net.q == 1 {
+            return iso_ruling_gap_bound(cn, &wn, &net, [lo, hi]);
+        }
     }
     None
 }
@@ -2704,6 +2896,159 @@ fn iso_row_gap_bound(
             worst = (Ivl::from(worst) + Ivl::from(lip) * Ivl::from(shift)).hi;
         }
     }
+    worst.is_finite().then_some(worst)
+}
+
+/// An analytic bound for a degree-1 trim along a constant-`u` ruling of a net of degree 1
+/// in `v` (`net.q == 1`, `net.nv == 2`, equal weights along `v`) paired with a degree-1 3D
+/// curve (e.g. cylinder, cone, or linear extrusion seam/tangency edges). Because the two `v`
+/// rows share weights `w(i, 0) == w(i, 1)`, the rational denominator `W(u)` is independent of
+/// `v`, so `S(u_a, v)` is affine in `v`; both `C(s)` and `S(W(s))` are affine in `s` on
+/// `[lo, hi]`, and by convexity of the Euclidean norm
+/// `|C(s) - S(W(s))| <= max(|C(lo) - S(u_a, v(lo))|, |C(hi) - S(u_a, v(hi))|)`.
+#[allow(clippy::float_cmp)] // exact bit equality of clamped knots, unit weights, constant u
+fn iso_ruling_gap_bound(
+    cn: &NurbsCurve,
+    wn: &NurbsCurve,
+    net: &Nurbs,
+    [lo, hi]: [f64; 2],
+) -> Option<f64> {
+    if !(cn.p == 1 && cn.n == 2 && wn.p == 1 && wn.n == 2 && net.q == 1 && net.nv == 2) {
+        return None;
+    }
+    if net.p == 0 || net.nu == 0 || net.u.len() != net.nu + net.p + 1 {
+        return None;
+    }
+    if cn.pw.len() != 8 || wn.pw.len() != 8 || net.pw.len() != 4 * net.nu * 2 {
+        return None;
+    }
+    let clamped_containing = |k: &[f64]| -> Option<[f64; 2]> {
+        match k {
+            [a, b, c, d] if *a == *b && *c == *d && *a <= lo && hi <= *d && *a < *d => {
+                Some([*a, *d])
+            }
+            _ => None,
+        }
+    };
+    let [c_lo, c_hi] = clamped_containing(&cn.u)?;
+    let [w_lo, w_hi] = clamped_containing(&wn.u)?;
+    let clamped_v = matches!(net.v.as_slice(), [a, b, c, d] if a == b && b < c && c == d);
+    if !clamped_v {
+        return None;
+    }
+    let (&nu0, &nu1, &nv0, &nv1) = (
+        net.u.get(net.p)?,
+        net.u.get(net.nu)?,
+        net.v.first()?,
+        net.v.last()?,
+    );
+    let raw = |pw: &[f64], i: usize| -> Option<[f64; 4]> {
+        let s = pw.get(4 * i..4 * i + 4)?;
+        Some([*s.first()?, *s.get(1)?, *s.get(2)?, *s.get(3)?])
+    };
+    let (c0_raw, c1_raw) = (raw(&cn.pw, 0)?, raw(&cn.pw, 1)?);
+    let ([_, _, _, w_c0], [_, _, _, w_c1]) = (c0_raw, c1_raw);
+    let ([u_a, v_a, _, w_a], [u_b, v_b, _, w_b]) = (raw(&wn.pw, 0)?, raw(&wn.pw, 1)?);
+    if !(w_c0 == 1.0 && w_c1 == 1.0 && w_a == 1.0 && w_b == 1.0) {
+        return None;
+    }
+    if !(u_a == u_b
+        && nu0 <= u_a
+        && u_a <= nu1
+        && nv0 <= v_a
+        && v_a <= nv1
+        && nv0 <= v_b
+        && v_b <= nv1)
+    {
+        return None;
+    }
+    // Equal weights along `v` guarantee `S(u_a, v)` is affine in `v`.
+    let mut row0_pw = Vec::new();
+    let _ = row0_pw.try_reserve(4 * net.nu);
+    let mut row1_pw = Vec::new();
+    let _ = row1_pw.try_reserve(4 * net.nu);
+    for i in 0..net.nu {
+        let p0 = net.pw.get(4 * (2 * i)..4 * (2 * i) + 4)?;
+        let p1 = net.pw.get(4 * (2 * i + 1)..4 * (2 * i + 1) + 4)?;
+        let (&w0, &w1) = (p0.get(3)?, p1.get(3)?);
+        if !(w0.is_finite() && w0 > 0.0 && w0.to_bits() == w1.to_bits()) {
+            return None;
+        }
+        row0_pw.extend_from_slice(p0);
+        row1_pw.extend_from_slice(p1);
+    }
+    let row0 = NurbsCurve {
+        p: net.p,
+        n: net.nu,
+        u: net.u.clone(),
+        pw: row0_pw,
+    };
+    let row1 = NurbsCurve {
+        p: net.p,
+        n: net.nu,
+        u: net.u.clone(),
+        pw: row1_pw,
+    };
+    let at_u = Ivl::from(u_a);
+    let s0 = *curve_derivs_over(&row0, at_u, 0, None).ok()?.first()?;
+    let s1 = *curve_derivs_over(&row1, at_u, 0, None).ok()?.first()?;
+    let dv = Ivl::from(nv1) - Ivl::from(nv0);
+    if !dv.is_positive() {
+        return None;
+    }
+    let frac = |s: f64, a: f64, b: f64| -> Option<Ivl> {
+        if s == a {
+            return Some(Ivl::from(0.0));
+        }
+        if s == b {
+            return Some(Ivl::from(1.0));
+        }
+        let span = Ivl::from(b) - Ivl::from(a);
+        if !span.is_positive() {
+            return None;
+        }
+        let t = (Ivl::from(s) - Ivl::from(a)) / span;
+        let t = Ivl::new(t.lo.max(0.0), t.hi.min(1.0));
+        (!t.lo.is_nan() && !t.hi.is_nan() && t.lo <= t.hi).then_some(t)
+    };
+    let lerp_v3 = |p0: V3<Ivl>, p1: V3<Ivl>, t: Ivl| {
+        let one_less = Ivl::from(1.0) - t;
+        plus(scaled(p0, one_less), scaled(p1, t))
+    };
+    let lerp_ivl = |a: f64, b: f64, t: Ivl| {
+        let one_less = Ivl::from(1.0) - t;
+        one_less * Ivl::from(a) + t * Ivl::from(b)
+    };
+    let blend = |v: Ivl| -> Option<V3<Ivl>> {
+        let b = (v - Ivl::from(nv0)) / dv;
+        let b = Ivl::new(b.lo.max(0.0), b.hi.min(1.0));
+        if b.lo.is_nan() || b.hi.is_nan() || b.lo > b.hi {
+            return None;
+        }
+        Some(lerp_v3(s0, s1, b))
+    };
+    let (v_lo, v_hi) = if [w_lo, w_hi] == [lo, hi] {
+        (Ivl::from(v_a), Ivl::from(v_b))
+    } else {
+        (
+            lerp_ivl(v_a, v_b, frac(lo, w_lo, w_hi)?),
+            lerp_ivl(v_a, v_b, frac(hi, w_lo, w_hi)?),
+        )
+    };
+    let sa = blend(v_lo)?;
+    let sb = blend(v_hi)?;
+    let (c0_pt, c1_pt) = (point_of(c0_raw)?, point_of(c1_raw)?);
+    let (ca, cb) = if [c_lo, c_hi] == [lo, hi] {
+        (c0_pt, c1_pt)
+    } else {
+        (
+            lerp_v3(c0_pt, c1_pt, frac(lo, c_lo, c_hi)?),
+            lerp_v3(c0_pt, c1_pt, frac(hi, c_lo, c_hi)?),
+        )
+    };
+    let d0 = norm_upper(minus(ca, sa))?;
+    let d1 = norm_upper(minus(cb, sb))?;
+    let worst = d0.max(d1);
     worst.is_finite().then_some(worst)
 }
 
@@ -8057,7 +8402,9 @@ mod tests {
             residual <= whole,
             "{residual:e} over the whole net's {whole:e}"
         );
-        if matches!(s.kind(), crate::surface::surface::SurfaceKind::Cone(_)) {
+        if matches!(s.kind(), crate::surface::surface::SurfaceKind::Cone(_))
+            && window.is_some_and(|[u, _]| u[1] - u[0] > 1e-6)
+        {
             assert!(residual > 1e-8, "the seam tear {residual:e}");
         }
         assert!(
@@ -9155,6 +9502,68 @@ mod tests {
         }
     }
 
+    /// #23139: a join the net is smooth across has no jump to add. The base is
+    /// `z = (x^2 / 4) (1 + y^2)` over `x` in `[0, 2]`, `y` in `[0, 1]`: two cubic Bézier
+    /// pieces in `u` (a triple knot at `u = 1`: continuous by count only, one polynomial in
+    /// fact), quadratic in `v`, offset by `0.5`. A box across the join with `1e-11` of it
+    /// past the line, as a trim along the line crosses it by rounding, has that overshoot
+    /// in its slack and nothing else: the overshoot times the offset's first partials,
+    /// which are under 2 there (`|S_u| < 1.2`, the offset adding less than `0.5` times a
+    /// curvature under 1) and enclosed under 10, so the slack is under `1e-10`, whether the
+    /// box is `1/32` long or a half. The two sides enclosed apart differ by their
+    /// enclosures' widths over the part's length along the line (`v` in `[0.4, 0.6]`):
+    /// that gave a slack of `5e-2` here, and kept every piece of a trim along such a line
+    /// open.
+    #[test]
+    fn an_offset_box_across_a_smooth_join_has_only_its_overshoot_in_the_slack() {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::srf_basic::Surface as NurbSurface;
+        use crate::surface::offset_surface::OffsetSurface;
+        let k = Kernel::default();
+        let third = 1.0 / 3.0;
+        let columns = [
+            [0.0, 0.0],
+            [third, 0.0],
+            [2.0 * third, 1.0 / 12.0],
+            [1.0, 0.25],
+            [4.0 * third, 5.0 / 12.0],
+            [5.0 * third, 2.0 * third],
+            [2.0, 1.0],
+        ];
+        let net: Vec<Vec<CPoint>> = columns
+            .iter()
+            .map(|&[x, z]| {
+                [[0.0, 1.0], [0.5, 1.0], [1.0, 2.0]]
+                    .iter()
+                    .map(|&[y, g]| CPoint::new(x, y, z * g, NOW))
+                    .collect()
+            })
+            .collect();
+        let base = NurbSurface::new(
+            net,
+            3,
+            2,
+            vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0],
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let base = Surface::from(BSplineSurface::from_nurb(base, false));
+        let surface = Surface::from(OffsetSurface::new(&k, 0.5, base, true, 0).unwrap());
+        let probes = [Point2::new(0.5, 0.5), Point2::new(1.5, 0.5)];
+        let net = NetSurface::of_exact(&k, &surface, &probes)
+            .unwrap()
+            .unwrap();
+        for length in [1.0 / 32.0, 0.5] {
+            let w = V3 {
+                x: Ivl::new(1.0 - length, 1.0 + 1.0e-11),
+                y: Ivl::new(0.4, 0.6),
+                z: Ivl::from(0.0),
+            };
+            let (_, slack) = net.partials(&[w], 2, 1).unwrap();
+            assert!(slack > 0.0 && slack < 1.0e-10, "{slack:e} over {length}");
+        }
+    }
+
     /// A box whose upper end lies on its base's kink (#20544 review): the surface's value
     /// there is the next span's (the evaluator takes the span the knot starts), the tilted
     /// sheet's, `0.5 / sqrt(2)` high where the flat sheet's is `0.5`. The point values over
@@ -9213,6 +9622,126 @@ mod tests {
             let (_, slack) = net.partials(&[w], lk, continuity).unwrap();
             assert!(slack >= 2.0 * jump, "{slack:e} against twice {jump:e}");
         }
+    }
+
+    /// Constant-`u` degree-1 ruling trims on a ruled NURBS net (`q == 1` and swapped `p == 1`)
+    /// are bounded analytically by [`iso_ruling_gap_bound`] without bisection, on both full
+    /// intervals and sub-intervals, and reject unequal `v`-row weights or slanted trims.
+    #[test]
+    fn iso_ruling_trim_on_cylinder_net_is_bounded_without_bisection() {
+        let (_, trims) = cylinder_trims();
+        let k = Kernel::default();
+        // Extract the exact cylinder net from the cylinder side face.
+        let cylinder_net = trims
+            .iter()
+            .find_map(|(s, curve, trim, range)| {
+                matches!(s.kind(), crate::surface::surface::SurfaceKind::Cone(_))
+                    .then(|| trim_data(&k, s, curve, trim, *range).2)
+            })
+            .expect("cylinder side net");
+        let (u0, u1) = (
+            *cylinder_net.u.get(cylinder_net.p).unwrap(),
+            *cylinder_net.u.get(cylinder_net.nu).unwrap(),
+        );
+        let (v0, v1) = (
+            *cylinder_net.v.first().unwrap(),
+            *cylinder_net.v.last().unwrap(),
+        );
+        let u_mid = 0.5 * (u0 + u1);
+        // Evaluate exact ruling endpoints via `NetSurface`.
+        let cyl_surf = trims
+            .iter()
+            .find_map(|(s, _, _, _)| {
+                matches!(s.kind(), crate::surface::surface::SurfaceKind::Cone(_)).then_some(s)
+            })
+            .unwrap();
+        let p_a = cyl_surf.evaluate_point(&k, Point2::new(u_mid, v0)).unwrap();
+        let p_b = cyl_surf.evaluate_point(&k, Point2::new(u_mid, v1)).unwrap();
+
+        let make_line = |a: [f64; 3], b: [f64; 3], t0: f64, t1: f64| NurbsCurve {
+            p: 1,
+            n: 2,
+            u: vec![t0, t0, t1, t1],
+            pw: vec![a[0], a[1], a[2], 1.0, b[0], b[1], b[2], 1.0],
+        };
+        let cn = make_line([p_a.x, p_a.y, p_a.z], [p_b.x, p_b.y, p_b.z], 0.0, 1.0);
+        let wn = make_line([u_mid, v0, 0.0], [u_mid, v1, 0.0], 0.0, 1.0);
+
+        // Full interval, exact ruling: near-zero certified bound.
+        let g = structured_trim_gap_bound(&cn, &wn, &cylinder_net, [0.0, 1.0]).unwrap();
+        assert!(g <= 1.0e-12, "exact cylinder ruling bound too loose: {g:e}");
+
+        // Sub-interval `[0.25, 0.75]` on the same line: still exact.
+        let g_sub = structured_trim_gap_bound(&cn, &wn, &cylinder_net, [0.25, 0.75]).unwrap();
+        assert!(
+            g_sub <= 1.0e-12,
+            "sub-interval ruling bound too loose: {g_sub:e}"
+        );
+
+        // Perturbed endpoint by `delta = 2e-4` along x: bound covers `delta` tightly.
+        let delta = 2.0e-4;
+        let cn_off = make_line(
+            [p_a.x + delta, p_a.y, p_a.z],
+            [p_b.x, p_b.y, p_b.z],
+            0.0,
+            1.0,
+        );
+        let g_off = structured_trim_gap_bound(&cn_off, &wn, &cylinder_net, [0.0, 1.0]).unwrap();
+        assert!(
+            g_off >= delta && g_off <= delta + 1.0e-11,
+            "perturbed ruling bound {g_off:e} vs {delta:e}"
+        );
+
+        // Swapped `(u, v)` net (`net.p == 1`) with matching swapped trim gives the same bound.
+        let (swap_net, swap_wn) = swapped_uv(&cylinder_net, &wn).unwrap();
+        let g_swap = structured_trim_gap_bound(&cn_off, &swap_wn, &swap_net, [0.0, 1.0]).unwrap();
+        assert!(
+            g_swap >= delta && g_swap <= delta + 1.0e-11,
+            "swapped ruling bound {g_swap:e} vs {delta:e}"
+        );
+
+        // Slanted trim (`u_a != u_b`) is not a ruling: returns `None`.
+        let wn_slant = make_line([u0, v0, 0.0], [u_mid, v1, 0.0], 0.0, 1.0);
+        assert_eq!(
+            structured_trim_gap_bound(&cn, &wn_slant, &cylinder_net, [0.0, 1.0]),
+            None
+        );
+
+        // Unequal weights along `v` breaks affinity in `v`: returns `None`.
+        let mut bad_net = cylinder_net.clone();
+        bad_net.pw[7] *= 1.5;
+        assert_eq!(
+            structured_trim_gap_bound(&cn, &wn, &bad_net, [0.0, 1.0]),
+            None
+        );
+    }
+
+    /// Even with `budget == None`, [`bisect`] stops immediately with `Some(INFINITY)` as soon
+    /// as any piece's endpoint gap exceeds `over`, without subdividing it further.
+    #[test]
+    fn bisect_without_budget_stops_at_once_when_ends_exceed_over() {
+        let mut evals = 0usize;
+        let res = bisect(
+            [0.0, 1.0],
+            4,
+            &[],
+            0.0,
+            1.0e-13,
+            [0.0, 1.0],
+            None,
+            |_a, _b| {
+                evals += 1;
+                // Huge unclosed slack so without the early `p.ends > over` cutoff it would
+                // bisect deeply before closing.
+                Ok(PieceBound::with(2.0, Ivl::from(100.0), 0.0))
+            },
+        )
+        .unwrap();
+        assert_eq!(res, Some(f64::INFINITY));
+        assert_eq!(
+            evals, 1,
+            "should return on the very first piece, got {evals}"
+        );
     }
 
     /// #22037: `cylinder.smb`'s cap 1 (a bilinear B-spline patch over the circle's bounding

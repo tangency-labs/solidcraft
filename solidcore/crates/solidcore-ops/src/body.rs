@@ -798,6 +798,21 @@ pub(crate) fn finish(k: &mut Kernel, b: Brep, expect: Expect) -> solidcore::Resu
     Ok(finish_proved(k, b, expect)?.map(|(b, _)| b))
 }
 
+/// The result contract of an operation's plain call: [`finish_under`] under
+/// [`Contract::Closed`]. A result has faces ([`Error::Empty`] if not), and a solid input gives
+/// a closed manifold solid ([`Error::NotSolid`] if not), by the topology test alone. No proof is
+/// made, so the result holds none; a caller that wants one asks for it ([`Body::check_solid`]).
+///
+/// # Errors
+/// The kernel's error from the topology test.
+pub(crate) fn finish_closed(
+    k: &mut Kernel,
+    b: Brep,
+    expect: Expect,
+) -> solidcore::Result<Result<Brep>> {
+    Ok(finish_under(k, b, expect, Contract::Closed)?.map(|(b, _)| b))
+}
+
 /// As [`finish`], with the proof its solid test made on the result, if it made one (a solid
 /// result: the topology test, then [`prove_naming`]), for the result's [`Body`] to keep
 /// ([`Body::held`]).
