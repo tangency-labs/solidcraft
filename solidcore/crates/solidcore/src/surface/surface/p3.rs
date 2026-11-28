@@ -1185,6 +1185,19 @@ impl Surface {
         if big_domain.is_degenerate(0.0) {
             return Ok(failure);
         }
+        let turn_window = if k.caches.cover_across_sweeps.get() {
+            sweep_turn_window(self)
+        } else {
+            None
+        };
+        if let Some(window) = turn_window {
+            big_domain = Extent2d::from_bounds(
+                window.min(),
+                big_domain.min().y,
+                window.max(),
+                big_domain.max().y,
+            );
+        }
 
         // Start with a rudimentary coincidence check.  Just drop some points.  Start
         // with the corner points.  We can save their uv values for dropping the boundary
@@ -1221,7 +1234,7 @@ impl Surface {
         // surfaces end to end that form a closed loop.)
         let uv_other = other_dom.evaluate(0.5, 0.5);
         let pt = other.evaluate_point(k, uv_other)?;
-        if ignored(step_inversion_in(
+        if ignored(cover_step_inversion_in(
             self,
             k,
             &big_domain,
@@ -1241,7 +1254,7 @@ impl Surface {
                 let uv_other = other_dom.evaluate(ii as f64, jj as f64);
                 let pt = other.evaluate_point(k, uv_other)?;
 
-                let Some((mut uv_this, location)) = ignored(step_inversion_in(
+                let Some((mut uv_this, location)) = ignored(cover_step_inversion_in(
                     self,
                     k,
                     &big_domain,
@@ -1353,7 +1366,7 @@ impl Surface {
                 let uv_other = other_dom.evaluate(du, dv);
                 let pt = other.evaluate_point(k, uv_other)?;
 
-                let Some((mut uv_this, location)) = ignored(step_inversion_in(
+                let Some((mut uv_this, location)) = ignored(cover_step_inversion_in(
                     self,
                     k,
                     &big_domain,
@@ -1487,7 +1500,7 @@ impl Surface {
                 // Do the drop.
                 let pt = other.evaluate_point(k, uv_other)?;
 
-                let Some((mut drop_uv, location)) = ignored(step_inversion_in(
+                let Some((mut drop_uv, location)) = ignored(cover_step_inversion_in(
                     self,
                     k,
                     &big_domain,
@@ -1555,6 +1568,7 @@ impl Surface {
 
         // Since we created the new domain just by dropping points, as opposed to dropping
         // boundary curves, we should expand it a bit.
+        let dropped = new_domain;
         new_domain.expand_relative(0.02);
 
         // But make sure that we didn't expand it to spill outside of sBigDomain.  This
@@ -1611,6 +1625,25 @@ impl Surface {
             }
         }
 
+        // Not upstream (#23441): within one turn (see `sweep_turn_window`). The domain the
+        // drops found is widened a little above, so a face that completes the turn (the
+        // other half of a split cone) takes the union past one turn: the merged face is the
+        // whole turn, from the far end of the angles the other face's points dropped to,
+        // unwidened (where its seam goes is the merge's to say: `topology::edge`'s
+        // `whole_turn_seam` moves it onto the edge the two faces still share).
+        if turn_window.is_some() && update_domain.u_interval().length() > 360.0 {
+            let own = orig_domain.u_interval();
+            let (lo, hi) = if update_domain.min().x < own.min() {
+                (dropped.min().x, dropped.min().x + 360.0)
+            } else {
+                (dropped.max().x - 360.0, dropped.max().x)
+            };
+            let clamp = |d: Extent2d| {
+                Extent2d::from_bounds(d.min().x.max(lo), d.min().y, d.max().x.min(hi), d.max().y)
+            };
+            update_domain = clamp(update_domain);
+            new_domain = clamp(new_domain);
+        }
         // (status ignored upstream; passed on as the fork does)
         self.adjust_step_uv_domain(k, &update_domain)?;
 
@@ -2274,6 +2307,77 @@ impl EvalNFunctions for SssIntersectEnfo<'_> {
 
         Ok(false)
     }
+}
+
+/// Whether `surface` sweeps a planar generator round an axis, its STEP u the sweep angle in
+/// degrees, and inverts in closed form over its own sweep: a cone, or a torus or surface of
+/// revolution with a planar generator.
+pub(crate) fn sweeps_in_closed_form(surface: &Surface) -> bool {
+    match surface.kind() {
+        SurfaceKind::Cone(_) => true,
+        SurfaceKind::Torus(s) => s.base().planar_generator,
+        SurfaceKind::SurfOfRevolution(s) => s.planar_generator,
+        _ => false,
+    }
+}
+
+/// Not upstream (#23441): the sweep angles `CoverCoincidentSurface` searches on a cone, or a
+/// torus or surface of revolution with a planar generator: every turn of 360 degrees that
+/// holds the surface's own angles, `[max - 360, min + 360]`. Its maximum analytic domain is
+/// the turn `[0, 360]`, so a face of the same surface lying just below the surface's own
+/// angle 0 (the other half of a cone split into two faces along a generator, at -180 to 0)
+/// could not be covered; the cover stays within one turn. `None` for every other kind. Asked
+/// only under `Caches::cover_across_sweeps`.
+fn sweep_turn_window(surface: &Surface) -> Option<Extent1d> {
+    if !sweeps_in_closed_form(surface) {
+        return None;
+    }
+    let own = surface.step_uv_domain().u_interval();
+    (own.length() < 360.0).then(|| Extent1d::from_min_max(own.max() - 360.0, own.min() + 360.0))
+}
+
+/// The drop of `point` onto `surface` in `CoverCoincidentSurface`, searching `anal_domain`, the
+/// surface's domain expanded for the cover. Not upstream (#23441): a cone, or a torus or
+/// surface of revolution with a planar generator, inverts in closed form over its own sweep
+/// and its generator's own span whatever domain it is asked to search, so a point of the same
+/// surface past its face's part of the turn (a cone split into two faces along a generator, one
+/// of them half a turn) would never drop, and two faces on one surface could never cover each
+/// other. Those kinds invert unbounded ([`Surface::step_inversion_unbounded`]) and the answer
+/// counts when it lies in `anal_domain`; every other kind, and every kind outside
+/// `Caches::cover_across_sweeps`, drops as upstream.
+fn cover_step_inversion_in<O: SolutionObject>(
+    surface: &Surface,
+    k: &Kernel,
+    anal_domain: &Extent2d,
+    point: Point3,
+    tol: f64,
+    uv_guess: Option<Point2>,
+    context: &mut Option<(&mut dyn SurfaceSolveContext<O>, Option<O>)>,
+) -> Result<(Point2, LocationType)> {
+    if !k.caches.cover_across_sweeps.get() || !sweeps_in_closed_form(surface) {
+        return step_inversion_in(surface, k, anal_domain, point, tol, uv_guess, context);
+    }
+    let (mut uv, location) = surface.step_inversion_unbounded(k, point, tol)?;
+    // The sweep angle is answered in [0, 360). Of its turns within `anal_domain`, the one
+    // nearest the guess keeps the walk continuous (a boundary at 360 degrees reached from
+    // below stays at 360, not 0); without a guess, the one nearest the surface's own domain.
+    let near = uv_guess.map_or_else(|| surface.step_uv_domain().u_interval().mid(), |g| g.x);
+    for turn in [-360.0, 360.0] {
+        let other = Point2::new(uv.x + turn, uv.y);
+        if anal_domain.contains_point(other, 0.0)
+            && ((other.x - near).abs() < (uv.x - near).abs()
+                || !anal_domain.contains_point(uv, 0.0))
+        {
+            uv = other;
+        }
+    }
+    if !anal_domain.contains_point(uv, 0.0) {
+        return Err(SolidError::surface(
+            "surface::surface::cover_step_inversion_in",
+            SurfaceFailure::PointOutsideSweep,
+        ));
+    }
+    Ok((uv, location))
 }
 
 /// `this->STEPInversion(..)` of `CoverCoincidentSurface`, under the caller's face
