@@ -150,10 +150,10 @@ pub(crate) fn parameter_changes(
 
 thread_local! {
     static EXISTING: RefCell<Option<Existing>> = const { RefCell::new(None) };
-    /// Where the open window sits, for which parameter, and the frame it was last drawn in. It
-    /// stays where it opened while it is open, so its arrows stay under the pointer while the
-    /// stepped value moves the dimension's text.
-    static ANCHOR: RefCell<Option<(String, u64, Pos2)>> = const { RefCell::new(None) };
+    /// Where the open window sits, for which opening of it ([`super::Edit`]'s `opened`), and the
+    /// frame it was last drawn in. It stays where it opened while it is open, so its arrows stay
+    /// under the pointer while the stepped value moves the dimension's text.
+    static ANCHOR: RefCell<Option<(u64, u64, Pos2)>> = const { RefCell::new(None) };
 }
 
 /// Whether the open window is under `p`: the wheel there steps its value, so the camera under it
@@ -246,12 +246,12 @@ pub(super) fn paint(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
 /// Where the window goes: where it already is while it stays open, else under the dimension's
 /// text `at` (over it where the view has no room below); always inside the view's free area.
 /// `size` is the window's as drawn last frame.
-fn place(app: &SolveApp, ctx: &egui::Context, param: &str, at: Pos2, size: egui::Vec2) -> Pos2 {
+fn place(app: &SolveApp, ctx: &egui::Context, opened: u64, at: Pos2, size: egui::Vec2) -> Pos2 {
     let frame = ctx.cumulative_frame_nr();
     let view = app.viewport.layout.as_ref().map(|layout| layout.drawable).filter(|r| r.is_finite() && r.is_positive());
     ANCHOR.with(|anchor| {
         let mut anchor = anchor.borrow_mut();
-        let open = anchor.as_ref().filter(|(open, drawn, _)| open == param && drawn.saturating_add(1) >= frame).map(|x| x.2);
+        let open = anchor.as_ref().filter(|(open, drawn, _)| *open == opened && drawn.saturating_add(1) >= frame).map(|x| x.2);
         let mut pos = open.unwrap_or_else(|| {
             let gap = Tokens::get().space_12;
             let below = Pos2::new(at.x - size.x * 0.5, at.y + gap);
@@ -261,7 +261,7 @@ fn place(app: &SolveApp, ctx: &egui::Context, param: &str, at: Pos2, size: egui:
             pos.x = pos.x.clamp(rect.left(), (rect.right() - size.x).max(rect.left()));
             pos.y = pos.y.clamp(rect.top(), (rect.bottom() - size.y).max(rect.top()));
         }
-        *anchor = Some((param.to_string(), frame, pos));
+        *anchor = Some((opened, frame, pos));
         pos
     })
 }
@@ -312,7 +312,8 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
     let arrows = 2.0 * (t.form_close_size - t.space_4) + t.space_2;
     let width = window_width(ctx, &e.expr, !rows.is_empty(), arrows);
     let guess = egui::vec2(width + t.space_6 * 2.0, t.control_height * 2.0 + t.space_6 * 3.0);
-    let anchor = place(app, ctx, &e.param, at, last.map_or(guess, |r| r.size()));
+    let anchor = place(app, ctx, e.opened, at, last.map_or(guess, |r| r.size()));
+    super::own_moved(ctx, e.opened);
     super::note_shown(ctx);
     // A click on the window (an arrow) takes the keyboard from its field, as any click away does;
     // the field takes it back instead of closing.

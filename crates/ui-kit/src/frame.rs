@@ -47,6 +47,19 @@ pub fn dock_offset(ctx: &egui::Context, key: &str) -> egui::Vec2 {
     ctx.data(|d| d.get_temp::<egui::Vec2>(dock_offset_id(key))).filter(|v| v.is_finite()).unwrap_or(egui::Vec2::ZERO)
 }
 
+/// [`dock_offset`] for a dialog that knows which opening of it this is (`opened`, new each time
+/// one opens). The offset belongs to that opening: another one, even on the very next frame,
+/// opens docked (#22388), and the same one keeps its place over frames it is not drawn.
+pub fn dock_offset_of(ctx: &egui::Context, key: &str, opened: u64) -> egui::Vec2 {
+    let owner = dock_offset_id(key).with("opened");
+    if ctx.data(|d| d.get_temp::<u64>(owner)) != Some(opened) {
+        ctx.data_mut(|d| d.insert_temp(owner, opened));
+        set_dock_offset(ctx, key, egui::Vec2::ZERO);
+        return egui::Vec2::ZERO;
+    }
+    ctx.data(|d| d.get_temp::<egui::Vec2>(dock_offset_id(key))).filter(|v| v.is_finite()).unwrap_or(egui::Vec2::ZERO)
+}
+
 pub fn set_dock_offset(ctx: &egui::Context, key: &str, offset: egui::Vec2) {
     ctx.data_mut(|d| d.insert_temp(dock_offset_id(key), offset));
 }
