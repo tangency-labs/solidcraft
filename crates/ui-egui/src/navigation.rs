@@ -3094,7 +3094,9 @@ mod tests {
                     let roll = f64::from(quarter) * std::f64::consts::FRAC_PI_2;
                     let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
                     app.preferences.free_orbit = true;
-                    app.cam = Camera { target: Vec3::new(2.0, 3.0, 4.0), yaw: 0.08, pitch: 0.1, roll: roll + 0.08, distance: 47.0, fov, up };
+                    // Test change: Camera gained `frame` (the design's own orientation, #6455); None is the camera as before.
+                    app.cam =
+                        Camera { target: Vec3::new(2.0, 3.0, 4.0), yaw: 0.08, pitch: 0.1, roll: roll + 0.08, distance: 47.0, fov, up, frame: None };
                     let expected = Camera { yaw: 0.0, pitch: 0.0, roll, ..app.cam };
                     orbit_drag(&mut app, rect, 0.0, 0.0, None, true, false);
                     let (right, vertical, back) = app.cam.basis();
@@ -6086,6 +6088,20 @@ mod view_key_tests {
                 }
             }
         }
+    }
+
+    /// Look At a sketch under a design's frame, from straight down the design's top: seen from the
+    /// sketch's own normal (X × Z, along -Y here), its +X points to the screen's right.
+    #[test]
+    fn a_sketch_look_at_under_a_frame_keeps_its_x_to_the_right() {
+        use solidcore_record::Vec3;
+        use solidcraft_viewport::{Camera, ViewFrame};
+        let f = ViewFrame::new(Vec3::Z, -Vec3::Y).unwrap();
+        let cam = Camera { frame: Some(f), ..Default::default() }.looking_from(-Vec3::Y);
+        let framed = crate::dialogs::square_sketch_axes(cam, Vec3::X, Vec3::Z);
+        let (right, _, back) = framed.basis();
+        assert!(back.dist(-Vec3::Y) < 1e-4, "the sketch's normal is the view: back {back:?}");
+        assert!(right.dot(Vec3::X) > 0.999, "the sketch's +X points to the screen's right: right {right:?}");
     }
 
     /// Holding Ctrl (or Shift) before middle-dragging into an unfocused SolidCraft window in

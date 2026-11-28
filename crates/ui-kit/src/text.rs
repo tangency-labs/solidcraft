@@ -66,6 +66,24 @@ pub(super) fn paint_text_aligned(ui: &Ui, rect: egui::Rect, text: &str, font: eg
     painter.galley(at, galley, ink);
 }
 
+/// [`egui::Painter::text`] whose vertically centred anchors (`LEFT_CENTER`, `CENTER_CENTER`,
+/// `RIGHT_CENTER`) are lifted by [`egui::galley_cap_ink_rise`], so the capitals read centred on
+/// `pos` the way [`centred_in`] centres them (#23399). Returns the rectangle painted in.
+pub fn paint_anchored(
+    painter: &egui::Painter,
+    pos: egui::Pos2,
+    anchor: egui::Align2,
+    text: impl ToString,
+    font: egui::FontId,
+    ink: egui::Color32,
+) -> egui::Rect {
+    let galley = painter.layout_no_wrap(text.to_string(), font, ink);
+    let rise = if anchor.y() == egui::Align::Center { egui::galley_cap_ink_rise(painter, &galley) } else { 0.0 };
+    let rect = anchor.anchor_size(pos, galley.size()).translate(egui::vec2(0.0, -rise));
+    painter.galley(rect.min, galley, ink);
+    rect
+}
+
 /// Where to paint `galley` so its capitals read centred on `centre` (#23381): egui's geometric
 /// centre of the row box, lifted by [`egui::galley_cap_ink_rise`].
 pub(crate) fn centred_in(painter: &egui::Painter, galley: &egui::Galley, centre: egui::Pos2) -> egui::Pos2 {
