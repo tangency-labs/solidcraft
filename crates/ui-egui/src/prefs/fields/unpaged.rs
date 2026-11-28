@@ -22,6 +22,10 @@ macro_rules! unpaged_preferences {
             /// Agents the user added (the installed ones are found by themselves). API keys are never
             /// here: they live in the system keychain.
             agents: Vec<crate::agent_chat::agents::AgentConfig> = Vec::new();
+            /// The programs the user added to Send to App (RFC 0018): a name, a program, an argument
+            /// template and the formats it takes. Added and removed in the Send to App window; no
+            /// command adds one, so a script can start only what the user chose.
+            app_targets: Vec<solidcraft_engine::apps::AppTarget> = Vec::new();
             /// The local appearance library the Appearance panel loads whenever it opens (#20361); empty:
             /// none, the panel opens with no library, as it always has. Set by the panel's own checkbox.
             appearance_library: String = String::new();
@@ -74,6 +78,8 @@ macro_rules! unpaged_preferences {
             save_mesh_format: String = "stl".into();
             /// Save as mesh: the last quality (`standard`, `fine` or `finest`, #4747).
             save_mesh_quality: String = "standard".into();
+            /// Send to App: the last app used (an app target's id).
+            send_app: String = String::new();
             /// Send to Slicer: the format last sent to each slicer, by its key in the slicer list (`3mf`,
             /// `stl` or `step`). A slicer that is not in it starts from its own default, 3MF for most.
             send_formats: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();

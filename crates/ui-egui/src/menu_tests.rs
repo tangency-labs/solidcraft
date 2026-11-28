@@ -2576,7 +2576,7 @@ fn mesh_export_from_a_selected_browser_body_takes_the_selected_bodies() {
         for (clicked, selected, expected) in &cases {
             let mut app = appearance_selection_app();
             // Send to Slicer needs a way to start a program.
-            app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+            app.services.pick_program = Some(Box::new(|_| Box::pin(async { None })));
             let items: Vec<_> = selected.iter().map(|name| json!({"type":"body","name":name})).collect();
             app.run("select.set", json!({ "items": items })).unwrap();
             let item = find(&context_menu::items(&app, &Target::Body { name: (*clicked).into() }), label);

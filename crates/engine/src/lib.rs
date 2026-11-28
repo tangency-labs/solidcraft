@@ -9,6 +9,7 @@
 
 pub mod agent_setup;
 pub mod agent_tools;
+pub mod apps;
 pub mod batch_params;
 pub mod batch_preflight;
 pub mod browser_find;

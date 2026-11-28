@@ -1266,7 +1266,7 @@ mod tests {
         crate::i18n::install();
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        h.app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+        h.app.services.pick_program = Some(Box::new(|_| Box::pin(async { None })));
         h.app.preferences.send_slicer = "prusa".into();
         h.app.policy = Policy::from_json(r#"{"Slicer": " Orca "}"#);
         h.frame();

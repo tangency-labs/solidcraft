@@ -56,6 +56,7 @@ pub(crate) mod tests;
 // The contracts, by command file.
 pub mod align;
 pub mod appearance;
+pub mod apps;
 pub mod board_import;
 pub mod bom;
 pub mod browser;

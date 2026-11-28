@@ -5499,7 +5499,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         // Nothing picked is an answer too: OK adds no pill.
         Kind::ChatContext => true,
         Kind::Material { editor, .. } => !editor.editing() && apply_commands(app, &d).is_ok(),
-        Kind::SaveMesh(_) => crate::dialogs_save_mesh::ready(&d.inputs),
+        Kind::SaveMesh(k) => crate::dialogs_save_mesh::ready_for(k, &d.inputs),
         // OK waits for values the engine takes; the drawing says why it does not.
         Kind::ShaftSpline(_) => built.unwrap_or_else(|| apply_commands(app, &d).is_ok()),
         // A drawing whose Resolution was just changed is being measured again, and the Simplify

@@ -38,7 +38,14 @@ pub fn command_reads_only(id: &str) -> bool {
         || id == "view.status_items"
         || matches!(
             id,
-            "doc.info" | "document.inspect" | "engine.commands" | "render.status" | "render.backends" | "render.settings.get" | "file.slicers"
+            "doc.info"
+                | "document.inspect"
+                | "engine.commands"
+                | "render.status"
+                | "render.backends"
+                | "render.settings.get"
+                | "file.slicers"
+                | "file.apps"
         )
 }
 

@@ -62,14 +62,15 @@ impl IconSource {
     }
 }
 
-/// What a mesh can be sent to. `Slicer` is the only kind there is. It is the extension point for a
-/// later Send to App: a new kind would name programs that are not slicers (a viewer, a CAM tool, a
-/// converter), each with its own accepted formats and way of taking a file, and would send through
-/// the same pipeline as `file.send_to_slicer` (write the file, find the target, start it and wait if
-/// it needs that, hand the file over, report).
+/// What a file can be sent to. `Slicer` is the table below and what `file.slicers` lists. `App` is
+/// Send to App (RFC 0018): a program the user added that is not a slicer (a viewer, a CAM tool, a
+/// converter), with its own accepted formats and argument template (see [`crate::apps`], which
+/// resolves and starts it). Both send through the same pipeline (write the file, find the target,
+/// start it, report).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TargetKind {
     Slicer,
+    App,
 }
 
 /// How a target takes the file it is sent.
