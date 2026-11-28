@@ -144,7 +144,6 @@ impl Rigid {
         self.exact()
     }
 
-
     fn stored_point_fits(&self, p: [f64; 3]) -> bool {
         fits_point(self.point(p))
     }

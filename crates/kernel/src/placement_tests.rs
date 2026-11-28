@@ -366,8 +366,7 @@ fn a_placed_body_is_moved_only_when_its_geometry_is_read() {
     assert!(again.record.pending(), "meshed from the part's display");
 }
 
-
-/// #272: a translation that lands a vertex past `validate_built`'s ceiling (finite, absolute
+/// A translation that lands a vertex past `validate_built`'s ceiling (finite, absolute
 /// value at most 1e12) is an error. The same cylinder translated by 1e9, or by 10 mm, stays a
 /// lazy record: 1e9 plus the radius is still under the ceiling, which is not the 1e9 parameter cap.
 #[test]

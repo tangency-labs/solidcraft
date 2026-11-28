@@ -4993,4 +4993,3 @@ fn pattern_coordinate_ceiling_hostile_spacing_angle_and_counts_are_refused() {
     reject_pattern_without_changing_design(&mut s, "solid.pattern.rectangular", &shaft_pattern_row(json!(10), json!(u64::MAX)));
     reject_pattern_without_changing_design(&mut s, "solid.pattern.circular", &json!({"bodies": ["Shaft"], "axis": "Z", "count": u64::MAX}));
 }
-
