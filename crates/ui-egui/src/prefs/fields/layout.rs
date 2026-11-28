@@ -104,6 +104,9 @@ macro_rules! layout_preferences {
             /// (relative to the folder).
             library_folder: String = String::new(), PAGE_LAYOUT;
             library_open: bool = false, PAGE_LAYOUT;
+            /// The order the parts library lists a folder's cards in: by name (folders first) or
+            /// by the files' date modified, each ascending or descending. Name A–Z, as before.
+            library_sort: LibrarySort = LibrarySort::default(), PAGE_LAYOUT;
             library_size: LibrarySize = LibrarySize::default(), PAGE_LAYOUT;
             library_subfolder: String = String::new(), PAGE_LAYOUT;
             /// Preview panel placement and reflow while dragging. Off shows the drop outline.
