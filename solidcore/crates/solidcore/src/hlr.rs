@@ -3204,7 +3204,7 @@ fn classify_point_counted(
                 // A face drawn from a surface within ε of what it is crosses the ray within
                 // ε / |n · d| of a hit on that surface, to first order; `None` where there is no
                 // normal to cross along, and nothing is known of the face.
-                let margin = |h: &Hit| -> Option<f64> {
+                let margin_of = |h: &Hit| -> Option<f64> {
                     if !(f.bound > 0.) {
                         return Some(0.);
                     }
@@ -3220,14 +3220,14 @@ fn classify_point_counted(
                     // two crossings is their distance times its slope over 4 deep), and the face
                     // may miss it. A ray within ε of a face's surface that never crosses it is
                     // not seen here.
-                    let Some(margin) = margin(h) else {
+                    let Some(margin) = margin_of(h) else {
                         uncertain = true;
                         continue;
                     };
                     if margin > 0.
                         && hits.iter().any(|g| {
                             !std::ptr::eq(g, h)
-                                && margin(g)
+                                && margin_of(g)
                                     .is_none_or(|m| (g.lam - h.lam).abs() < 2. * (margin + m))
                         })
                     {
