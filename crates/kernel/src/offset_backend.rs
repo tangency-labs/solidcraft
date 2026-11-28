@@ -149,6 +149,7 @@ pub(crate) fn shell(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
     if !(thickness.is_finite() && thickness > 1e-6) {
         return Err(KernelError::Invalid("shell thickness must be positive".into()));
     }
+    b.require_brep("shell")?;
     let picked = faces_under(b, open)?;
     let opened = crate::offset::with_same_surface(b, &picked);
     let tol = pick_tolerance(b);
@@ -330,7 +331,7 @@ fn faces_under(b: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
     Ok(out)
 }
 
-/// One point inside each face `faces` of `b`: the centroid of its largest triangle.
+/// One point on each face `faces` of `b`: the centroid of its largest triangle, moved onto the exact face.
 fn face_points(b: &Body, faces: &[usize]) -> Result<Vec<Vec3>> {
     let mesh = b.mesh(&crate::MeshTolerance::chord((b.size() * 1e-3).max(1e-3)))?;
     faces
@@ -344,6 +345,9 @@ fn face_points(b: &Body, faces: &[usize]) -> Result<Vec<Vec3>> {
                 .max_by(|x, y| area(x).total_cmp(&area(y)))
                 .map(|[p, q, s]| (p + q + s) * (1.0 / 3.0))
                 .ok_or_else(|| KernelError::Failed(format!("offset faces: face {f} has no triangles")))
+                .and_then(|c| crate::distance::point_closest(c, b, crate::distance::Members::Faces(&[*f])))?
+                .map(|d| d.to)
+                .ok_or_else(|| KernelError::Failed(format!("offset faces: face {f} is not an exact face")))
         })
         .collect()
 }
