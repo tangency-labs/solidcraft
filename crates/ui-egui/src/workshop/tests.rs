@@ -685,7 +685,7 @@ fn choosing_an_item_asks_as_a_link_does() {
     let mut h = crate::scenario::Harness::new();
     assert!(!browser::offered(&h.app));
     assert!(h.app.session.workshop.is_none());
-    assert!(!crate::plugin_menu::rows(&h.app).iter().any(|r| matches!(r, crate::app_bar::FileRow::Item(i) if i.id == "workshop")));
+    assert!(!crate::plugin_menu::rows(&h.app).iter().any(|r| r.id == "workshop"));
     browser::open(&mut h.app);
     assert!(!h.app.workshop.browser.open, "no window without the Workshop");
     assert!(browser::control(&mut h.app, &json!({"open": true})).is_err());
@@ -729,7 +729,7 @@ fn the_session_lists_what_the_window_shows() {
     assert_eq!(listed["state"], "ready");
     assert_eq!(listed["items"].as_array().map(Vec::len), Some(1));
     assert_eq!(listed["items"][0]["id"], "gears");
-    assert!(crate::plugin_menu::rows(&h.app).iter().any(|r| matches!(r, crate::app_bar::FileRow::Item(i) if i.id == "workshop")));
+    assert!(crate::plugin_menu::rows(&h.app).iter().any(|r| r.id == "workshop"));
 
     // `ui.workshop` drives the window as clicks would; bad values are refused.
     let shown = browser::control(&mut h.app, &json!({"open": true, "kind": "plugin"})).unwrap();

@@ -1335,6 +1335,24 @@ pub fn tangent_chain_edges(body: &Body, picks: &[Vec3]) -> Result<Vec<usize>> {
     picked_chain(body, picks).map(|(_, chain, _)| chain)
 }
 
+/// Whether the tangent chain of the edge at `pick` ([`tangent_chain`]) closes on itself: each
+/// vertex of its edges is an end of two of them, as on a rim rounded at every corner. One radius
+/// law runs along an open chain only ([`crate::fillet_variable_spline_chain`]).
+pub fn tangent_chain_closes(body: &Body, pick: Vec3) -> Result<bool> {
+    let (rec, chain, _) = picked_chain(body, &[pick])?;
+    let mut ends: Vec<(u32, usize)> = Vec::new();
+    for e in &chain {
+        let edge = rec.rec.edges.get(*e).ok_or_else(|| KernelError::Failed("an edge of the chain".into()))?;
+        for v in edge.vertices {
+            match ends.iter_mut().find(|(w, _)| *w == v) {
+                Some((_, n)) => *n += 1,
+                None => ends.push((v, 1)),
+            }
+        }
+    }
+    Ok(!ends.is_empty() && ends.iter().all(|&(_, n)| n == 2))
+}
+
 /// Points along each edge that `picks`' tangent chains run on into beyond the picked edges
 /// themselves ([`tangent_chain`]): one list per such edge, in chain order, of `per_edge` points
 /// spread evenly inside the edge, never at its ends (solidcore's

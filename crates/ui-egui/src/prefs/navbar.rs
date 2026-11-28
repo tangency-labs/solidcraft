@@ -206,17 +206,13 @@ fn preview(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, width: f32)
                     from_menu: false,
                 });
             }
-            ui_kit::navigation_context(&response, |ui| {
-                for (key, enabled) in [("left", index > 0), ("right", index + 1 < app.preferences.navigation_bar.slots.len()), ("remove", true)] {
-                    let label = format!("navbar.custom.{key}");
-                    let mut item = ui_kit::NavigationMenuRow::new(key, app.tr(&label), "");
-                    item.enabled = enabled;
-                    if item.show(ui).clicked() {
-                        edit(app, state, index, key);
-                        ui.close();
-                    }
-                }
-            });
+            let items: Vec<_> = [("left", index > 0), ("right", index + 1 < app.preferences.navigation_bar.slots.len()), ("remove", true)]
+                .into_iter()
+                .map(|(key, enabled)| ui_kit::Item::action(key, app.tr(&format!("navbar.custom.{key}")), "").on_if(enabled))
+                .collect();
+            if let Some(picked) = ui_kit::Menu::context_items(&response, &items) {
+                edit(app, state, index, &picked.id);
+            }
         }
     }
     slot_count(app, ui, stage, bar.rect);
