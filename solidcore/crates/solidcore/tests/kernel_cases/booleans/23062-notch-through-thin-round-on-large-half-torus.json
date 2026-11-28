@@ -1,0 +1,335 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b14": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b15": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b5": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b8": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "make_torus",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "center": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "major_radius": 500.0,
+        "minor_radius": 0.5
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b3"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 1.5,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                501.5,
+                -501.5,
+                -1.5
+              ],
+              "start": [
+                -501.5,
+                -501.5,
+                -1.5
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                501.5,
+                501.5,
+                -1.5
+              ],
+              "start": [
+                501.5,
+                -501.5,
+                -1.5
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -501.5,
+                501.5,
+                -1.5
+              ],
+              "start": [
+                501.5,
+                501.5,
+                -1.5
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -501.5,
+                -501.5,
+                -1.5
+              ],
+              "start": [
+                -501.5,
+                501.5,
+                -1.5
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b5",
+        "b4"
+      ],
+      "op": "boolean_tagged",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  499.5,
+                  0.0,
+                  6.123233995736766e-17
+                ],
+                [
+                  499.5,
+                  0.0,
+                  6.123233995736766e-17
+                ]
+              ],
+              "index": 0
+            },
+            {
+              "at": [
+                [
+                  500.5,
+                  0.0,
+                  0.0
+                ],
+                [
+                  500.5,
+                  0.0,
+                  0.0
+                ]
+              ],
+              "index": 2
+            }
+          ],
+          "points": [
+            [
+              -499.49999999999994,
+              7.318590178329032e-13,
+              6.123233995736766e-17
+            ],
+            [
+              -500.5,
+              -3.92993672176728e-13,
+              0.0
+            ]
+          ],
+          "tolerance": 70.78239321177566
+        },
+        "kind": "round",
+        "sizes": [
+          0.05,
+          0.05
+        ],
+        "turn": "auto"
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b13"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 0.25,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                0.0,
+                500.5,
+                0.0
+              ],
+              "end": 6.896285307179586,
+              "radius": 0.05,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b15",
+        "b14"
+      ],
+      "op": "boolean_tagged",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "23062-notch-through-thin-round-on-large-half-torus",
+  "expected": {
+    "body_count": 1,
+    "method": "Pappus and Green: the section is the half disc (centre rho = 500, z = 0, radius a = 0.5, z >= 0) with its two corners on z = 0 rounded by r 0.05 circles centred at rho = 500 +- d, z = 0.05, d = sqrt(0.45^2 - 0.05^2) (tangent to z = 0 and inside the tube circle). V = 2 pi Int Int rho dA, and Int Int rho dA = closed integral of rho^2/2 dz along the boundary: the flat segment (dz = 0), the two fillet arcs and the tube arc between their tangent points (at angles atan2(0.05, d) and pi - atan2(0.05, d) about the tube centre), each by composite Simpson in its angle (20000 intervals), so V = 1229.7131450557 (the half torus pi^2 500 0.25 = 1233.7005501362 less 3.9874050804 for the rounds). The notch takes the integral over its disc (centre (0, 500.5), r 0.05) of the section's material height at rho = hypot(x, y), clipped to 0.25: from z = 0, or from the outer fillet arc where rho > 500 + d, up to the tube, by the midpoint rule on 1000^2, 2000^2 and 4000^2 cells: 0.00046873, 0.00046870, 0.00046869 (converging to about 1e-8). V = 1229.7131450557 - 0.0004686903 = 1229.7126763654; one body",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#23062"
+    ],
+    "tolerance": {
+      "rel": 1e-9
+    },
+    "volume_mm3": 1229.7126763654,
+    "what": "the upper half of a torus (centre circle r 500, tube r 0.5) with both edges of its flat face rounded with 0.05, less a r 0.05 notch 0.25 deep centred on the flat face's outer rim at +Y: one valid solid. The check refused the cut on test 11 (Bad SpeedPt): a UV trim of the outer round, read in raw (u, v), slowed to 3.5e-4 against a tolerance of 4.4e-4, where on the surface it moves at 0.97 or more"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 10,
+      "faces": 5,
+      "vertices": 6
+    }
+  },
+  "records": "23062-notch-through-thin-round-on-large-half-torus.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 7923.402865709267,
+      "body_count": 1,
+      "edges": 10,
+      "faces": 5,
+      "vertices": 7,
+      "volume_mm3": 1229.712676380673
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#23062"
+  ],
+  "traced_ops": [
+    "make_torus",
+    "extrude",
+    "boolean_tagged",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "extrude",
+    "boolean_tagged"
+  ],
+  "ungraded": [],
+  "what": "the upper half of a torus (centre circle r 500, tube r 0.5) with both edges of its flat face rounded with 0.05, less a r 0.05 notch 0.25 deep centred on the flat face's outer rim at +Y: one valid solid. The check refused the cut on test 11 (Bad SpeedPt): a UV trim of the outer round, read in raw (u, v), slowed to 3.5e-4 against a tolerance of 4.4e-4, where on the surface it moves at 0.97 or more",
+  "why_not": []
+}
