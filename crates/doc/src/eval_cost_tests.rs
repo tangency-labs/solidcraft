@@ -2891,7 +2891,10 @@ fn a_grouped_modelled_thread_cuts_and_checks_each_target_once() {
             .record()
             .faces
             .iter()
-            .filter(|f| f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
+            .filter(|f| {
+                matches!(f.surface, Surface::Sweep { .. })
+                    || (f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
+            })
             .count();
         if continuous_flanks {
             assert_eq!(flanks, 8, "two whole flank faces on each of the four shafts");
@@ -7973,7 +7976,7 @@ fn capture_position_keeps_the_centered_pose_after_a_wall_is_removed() {
         id: 1,
         name: "Center1".into(),
         kind: JointKind::Planar,
-        a: JointOrigin::new(wall_occ, Snap::BetweenFaces { a, b }),
+        a: JointOrigin::new(wall_occ, Snap::BetweenFaces { a, b, snap: None }),
         b: JointOrigin::new(slider_occ, Snap::Frame { origin: Vec3::ZERO, z: Vec3::X, x: None }),
         values: vec![0.0; 3],
         limits: vec![None; 3],

@@ -87,7 +87,9 @@ impl FaceSurface {
                 None,
                 Some(solidcore_convert::blend::blend(definition)),
             ),
-            (Surface::Blend { .. }, None) => return Err(Error::Argument),
+            (Surface::Blend { .. } | Surface::Sweep { .. }, None) => return Err(Error::Argument),
+            // A sweep is built on its net (its definition is not yet given back).
+            (Surface::Sweep { .. }, Some(net)) => (conv(net)?, None, None),
             (label, form) => (conv(label)?, form.as_ref().map(conv).transpose()?, None),
         };
         let mut boundary = Vec::new();
@@ -107,7 +109,10 @@ impl FaceSurface {
         let domain = f.domain;
         let labelled = !matches!(
             f.surface,
-            Surface::Spline { .. } | Surface::RationalSpline { .. } | Surface::Blend { .. }
+            Surface::Spline { .. }
+                | Surface::RationalSpline { .. }
+                | Surface::Blend { .. }
+                | Surface::Sweep { .. }
         );
         let surface_label = f.surface.clone();
         run("face_surface::of", move |k: &mut Kernel| {

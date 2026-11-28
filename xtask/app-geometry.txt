@@ -95,7 +95,6 @@ crates/doc/src/eval.rs:ModelBody::sketch_frame dot
 crates/doc/src/eval.rs:PreparedMeshImport::body triangles
 crates/doc/src/eval.rs:bridge_tools atan2,cross,dot,normalized
 crates/doc/src/eval.rs:build_import_mesh triangles
-crates/doc/src/eval.rs:centered_extrude dot
 crates/doc/src/eval.rs:curved_face cross
 crates/doc/src/eval.rs:edge_dir normalized
 crates/doc/src/eval.rs:entry_face_rise dot
@@ -119,6 +118,7 @@ crates/doc/src/eval.rs:level_start_reason dot
 crates/doc/src/eval.rs:line_in_sketch_plane dot,normalized
 crates/doc/src/eval.rs:mesh_content_digest triangles
 crates/doc/src/eval.rs:mirror_matrix dot
+crates/doc/src/eval.rs:named_extrude dot
 crates/doc/src/eval.rs:nearest_object_face closest_on_triangle,cross,triangles
 crates/doc/src/eval.rs:off_its_face dot (only warns that a sketch's face point is off its face; no geometry is built from it)
 crates/doc/src/eval.rs:offset_sheet dot,normalized

@@ -482,6 +482,7 @@ fn surface_kind(s: &BSurface) -> &'static str {
         BSurface::Spline { .. } | BSurface::RationalSpline { .. } => "spline surface",
         BSurface::PlacedRevolution { .. } => "surface of revolution",
         BSurface::Blend { .. } => "blend surface",
+        BSurface::Sweep { .. } => "swept surface",
     }
 }
 
