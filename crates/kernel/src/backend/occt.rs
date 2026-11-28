@@ -27,11 +27,12 @@ use std::sync::OnceLock;
 use occt_capi::{Boolean, Shape};
 use solidcore_ops::sweep::Curve;
 use solidcore_record::brep::Brep;
-use solidcore_record::{Plane, Region2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Vec3};
 use solidcraft_kernel_api::{
     Axis2, Backend, BackendError, BackendId, BoolOp, ChamferSide, Exported, ExtrudeSides, FilletTurn, Modelling, OpKind, Primitive, RevolveSides,
     SplitTool, Support, Taper, TrimKeep,
 };
+use solidcraft_kernel_api::{Helix, PathSpan, PointPath, RailFit, SweepOptions};
 
 use crate::body::Body;
 
@@ -145,6 +146,10 @@ impl Backend for Occt {
             OpKind::Extrude => Support::Some("straight extrusions; not tapered, not the material of overlapping regions".into()),
             OpKind::Revolve => Support::Some("arcs not joined first".into()),
             OpKind::Fillet => Support::Some("constant radius with mitred turns".into()),
+            OpKind::Chamfer => Support::Some("equal chamfers".into()),
+            OpKind::Shell => Support::Some("open at one face or more".into()),
+            OpKind::Thicken => Support::Yes,
+            OpKind::OffsetFaces => Support::Yes,
             _ => Support::No,
         }
     }
@@ -282,8 +287,12 @@ impl Modelling for Occt {
         unsupported("a setback fillet")
     }
 
-    fn chamfer(&self, _body: &Shape, _edges: &[Vec3], _distance: f64) -> Result<Shape, BackendError> {
-        unsupported("a chamfer")
+    fn chamfer(&self, body: &Shape, edges: &[Vec3], distance: f64) -> Result<Shape, BackendError> {
+        if edges.is_empty() || edges.len() > 1000 || !(distance > 1e-6 && distance < 1e6) || edges.iter().any(|p| !finite(&xyz(*p))) {
+            return unsupported("a chamfer solidcore refuses");
+        }
+        let points: Vec<[f64; 3]> = edges.iter().map(|p| xyz(*p)).collect();
+        body.chamfer_nearest(&points, distance).map_err(failed)
     }
 
     fn chamfer_carrying_face(&self, _body: &Shape, _edges: &[Vec3], _distance: f64) -> Result<Shape, BackendError> {
@@ -298,16 +307,29 @@ impl Modelling for Occt {
         unsupported("a chamfer")
     }
 
-    fn shell(&self, _body: &Shape, _open: &[Vec3], _thickness: f64) -> Result<Shape, BackendError> {
-        unsupported("a shell")
+    fn shell(&self, body: &Shape, open: &[Vec3], thickness: f64) -> Result<Shape, BackendError> {
+        // A closed hollow (no open face) is one solid inside another: OCCT makes it, the record
+        // takes it, but solidcore's shell is what the app's checks expect, so it stays there.
+        if open.is_empty() || !(thickness > 0.0 && thickness.is_finite()) || open.iter().any(|p| !finite(&xyz(*p))) {
+            return unsupported("a shell with no open face, or one solidcore refuses");
+        }
+        let points: Vec<[f64; 3]> = open.iter().map(|p| xyz(*p)).collect();
+        body.shell_nearest(&points, thickness).map_err(failed)
     }
 
-    fn thicken(&self, _sheet: &Shape, _thickness: f64, _symmetric: bool) -> Result<Shape, BackendError> {
-        unsupported("thicken")
+    fn thicken(&self, sheet: &Shape, thickness: f64, symmetric: bool) -> Result<Shape, BackendError> {
+        if !(thickness != 0.0 && thickness.is_finite()) {
+            return unsupported("a thickness solidcore refuses");
+        }
+        sheet.thicken(thickness, symmetric).map_err(failed)
     }
 
-    fn offset_faces(&self, _body: &Shape, _at: &[Vec3], _distance: f64) -> Result<Shape, BackendError> {
-        unsupported("an offset")
+    fn offset_faces(&self, body: &Shape, at: &[Vec3], distance: f64) -> Result<Shape, BackendError> {
+        if at.is_empty() || !distance.is_finite() || distance == 0.0 || distance.abs() > 1e6 || at.iter().any(|p| !finite(&xyz(*p))) {
+            return unsupported("an offset solidcore refuses, or one of 0");
+        }
+        let points: Vec<[f64; 3]> = at.iter().map(|p| xyz(*p)).collect();
+        body.offset_faces_nearest(&points, distance).map_err(failed)
     }
 
     fn draft(&self, _body: &Shape, _faces: &[Vec3], _neutral: &Plane, _pull: Vec3, _angle: f64) -> Result<Shape, BackendError> {
@@ -333,6 +355,30 @@ impl Modelling for Occt {
     fn trim_keep(&self, _body: &Shape, _tool: &SplitTool<'_, Shape>, _keep: TrimKeep<'_>) -> Result<Shape, BackendError> {
         unsupported("a trim")
     }
+
+    fn sweep(&self, _plane: &Plane, _region: &Region2, _path: &[PathSpan], _options: &SweepOptions) -> Result<Shape, BackendError> {
+        unsupported("a sweep")
+    }
+
+    fn sweep_points(&self, _plane: &Plane, _region: &Region2, _path: &PointPath, _options: &SweepOptions) -> Result<Shape, BackendError> {
+        unsupported("a sweep")
+    }
+
+    fn sweep_helix(&self, _plane: &Plane, _region: &Region2, _helix: &Helix<'_>) -> Result<Shape, BackendError> {
+        unsupported("a helical sweep")
+    }
+
+    fn loft(&self, _sections: &[(Plane, Loop2)], _rails: &[Vec<Vec3>], _fit: RailFit) -> Result<Shape, BackendError> {
+        unsupported("a loft")
+    }
+
+    fn loft_regions(&self, _sections: &[(Plane, Region2)]) -> Result<Shape, BackendError> {
+        unsupported("a loft")
+    }
+
+    fn loft_to_point(&self, _plane: &Plane, _section: &Loop2, _apex: Vec3, _rails: &[Vec<Vec3>], _fit: RailFit) -> Result<Shape, BackendError> {
+        unsupported("a loft to a point")
+    }
 }
 
 #[cfg(test)]
@@ -348,7 +394,7 @@ mod tests {
     }
 
     #[test]
-    fn it_takes_primitives_extrusions_revolutions_booleans_and_fillets_only() {
+    fn it_takes_the_operations_it_builds_only() {
         for &op in OpKind::ALL {
             let routed = matches!(
                 op,
@@ -360,6 +406,10 @@ mod tests {
                     | OpKind::Revolve
                     | OpKind::Boolean
                     | OpKind::Fillet
+                    | OpKind::Chamfer
+                    | OpKind::Shell
+                    | OpKind::Thicken
+                    | OpKind::OffsetFaces
             );
             assert_eq!(Occt.supports(op) != Support::No, routed, "{}", op.name());
         }
@@ -538,5 +588,47 @@ mod tests {
         set_kernel(Kernel::Solidcore);
         assert!(fell_back() > before);
         assert!(b[0].history().is_some());
+    }
+
+    /// `build` on both kernels: Open CASCADE ran it, the shared check passes both, and their
+    /// volume, area, face and edge counts and centroid agree with each other and with `volume`.
+    /// Open CASCADE's results carry no history yet, so names are not compared.
+    fn same_solid(what: &str, volume: f64, build: impl Fn() -> crate::Result<Body>) {
+        use crate::route::foreign::{Kernel, fell_back, set_kernel};
+        let grade = |b: &Body| {
+            assert!(matches!(crate::failing_check(b), Ok(None)), "{what}: the shared check fails");
+            let m = crate::measure(b).unwrap();
+            (m.volume, m.area, b.record().faces.len(), b.record().edges.len(), m.centroid)
+        };
+        set_kernel(Kernel::Solidcore);
+        let ours = grade(&build().unwrap());
+        set_kernel(Kernel::Occt);
+        let before = fell_back();
+        let theirs = grade(&build().unwrap());
+        set_kernel(Kernel::Solidcore);
+        assert_eq!(fell_back(), before, "{what}: solidcore ran it");
+        assert!((theirs.0 - volume).abs() <= 1e-9 * volume, "{what}: volume {} against {volume}", theirs.0);
+        assert!((ours.0 - theirs.0).abs() <= 1e-9 * volume, "{what}: volume {} against {}", theirs.0, ours.0);
+        assert!((ours.1 - theirs.1).abs() <= 1e-9 * ours.1, "{what}: area {} against {}", theirs.1, ours.1);
+        assert_eq!((ours.2, ours.3), (theirs.2, theirs.3), "{what}: faces and edges");
+        let apart = ((ours.4.x - theirs.4.x).powi(2) + (ours.4.y - theirs.4.y).powi(2) + (ours.4.z - theirs.4.z).powi(2)).sqrt();
+        assert!(apart <= 1e-9 * volume.cbrt(), "{what}: centroid {:?} against {:?}", theirs.4, ours.4);
+    }
+
+    #[test]
+    fn chamfers_shells_and_thickened_sheets_match_solidcore() {
+        let cube = || crate::route::box_solid(v(0.0, 0.0, 0.0), v(10.0, 10.0, 10.0));
+        // One edge, 1 back: a prism of section 1/2 along it.
+        same_solid("a chamfered edge", 1000.0 - 5.0, || crate::route::chamfer(&cube()?, &[v(5.0, 0.0, 10.0)], 1.0));
+        // Open at the top, walls 1 thick: the 8 x 8 x 9 hollow taken out.
+        same_solid("a box shelled open at the top", 1000.0 - 576.0, || crate::route::shell(&cube()?, &[v(5.0, 5.0, 10.0)], 1.0));
+        let square = Region2 { outer: poly(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]), holes: vec![] };
+        let sheet = || crate::surfaces::patch_region(&Plane::XY, &square);
+        same_solid("a sheet thickened up", 200.0, || crate::route::thicken(&sheet()?, 2.0, false));
+        same_solid("a sheet thickened down", 200.0, || crate::route::thicken(&sheet()?, -2.0, false));
+        same_solid("a sheet thickened both ways", 200.0, || crate::route::thicken(&sheet()?, 2.0, true));
+        // The top face up 2 (10 x 10 x 12); the side face at x = 10 in 1 (9 x 10 x 10).
+        same_solid("a face moved out", 1200.0, || crate::route::offset_faces(&cube()?, &[v(5.0, 5.0, 10.0)], 2.0));
+        same_solid("a face moved in", 900.0, || crate::route::offset_faces(&cube()?, &[v(10.0, 5.0, 5.0)], -1.0));
     }
 }

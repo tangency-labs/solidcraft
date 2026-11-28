@@ -1,8 +1,9 @@
 //! solidcore's body-making operations ([`Modelling`]): each the call this crate made before the
 //! interface existed.
 
-use solidcore_record::{Plane, Region2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Vec3};
 use solidcraft_kernel_api::{Axis2, BoolOp, ChamferSide, ExtrudeSides, FilletTurn, Modelling, Primitive, RevolveSides, Taper, TrimKeep};
+use solidcraft_kernel_api::{Helix, PathSpan, PointPath, RailFit, SweepOptions};
 
 use crate::SplitTool;
 
@@ -115,5 +116,32 @@ impl Modelling for Solidcore {
 
     fn trim_keep(&self, body: &Body, tool: &SplitTool<'_>, keep: TrimKeep<'_>) -> Result<Body> {
         crate::surface_trim::trim_keep(body, tool, keep)
+    }
+
+    fn sweep(&self, plane: &Plane, region: &Region2, path: &[PathSpan], options: &SweepOptions) -> Result<Body> {
+        crate::build::sweep_with(plane, region, &crate::sweep_api::segs(path)?, &crate::sweep_api::control(options))
+    }
+
+    fn sweep_points(&self, plane: &Plane, region: &Region2, path: &PointPath, options: &SweepOptions) -> Result<Body> {
+        crate::point_path::sweep_point_path_with(plane, region, &crate::sweep_api::path_of_points(path)?, &crate::sweep_api::control(options))
+    }
+
+    fn sweep_helix(&self, plane: &Plane, region: &Region2, h: &Helix<'_>) -> Result<Body> {
+        match h.law {
+            None => crate::helix::sweep_helix(plane, region, h.origin, h.axis, h.pitch, h.turns),
+            Some(law) => crate::helix::sweep_helix_radial(plane, region, h.origin, h.axis, h.pitch, h.turns, law, h.continuous_flanks),
+        }
+    }
+
+    fn loft(&self, sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: RailFit) -> Result<Body> {
+        crate::build::loft_with_rails(sections, rails, fit)
+    }
+
+    fn loft_regions(&self, sections: &[(Plane, Region2)]) -> Result<Body> {
+        crate::build::loft_regions(sections)
+    }
+
+    fn loft_to_point(&self, plane: &Plane, section: &Loop2, apex: Vec3, rails: &[Vec<Vec3>], fit: RailFit) -> Result<Body> {
+        crate::helix::loft_to_point_with_rails(plane, section, apex, rails, fit)
     }
 }

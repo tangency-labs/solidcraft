@@ -41,6 +41,7 @@ pub mod query;
 pub mod runtime;
 pub mod sections;
 pub mod shaft_spline;
+pub mod sweep;
 pub mod tessellate;
 pub mod tube_cope;
 
@@ -63,6 +64,7 @@ pub use query::{FaceHit, MembersClosest, OutlineStretch, Queries, QueryRefused, 
 pub use runtime::{ErrorClass, FailureCode, Runtime};
 pub use sections::{BlendFrame, FramesRefused, Sections, TurnRefusal};
 pub use shaft_spline::ShaftSplines;
+pub use sweep::{Helix, PathSpan, PointPath, PointPiece, RailFit, SpaceSpan, SweepOptions, SweepOrientation};
 pub use tessellate::{PlanarFill, TessRefused, Tessellate};
 pub use tube_cope::{CopeFailed, CopeRefusal, TemplateRefusal, TubeCopes};
 
@@ -112,6 +114,10 @@ pub enum OpKind {
     /// Faces and bodies split by a tool, and surface bodies trimmed ([`Modelling::split_body`],
     /// [`Modelling::split_faces`], [`Modelling::trim_keep`]).
     Split,
+    /// A profile swept along a path or a helix ([`Modelling::sweep`], [`Modelling::sweep_helix`]).
+    Sweep,
+    /// Sections lofted into a solid ([`Modelling::loft`]).
+    Loft,
     /// A cell grid planned over a profile ([`CellGrid`]).
     CellGrid,
     /// The exchange helpers: a STEP string, CADIR read and written ([`Exchange`]).
@@ -175,6 +181,8 @@ impl OpKind {
         OpKind::OffsetFaces,
         OpKind::Draft,
         OpKind::Split,
+        OpKind::Sweep,
+        OpKind::Loft,
         OpKind::CellGrid,
         OpKind::Exchange,
         OpKind::Develop,
@@ -214,6 +222,8 @@ impl OpKind {
             OpKind::OffsetFaces => "offset_faces",
             OpKind::Draft => "draft",
             OpKind::Split => "split",
+            OpKind::Sweep => "sweep",
+            OpKind::Loft => "loft",
             OpKind::CellGrid => "cell_grid",
             OpKind::Exchange => "exchange",
             OpKind::Develop => "develop",

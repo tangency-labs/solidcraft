@@ -2234,6 +2234,16 @@ fn a_late_cranelift_compile_never_replaces_another_components_code() {
     assert_eq!((cached.tier, Arc::ptr_eq(&cached.bytes, &second)), (Tier::Baseline, true));
 }
 #[test]
+fn preparation_is_reported_only_for_an_uncached_component() {
+    let bytes = importer_component();
+    let mut preparations = 0;
+    compile_reporting(&bytes, 512 * 1024, || preparations += 1).unwrap();
+    assert_eq!(preparations, 1);
+    compile_reporting(&bytes, 512 * 1024, || preparations += 1).unwrap();
+    assert_eq!(preparations, 1);
+}
+
+#[test]
 fn a_component_winch_refuses_is_compiled_with_cranelift_and_runs() {
     // Relaxed SIMD is one of the proposals Wasmtime's Winch does not compile.
     let code = "call $box v128.const i64x2 0 0 v128.const i64x2 0 0 v128.const i64x2 0 0 f32x4.relaxed_madd drop";
