@@ -6,7 +6,7 @@ mod text_buffer;
 
 pub use {
     crate::text_selection::TextCursorState,
-    builder::TextEdit,
+    builder::{TextEdit, cap_ink_rise, galley_cap_ink_rise},
     completion::{CompletionOutput, CompletionPopup, CompletionQuery, Suggestion},
     output::TextEditOutput,
     state::TextEditState,

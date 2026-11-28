@@ -1116,15 +1116,17 @@ impl<'b, 'a> Builder<'b, 'a> {
             let s = self.reader.surface(rid(p.get(2), "face geometry")?).map_err(|m| format!("face #{id}: {m}"))?;
             (s, flag(p.get(3), "face same_sense")?)
         };
-        if !loops.iter().any(|l| matches!(l, Bound::Edges(_))) {
-            loops = self.whole_sphere(&step_surface, &loops).map_err(|m| format!("face #{id}: {m}"))?;
+        let has_edge_loop = loops.iter().any(|l| matches!(l, Bound::Edges(_)));
+        if !has_edge_loop {
+            loops = self.whole_surface(&step_surface, &loops).map_err(|m| format!("face #{id}: {m}"))?;
         }
         let extent = self.asm.extent(&loops)?;
         let (surface, reversed) = swept::map_surface(&step_surface, &extent, self.asm.tol).map_err(|m| format!("face #{id}: {m}"))?;
         // Loops relative to the record's natural normal: the face's normal is STEP's surface
         // normal when same_sense, and the record's is STEP's unless `reversed`.
         let sense = same_sense != reversed;
-        if !sense {
+        // Manufactured seams already follow the natural normal, including on a cavity face.
+        if has_edge_loop && !sense {
             for l in &mut loops {
                 if let Bound::Edges(uses) = l {
                     reverse(uses);
@@ -1135,11 +1137,16 @@ impl<'b, 'a> Builder<'b, 'a> {
         Ok((i, sense))
     }
 
-    /// A sphere face bounded by vertex loops alone, each at one of its poles (ISO 10303-42: a face
-    /// of a closed surface bounded by vertices is all of the surface): the whole sphere, its loop
-    /// a meridian from the south pole to the north and back, which [`Assembly::complete_slits`]
-    /// keeps as its seam. Any other face without an edge loop is refused.
-    fn whole_sphere(&mut self, surface: &crate::geom::Surface, loops: &[Bound]) -> R<Vec<Bound>> {
+    /// An untrimmed ring torus needs both periodic seams. A sphere can also have vertex
+    /// bounds at its poles. Other surfaces need an edge loop to determine their extent.
+    fn whole_surface(&mut self, surface: &crate::geom::Surface, loops: &[Bound]) -> R<Vec<Bound>> {
+        if loops.is_empty()
+            && let crate::geom::Surface::Torus { position, major_radius, minor_radius } = surface
+            && major_radius > minor_radius
+            && *minor_radius > 0.0
+        {
+            return Ok(vec![self.asm.torus_seams(&frame(position), *major_radius, *minor_radius, 0.0, 0.0)?]);
+        }
         let crate::geom::Surface::Sphere { position, radius } = surface else { return Err(unsupported("a face without an edge loop")) };
         // Each pole vertex as its joined set's root ([`Builder::meet`]).
         let loops: Vec<Bound> = loops.iter().map(|l| if let &Bound::Vertex(v) = l { Bound::Vertex(self.find(v)) } else { l.clone() }).collect();

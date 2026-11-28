@@ -77,6 +77,13 @@ every prompt and answer, including those scrolled out of view, but not thoughts,
 notices. Ctrl+C then copies them in order as plain text, each under who wrote it. Esc or a
 click ends the selection; in the message box Ctrl+A selects only the draft.
 
+From the Assistant header, choose **Export conversation as Markdown…** to save the current
+chat as a `.md` file. The file preserves the original formatting of the prompts and replies
+still in the chat. If a reply is arriving, the export captures the text received when you
+open the save dialog. Select **Include tool details** to add the retained tool calls and results.
+With this option selected, the dialog reminds you to review the file before sharing it. The file
+lists attachments by name and skips the draft, thoughts, plans and approval cards.
+
 - **Docking:** on the left, Assistant is the first panel, before vertical history and the browser.
   The drag highlight shows the actual destination bounds. Drag the panel's header (the dotted grip and the title) to the other half of the
   window and let go. The side it would land on lights up while you drag. You can also pick
@@ -99,6 +106,12 @@ click ends the selection; in the message box Ctrl+A selects only the draft.
   reasoning effort. Changing the model can change or remove the effort choices. A selection is
   shown as applied only after the agent reports it; a rejected change leaves the confirmed
   selection in place and shows an error.
+- **Service tier** shows the speed choices reported by the ACP agent. For endpoints configured
+  with **Use OpenAI Responses API**, choose **Fast** or **Ultrafast**. OpenAI's hosted Chat
+  Completions endpoint also offers **Fast**. The endpoint choice applies from the next turn.
+  Choose **Provider default** to use the endpoint's configured tier. A new chat starts with that
+  default. Availability depends on the model and account, and faster tiers can cost more.
+  [OpenAI Fast mode](https://developers.openai.com/api/docs/guides/fast-mode) · [OpenAI Ultrafast mode](https://developers.openai.com/api/docs/guides/ultrafast-mode)
 - **Older agents and API endpoints** keep their model and mode drop-downs when they report those
   choices (an ACP agent's legacy model/mode lists, or an endpoint's `/models`). SolidCraft remembers
   the last model choice for each agent and puts it back on the next session when still available.

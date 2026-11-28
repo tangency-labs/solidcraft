@@ -977,7 +977,12 @@ fn screen_up_policy_leaves_other_view_animations_unchanged() {
         let fallback = SolveApp::screen_up_turn(CameraAnim::new(from, to, 0.0));
         assert!(!fallback.is_screen_up_turn(), "different or invalid screen-up directions keep the ordinary path");
         if to.is_valid() {
-            assert_eq!(fallback.sample(fallback.duration * 0.4).0, Camera::interpolate(&from, &to, ease_in_out(0.4)));
+            // Compared with the same animation left alone, sampled at the same moment: both take
+            // the same arithmetic, so they match exactly. Against `Camera::interpolate` at the
+            // fraction itself, the time round trip can change the last digits (#23130).
+            let reference = CameraAnim::new(from, to, 0.0);
+            let now = reference.duration * 0.4;
+            assert_eq!(fallback.sample(now), reference.sample(now), "the fallback is the ordinary animation");
         }
     }
 }

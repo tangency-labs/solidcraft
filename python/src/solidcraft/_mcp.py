@@ -7,10 +7,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
 from typing import Any, Sequence
+
+from . import _download
 
 PROTOCOL = "2025-06-18"
 
@@ -19,19 +22,62 @@ class SolidCraftError(RuntimeError):
     """A tool or command that SolidCraft refused or that failed; the message is SolidCraft's."""
 
 
-def find_cli() -> str:
-    """``solidcraft-cli``: ``$SOLIDCRAFT_CLI``, the binary bundled in a wheel, then ``PATH``."""
+def _version_tuple(text: str) -> tuple[int, int] | None:
+    m = re.search(r"(\d+)\.(\d+)", text)
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def path_cli_ok(path: str, version: str) -> tuple[bool, str]:
+    """Whether a ``solidcraft-cli`` found on PATH may stand in for this package's own version:
+    it must start and be the same minor version or newer. Returns (usable, why not)."""
+    try:
+        r = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError) as e:
+        return False, f"{path} (found on PATH) cannot start: {e}"
+    if r.returncode != 0:
+        why = (r.stderr.strip().splitlines() or [f"exit status {r.returncode}"])[-1]
+        return False, f"{path} (found on PATH) failed to start: {why}"
+    want, got = _version_tuple(version), _version_tuple(r.stdout)
+    if want and got and got < want:
+        return False, f"{path} (found on PATH) is {r.stdout.strip()}, older than this package's {version}"
+    return True, ""
+
+
+def locate_cli() -> tuple[str, str]:
+    """``(path, where it came from)`` of the ``solidcraft-cli`` to run: ``$SOLIDCRAFT_CLI``, one
+    bundled in the package, the one downloaded earlier for this version, one on ``PATH`` of the same
+    minor version or newer, then a download of this version's own (``_download``)."""
     env = os.environ.get("SOLIDCRAFT_CLI")
     if env:
-        return env
-    exe = "solidcraft-cli.exe" if os.name == "nt" else "solidcraft-cli"
-    bundled = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", exe)
+        return env, "SOLIDCRAFT_CLI"
+    bundled = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin", _download.EXE)
     if os.path.isfile(bundled):
-        return bundled
+        return bundled, "bundled in this package"
+    version = _download.package_version()
+    cached = _download.cached(version)
+    if cached:
+        return cached, "downloaded for this version"
+    skipped = ""
     found = shutil.which("solidcraft-cli")
     if found:
-        return found
-    raise SolidCraftError("solidcraft-cli not found: install SolidCraft, or set SOLIDCRAFT_CLI to its path")
+        ok, skipped = path_cli_ok(found, version)
+        if ok:
+            return found, "found on PATH"
+    if not version:
+        raise SolidCraftError(f"solidcraft-cli not found; {skipped + '; ' if skipped else ''}{_download.HINT}")
+    if _download.disabled():
+        raise SolidCraftError(
+            f"solidcraft-cli not found and SOLIDCRAFT_NO_DOWNLOAD is set; {skipped + '; ' if skipped else ''}{_download.HINT}"
+        )
+    try:
+        return _download.download(version), "downloaded for this version"
+    except _download.DownloadError as e:
+        raise SolidCraftError(f"{e}; {skipped + '; ' if skipped else ''}{_download.HINT}") from e
+
+
+def find_cli() -> str:
+    """The ``solidcraft-cli`` to run (``locate_cli``'s order); may download it the first time."""
+    return locate_cli()[0]
 
 
 class Client:

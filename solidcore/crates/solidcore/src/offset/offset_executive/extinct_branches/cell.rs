@@ -271,13 +271,18 @@ impl Sheet {
 }
 
 impl Cell {
-    /// Whether the material halfspaces of sheets `a` and `b` have no common point in
-    /// this cell: a Farkas certificate with unit multipliers. Each material halfspace
-    /// is `f <= 0` for the affine `f` of [`Sheet::excess`]; if `f_a + f_b > 0` at every
-    /// vertex, it is positive on the cell, their convex hull, so no point of the cell
-    /// lies in both. For exactly opposite normals `f_a + f_b` is the constant crossing
-    /// of the two planes; for normals opposite only up to rounding (a turned branch)
-    /// the plane's own tilt is decided exactly instead of being compared bit for bit.
+    /// Whether the material halfspaces of sheets `a` and `b` have no common interior
+    /// point in this cell: a Farkas certificate with unit multipliers. Each material
+    /// halfspace is `f <= 0` for the affine `f` of [`Sheet::excess`]; if `f_a + f_b >= 0`
+    /// at every vertex, it is non-negative on the cell, their convex hull, so no point
+    /// of the cell has both `f_a < 0` and `f_b < 0`: the two halfspaces' common part in
+    /// the cell has no interior, and the regularized cavity there is empty. Where the sum
+    /// is zero the two sheets coincide (a pad inset by exactly half its width, #22783):
+    /// what lies in both is a part of that one plane, of zero volume, which the
+    /// regularized offset does not keep. For exactly opposite normals `f_a + f_b` is the
+    /// constant crossing of the two planes; for normals opposite only up to rounding (a
+    /// turned branch) the plane's own tilt is decided exactly instead of being compared
+    /// bit for bit.
     pub(super) fn separates(&self, a: &Sheet, b: &Sheet) -> bool {
         let proof = || {
             let na = a.normal()?;
@@ -287,7 +292,7 @@ impl Cell {
             }
             for p in &self.points {
                 let sum = add(&a.excess(&na, p)?, &b.excess(&nb, p)?)?;
-                if ex::sign(&sum) <= 0 {
+                if ex::sign(&sum) < 0 {
                     return Some(false);
                 }
             }

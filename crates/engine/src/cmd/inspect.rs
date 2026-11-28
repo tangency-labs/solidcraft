@@ -74,7 +74,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo().read_only()
         .contract(&MEASURE_CONTRACT)
         .output(output_schema_for::<MeasureResult>)
-        .params("bodies?: [names] (default all); within?: {min:[x,y,z], max:[x,y,z]} (world mm); mode?: intersects|inside (default intersects, includes touching); names_only?: bool (each world body's name and its definition's, nothing measured) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, and point on it or index from model.faces/model.edges, or both) → length/area/volume; a face's perimeter_mm, with outer_perimeter_mm and inner_perimeter_mm on a flat face with holes; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
+        .params("bodies?: [names] (default all); within?: {min:[x,y,z], max:[x,y,z]} (world mm); mode?: intersects|inside (default intersects, includes touching); names_only?: bool (each world body's name and its definition's, nothing measured) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections, or 3-64 round edges or cylinder faces with parallel axes] (face/edge: type, body, and point on it or index from model.faces/model.edges, or both) → length/area/volume; a face's perimeter_mm, with outer_perimeter_mm and inner_perimeter_mm on a flat face with holes; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle; three or more round items (a row of holes, a bolt circle): spacing {pattern: line|circle|none, order, gaps (centre to centre, in order along the row or round the circle), span, even, pitch, odd_gaps, and for a circle pcd, pcd_center, angle_deg}"),
     CommandSpec::new("document.inspect", "Inspect Design", crate::checked!("document.inspect", inspect))
         .icon("inspect")
         .noundo().read_only()
@@ -1079,14 +1079,22 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
     if bodies.iter().any(|b| st.body(b).is_none()) {
         return Err(bad(cmd, "`bodies` must list existing bodies"));
     }
-    // Faces: a point on each, on the named body or the nearest one.
+    // Faces: a point on each, on the named body or the nearest one, or a face's name (#22984).
     let mut faces: Vec<(String, solidcore_record::Vec3)> = Vec::new();
     if let Some(list) = p.get("faces") {
-        let list = list.as_array().filter(|a| a.len() <= 10_000).ok_or_else(|| bad(cmd, "`faces` must list points [x, y, z]"))?;
+        let wrong = || bad(cmd, "`faces` must list points [x, y, z] or face names");
+        let list = list.as_array().filter(|a| a.len() <= 10_000).ok_or_else(wrong)?;
         for v in list {
-            let pt = crate::params::vec3(v)
-                .or_else(|| v.get("point").and_then(crate::params::vec3))
-                .ok_or_else(|| bad(cmd, "`faces` must list points [x, y, z]"))?;
+            if let Some(name) = v.as_str() {
+                crate::cmd::face_ref_form(v).map_err(|why| bad(cmd, why))?;
+                let body = str_(p, "body");
+                let hit = solidcraft_doc::naming::locate_one(&st, body, name).map_err(|why| bad(cmd, why))?;
+                let on = st.bodies.get(hit.body).ok_or_else(wrong)?.name.clone();
+                let pt = solidcraft_doc::naming::named_face_point(&st, Some(&on), name).map_err(|why| bad(cmd, why))?;
+                faces.push((on, pt));
+                continue;
+            }
+            let pt = crate::params::vec3(v).or_else(|| v.get("point").and_then(crate::params::vec3)).ok_or_else(wrong)?;
             let on = |b: &solidcraft_doc::ModelBody| solidcraft_doc::appearance::face_index_at(b, pt).is_some();
             let body = match v.get("body").and_then(Value::as_str).or_else(|| str_(p, "body")) {
                 Some(n) => st.body(n).filter(|b| on(b)).map(|b| b.name.clone()),
