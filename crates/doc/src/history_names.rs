@@ -247,6 +247,9 @@ impl<'a> OperandNames<'a> {
                 let body = o.before.body(name)?;
                 Some(OperandNames { operand, names: crate::naming::names(body), body: Some(body.clone()), edges: OnceLock::new() })
             }
+            Operand::Historical(body) => {
+                Some(OperandNames { operand, names: crate::naming::names(body), body: Some(body.as_ref().clone()), edges: OnceLock::new() })
+            }
             Operand::Made(_) | Operand::CopiedTool { .. } | Operand::Rebuilt { .. } | Operand::Grown { body: None, .. } => {
                 Some(OperandNames { operand, body: None, names: Arc::default(), edges: OnceLock::new() })
             }
@@ -294,7 +297,7 @@ impl<'a> OperandNames<'a> {
             })
         };
         match self.operand {
-            Operand::Body(_) | Operand::Stage(_) => given(&self.names),
+            Operand::Body(_) | Operand::Historical(_) | Operand::Stage(_) => given(&self.names),
             Operand::Copy { instance, .. } => given(&self.names).map(|n| {
                 let copied = |names: &[String]| names.iter().map(|a| format!("{a}@F{fid}.{instance}")).collect();
                 Named {
@@ -352,7 +355,7 @@ impl<'a> OperandNames<'a> {
     /// The name of edge `edge`, and whether it is exact.
     fn edge(&self, edge: usize) -> Option<(String, bool)> {
         match self.operand {
-            Operand::Body(_) | Operand::Stage(_) => {
+            Operand::Body(_) | Operand::Historical(_) | Operand::Stage(_) => {
                 let body = self.body.as_ref()?;
                 let names = self.edges.get_or_init(|| crate::naming::edge_names(body));
                 let verified = if body.body.is_mesh() {
@@ -843,6 +846,32 @@ fn rounds_the_edge(bound: &str, here: &str, face: &str) -> bool {
     let face = crate::naming::strip_piece(face);
     let sides = |n: &str| crate::naming::strip_piece(n).to_string();
     crate::naming::blend_sides(bound).is_some_and(|(a, b)| (sides(a) == here && sides(b) == face) || (sides(a) == face && sides(b) == here))
+}
+
+/// A numbered piece that kept the number that told the tied pieces of its stem apart while its
+/// qualifier lost bounds: every bound the qualifier still lists was in the stored one, and every
+/// bound it lost still bounds the piece (the faces around it merely stopped telling the pieces
+/// apart, so the bound left the written name). The number ranks the pieces the way it did when
+/// the design was saved, so the piece of that number is the piece the stored name names — the
+/// caller must not consult the saved point: an edit can move another piece to where this one
+/// was picked (a respaced pattern puts another wall at the old place).
+pub(crate) fn rank_kept(names: &Names, face: usize, saved: &str) -> bool {
+    let Some(current) = names.faces.get(face) else { return false };
+    let saved = crate::persistent_name::written_now(saved);
+    let current = crate::persistent_name::written_now(current);
+    let ((saved, at), (current, here)) = (instance_suffix(&saved), instance_suffix(&current));
+    if here != at {
+        return false;
+    }
+    let Some(tie) = tie_number(saved) else { return false };
+    let (Some((stem, old)), Some((own, new))) = (crate::piece_names::piece_parts(saved), crate::piece_names::piece_parts(current)) else {
+        return false;
+    };
+    stem == own
+        && tie_number(current).as_deref() == Some(tie.as_str())
+        && new.len() < old.len()
+        && new.iter().all(|n| old.contains(n))
+        && names.info.get(face).is_some_and(|i| i.verified && old.iter().all(|n| new.contains(n) || i.bounds.contains(*n)))
 }
 
 /// How many of the bounding faces in a stored piece qualifier (`stem#[a, b, …]`, without a tie

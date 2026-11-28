@@ -24,6 +24,9 @@ use crate::SolvedSketch;
 pub(crate) enum Operand {
     /// A body of the model before the feature (by name): its faces keep their names.
     Body(String),
+    /// A replayed tool was trimmed against this body at its source step. Its topology and
+    /// names belong together; the same body name may mean different geometry at the copy.
+    Historical(Box<crate::ModelBody>),
     /// A moved copy of a body of the model before the feature, instance `instance` of a pattern
     /// or mirror: its faces are named after their sources (`<name>@F<feature>.<instance>`).
     Copy { body: String, instance: usize },
@@ -1114,6 +1117,15 @@ impl crate::ModelBody {
             Made::Unknown => None,
         };
         Traced { body: self.body.clone(), lineage, recipe: None }
+    }
+
+    /// The body that actually trimmed a tool re-created from its source step. The saved
+    /// predecessor is an input here, regardless of how the preceding step made it.
+    pub(crate) fn historical_operand(&self) -> Traced {
+        let mut body = self.clone();
+        body.made = Made::Before;
+        let lineage = Lineage::of(&self.body, Operand::Historical(Box::new(body)));
+        Traced { body: self.body.clone(), lineage: Some(lineage), recipe: None }
     }
 
     /// This body, as it was before the feature, as an operand named by `operand` (a moved copy of
