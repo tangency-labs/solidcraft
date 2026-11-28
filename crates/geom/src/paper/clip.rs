@@ -257,7 +257,7 @@ pub fn clipped(group: &Group, clip: &Clip) -> Result<Group> {
 fn inside(clip: &Clip, region: &Region2) -> Result<bool> {
     const CROSSING: Invalid = Invalid("not supported yet: a fill crossing a clip's edge (#4890 A8)");
     let mut all = None;
-    for seg in std::iter::once(&region.outer).chain(&region.holes).flat_map(|l| &l.segs) {
+    for seg in region.loops().flat_map(|l| &l.segs) {
         let mut bounds = vec![0.0];
         bounds.extend(clip.cuts(seg)?);
         bounds.push(1.0);

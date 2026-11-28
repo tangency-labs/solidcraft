@@ -292,7 +292,7 @@ pub trait Region2ArcFit {
 
 impl Region2ArcFit for Region2 {
     fn is_line_arc(&self) -> bool {
-        self.outer.is_line_arc() && self.holes.iter().all(Loop2::is_line_arc)
+        self.loops().all(Loop2::is_line_arc)
     }
 }
 
