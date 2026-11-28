@@ -38,7 +38,7 @@ enum Value {
 /// the reference gives no form, which cannot be skipped because its length is unknown.
 fn value_of(code: i32) -> Option<Value> {
     Some(match code {
-        0..=9 | 100 | 102 | 105 | 300..=309 | 320..=369 | 390..=399 | 410..=419 | 430..=439 | 470..=481 | 999 => Value::Text,
+        0..=9 | 100..=102 | 105 | 300..=309 | 320..=369 | 390..=399 | 410..=419 | 430..=439 | 470..=481 | 999 => Value::Text,
         1004 | 310..=319 => Value::Chunk,
         1000..=1009 => Value::Text,
         10..=59 | 110..=149 | 210..=239 | 460..=469 | 1010..=1059 => Value::Double,
@@ -306,6 +306,9 @@ pub(crate) mod tests {
         // A code above 254 in a release 12 file is escaped with 255.
         let r12 = BinaryDxf::new(false).s(0, "SECTION").s(1001, "APP").s(0, "EOF").bytes;
         assert_eq!(binary_to_text(&r12).unwrap(), "0\nSECTION\n1001\nAPP\n0\nEOF\n");
+        // Group 101 marks an embedded object (MTEXT, from AutoCAD 2018): a string.
+        let embedded = BinaryDxf::new(true).s(0, "SECTION").s(101, "Embedded Object").s(0, "EOF").bytes;
+        assert_eq!(binary_to_text(&embedded).unwrap(), "0\nSECTION\n101\nEmbedded Object\n0\nEOF\n");
     }
 
     #[test]
