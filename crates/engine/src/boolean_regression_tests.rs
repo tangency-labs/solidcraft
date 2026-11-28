@@ -1308,6 +1308,33 @@ fn combine_of_a_piece_a_cut_used_to_split_off_takes_the_body_it_is_part_of() {
     }
 }
 
+/// A circular pattern of cylinder `T` (radius 0.5, beside cylinder `M`) of six makes copies `T (2)`
+/// … `T (6)`. Combine joins copies that are there. A number the pattern never made is refused as
+/// an unknown body, also when the seed `T` is listed beside it: that name is not dropped.
+#[test]
+fn combine_refuses_a_missing_numbered_copy() {
+    let setup = || {
+        let mut s = Session::default();
+        s.execute("solid.cylinder", &json!({"radius": 0.5, "height": 1, "base": [0, 0, 0], "body_name": "M"})).unwrap();
+        s.execute("solid.cylinder", &json!({"radius": 0.5, "height": 1, "base": [0.4, 0, 0], "operation": "new", "body_name": "T"})).unwrap();
+        s.execute("solid.pattern.circular", &json!({"bodies": ["T"], "axis": "Z", "count": 6})).unwrap();
+        s
+    };
+    let join = |s: &mut Session, tools: Value| s.execute("solid.combine", &json!({"target": "M", "tools": tools, "operation": "join"}));
+    let unknown = |err: &crate::Result<Value>, name: &str| err.as_ref().is_err_and(|e| e.to_string().contains(&format!("unknown body `{name}`")));
+
+    join(&mut setup(), json!(["T (2)", "T (6)"])).unwrap();
+
+    let past_the_end = join(&mut setup(), json!(["T (2)", "T (7)"]));
+    assert!(unknown(&past_the_end, "T (7)"), "{past_the_end:?}");
+
+    let alone = join(&mut setup(), json!(["T (9)"]));
+    assert!(unknown(&alone, "T (9)"), "{alone:?}");
+
+    let with_seed = join(&mut setup(), json!(["T", "T (9)"]));
+    assert!(unknown(&with_seed, "T (9)"), "{with_seed:?}");
+}
+
 /// A triangular prism and a thin slab sharing their bottom plane, the prism's edge in that plane
 /// lying in the slab's end face, the slab's corners rounded nearly to half its width (so its flat
 /// end is narrower than the prism).
