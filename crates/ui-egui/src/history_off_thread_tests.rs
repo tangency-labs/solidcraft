@@ -2639,3 +2639,39 @@ fn drawing_snapshot_scene_and_export_answer_on_a_copy_without_blocking_control()
     assert_eq!(untimed_stats(r["result"].clone()), export_here);
     assert!(h.app.control_answering.is_empty());
 }
+
+#[test]
+fn design_notifications_coalesce_changes_during_a_running_listener() {
+    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let ctx = egui::Context::default();
+    crate::plugin_events::observe(&mut app);
+    app.now = 0.11;
+    let (send, done) = std::sync::mpsc::channel();
+    let mut reply = None;
+    crate::plugin_events::tick_with_spawner_for_test(&mut app, &ctx, |scratch, _| {
+        assert_eq!(scratch.plugin_state.listener_open_plugins, Some(Default::default()));
+        reply = Some(scratch.plugin_state);
+        Some(done)
+    });
+    for index in 0..3 {
+        app.now = 0.12 + f64::from(index) * 0.01;
+        app.run("document.metadata.set", json!({"key":"description","value":format!("Change {index}")})).unwrap();
+    }
+    app.now = 0.3;
+    crate::plugin_events::tick_with_spawner_for_test(&mut app, &ctx, |_, _| {
+        panic!("an active listener must not spawn another call");
+    });
+    send.send(reply.unwrap()).unwrap();
+    let latest = app.session.design_token();
+    let (send, done) = std::sync::mpsc::channel();
+    crate::plugin_events::tick_with_spawner_for_test(&mut app, &ctx, |scratch, token| {
+        assert_eq!(token, Some(latest));
+        send.send(scratch.plugin_state).unwrap();
+        Some(done)
+    });
+    crate::plugin_events::drain(&mut app).unwrap();
+    app.now = 1.0;
+    crate::plugin_events::tick_with_spawner_for_test(&mut app, &ctx, |_, _| {
+        panic!("the coalesced follow-up must drain the entire burst");
+    });
+}

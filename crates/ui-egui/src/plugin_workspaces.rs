@@ -69,6 +69,10 @@ impl State {
     }
 }
 
+pub(crate) fn active_plugin(app: &SolveApp) -> Option<&str> {
+    app.plugin_workspaces.active.as_ref().map(|workspace| workspace.plugin.id.as_str())
+}
+
 pub(crate) fn active_id(app: &SolveApp) -> Option<&str> {
     app.plugin_workspaces.active.as_ref().map(|workspace| workspace.id.as_str())
 }

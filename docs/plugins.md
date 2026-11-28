@@ -140,11 +140,16 @@ that triggered the notification. Each invocation uses a fresh guest instance.
 Handler results use the existing 1 MiB JSON reply limit; retained panel data is
 limited to 16 MiB in total. Exceeding either limit reports a typed limit error.
 
-A handler cannot refresh its plugin's docked panel yet. It runs on a scratch copy of the
-session, so a `ui.set-data` call it makes does not reach the open panel; only the handler's JSON
-reply is kept (up to the limits above), and no panel reads it. Until the panel contract lands
-(#19516, phase 3 of RFC 0015), give the panel a Refresh button whose entry reads the design and
-calls `ui.set-data`, as the entries a panel runs do (see Docked panels below).
+A listener can refresh its own plugin's docked panel with `ui.set-data`. The host
+adopts successful panel updates from the handler's scratch session and merges them
+into the open panel once per frame. The handler cannot update another plugin's
+panel, edit the design, write files, or change panel visibility. Listeners run only
+while their plugin's panel or workspace is open. Closing both stops delivery.
+
+If changes finish during a handler call, the host folds them into one more call
+for the latest design; it never queues one call per edit. A failed handler leaves
+the triggering edit successful and shows its error in its own panel. Retained panel
+data stays within the 16 MiB total limit above.
 
 ## Classifying points and reading surface normals
 
