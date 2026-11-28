@@ -661,7 +661,7 @@ fn operation_length_defaults_follow_every_design_unit() {
         ("surface.thicken", &["2"]),
         ("surface.extend", &["10"]),
         ("surface.stitch", &[""]),
-        ("sheet.flange", &["10", "", "20", ""]),
+        ("sheet.flange", &["10", "", "20", "", ""]),
         ("sheet.hem", &["5", ""]),
         ("sheet.fold", &[""]),
         ("plastic.boss", &["6", "10", "3", "", "", "1", "3", "1"]),

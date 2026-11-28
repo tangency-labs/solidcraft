@@ -832,9 +832,9 @@ keyword_param!(
     /// `solid.fillet`'s `fit`.
     FilletFitParam,
     "fit",
-    &["exact", "reduce", "taper"],
-    "exact, reduce or taper",
-    "What a radius too large for the geometry around the edges does: exact (the default) refuses it naming the largest that fits, reduce reduces it where it doesn't fit, taper follows the room along straight edges between planar faces. reduce and taper take type: constant. Matching ignores case."
+    &["exact", "reduce", "taper", "keep_edge"],
+    "exact, reduce, taper or keep_edge",
+    "What a radius too large for the geometry around the edges does: exact (the default) refuses it naming the largest that fits, reduce reduces it where it doesn't fit, taper follows the room along straight edges between planar faces, keep_edge rounds a concave edge whose wall is lower than the radius with a round tangent to the floor only that ends on the wall's top edge (the top face and its edge stay as they are; the wall must be flat with a straight top edge parallel to the edge, its ends square to the edge or upright faces bounding the floor; other edges are rounded as usual). reduce, taper and keep_edge take type: constant. Matching ignores case."
 );
 keyword_param!(
     /// `solid.fillet`'s `corner`.

@@ -1132,7 +1132,7 @@ impl SurfaceSheet {
         from: HeightFrom,
         flip: bool,
     ) -> Result<(usize, Vec<SquareSides>)> {
-        let (made, square) = self.flanges_on(edge, &[(WHOLE_EDGE.0, WHOLE_EDGE.1, height, angle, flip)], radius, position, from)?;
+        let (made, square) = self.flanges_on(edge, &[(WHOLE_EDGE.0, WHOLE_EDGE.1, height, angle, flip)], radius, position, 0.0, from)?;
         let joint = made.first().copied().ok_or_else(|| DocError::Invalid("the flange has no bend".into()))?;
         Ok((joint, square))
     }
@@ -1154,17 +1154,24 @@ impl SurfaceSheet {
     /// corner is closed and no bend relief is cut there. Their corners elsewhere are not closed
     /// yet (see [`SurfaceSheet::close_flange_corners`]). The new bends' joints, in the order of
     /// `runs`, and the flanges among them laid on with square sides for now, which
-    /// [`SurfaceSheet::slant_open_sides`] settles once the corners are closed.
+    /// [`SurfaceSheet::slant_open_sides`] settles once the corners are closed. `offset` moves every
+    /// bend that far out past where `position` starts it (in where negative), the panel growing,
+    /// or shrinking, by the strip between.
+    #[allow(clippy::too_many_arguments)]
     pub fn flanges_on(
         &mut self,
         edge: FreeEdge,
         runs: &[(f64, f64, f64, f64, bool)],
         radius: f64,
         position: &str,
+        offset: f64,
         from: HeightFrom,
     ) -> Result<(Vec<usize>, Vec<SquareSides>)> {
         if runs.iter().any(|&(_, _, _, angle, _)| !(angle > 1e-6 && angle <= std::f64::consts::PI - 1e-6)) {
             return err("the flange angle must be between 0 and 180°");
+        }
+        if !offset.is_finite() {
+            return err("the flange offset must be a finite length");
         }
         if radius == 0.0 {
             return err(crate::sheet::KNIFE_EDGE);
@@ -1207,7 +1214,7 @@ impl SurfaceSheet {
                 "tangent" if angle < std::f64::consts::FRAC_PI_2 => (radius + t) * angle.sin(),
                 "tangent" => radius + t,
                 other => return err(format!("unknown bend position `{other}` (inside, outside, middle, material_outside or tangent)")),
-            };
+            } - offset;
             // On the side of the face picked: toward the material from the face a thickness in.
             let toward = edge.far_face != flip;
             // The panels' surface is the bend's outside where it turns toward the material: the
@@ -5491,7 +5498,7 @@ mod tests {
         let (mut partial, _) = crate::SurfaceSheet::base("Body1", "R1", &rule, solidcore_record::Plane::XY, plate.clone(), &[], 1).unwrap();
         let e1 = partial.free_edge_at(Vec3::new(50.0, 0.0, 2.0)).unwrap().unwrap();
         let (js, sqs) =
-            partial.flanges_on(e1, &[(0.0, 0.85, 60.0, std::f64::consts::FRAC_PI_2, false)], 2.0, "inside", super::HeightFrom::Outer).unwrap();
+            partial.flanges_on(e1, &[(0.0, 0.85, 60.0, std::f64::consts::FRAC_PI_2, false)], 2.0, "inside", 0.0, super::HeightFrom::Outer).unwrap();
         partial.close_flange_corners(&js).unwrap();
         partial.slant_open_sides(&sqs).unwrap();
         partial.clear_of_neighbours(&js).unwrap();
@@ -5551,6 +5558,7 @@ mod tests {
                     &[(0.0, 0.98, 45.0, std::f64::consts::FRAC_PI_2, true), (0.98, 1.0, 45.0, std::f64::consts::FRAC_PI_2, true)],
                     2.0,
                     "inside",
+                    0.0,
                     super::HeightFrom::Outer,
                 )
                 .is_err()

@@ -19,7 +19,7 @@ pub(super) static SPEC: Spec = Spec {
     click: None,
     footprint,
     freedom: super::anywhere,
-    turn: Some(Turn { tip: "Drag to point the catch in another direction.", reach, angle, set }),
+    turn: Some(Turn { tip: "Drag to point the catch in another direction.", reach, angle, set, readout: None }),
 };
 
 /// The catch's direction across the face, as the combo shows it.

@@ -373,7 +373,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Dome { .. } => "dome",
         FeatureKind::Draft { .. } => "draft",
         FeatureKind::Split { .. } => "split",
-        FeatureKind::Move { .. } => "move",
+        FeatureKind::Move { .. } | FeatureKind::TransformFace { .. } => "move",
         FeatureKind::CapturePosition { .. } => "capture",
         FeatureKind::Import { .. } | FeatureKind::MeshImport { .. } | FeatureKind::MeshConvert { .. } => "import",
         FeatureKind::MeshReduce { .. } => "mesh_reduce",

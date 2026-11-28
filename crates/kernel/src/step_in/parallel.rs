@@ -494,11 +494,15 @@ pub(super) struct Queue {
     pending: std::collections::HashMap<u64, std::sync::mpsc::Receiver<Prepared>>,
     submitted: std::collections::HashSet<u64>,
     next: usize,
+    /// For the distinct-solid fixture: peak jobs submitted but not yet published as bodies.
+    #[cfg(test)]
+    pub(super) peak_ahead: usize,
 }
 
 impl Queue {
     pub fn fill(&mut self, reader: &super::Reader) {
-        while self.pending.len() < 2 * super::MAX_WINDOW {
+        // Leave a slot for the instance being published, including a copy prepared by the reader.
+        while self.pending.len() < 2 * super::MAX_WINDOW - 1 {
             let Some(p) = reader.plan.get(self.next) else { break };
             self.next += 1;
             if !self.submitted.insert(p.item) || reader.oriented.contains_key(&p.item) || reader.unreadable.contains_key(&p.item) {
@@ -511,6 +515,10 @@ impl Queue {
                 break;
             }
             self.pending.insert(p.item, receive);
+        }
+        #[cfg(test)]
+        {
+            self.peak_ahead = self.peak_ahead.max(self.submitted.len().saturating_sub(reader.bodies.len()));
         }
     }
 
@@ -567,7 +575,14 @@ pub(super) fn with_queue(ex: &Exchange, count: usize, first: usize, read: impl F
         if started == 0 {
             read(None);
         } else {
-            let mut queue = Queue { send, pending: Default::default(), submitted: Default::default(), next: first };
+            let mut queue = Queue {
+                send,
+                pending: Default::default(),
+                submitted: Default::default(),
+                next: first,
+                #[cfg(test)]
+                peak_ahead: 0,
+            };
             read(Some(&mut queue));
             stop.stop();
         }
