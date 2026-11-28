@@ -8,11 +8,12 @@
 
 use std::path::Path;
 
-use crate::app_bar::{TabAction, TabMenuRow};
+use crate::app_bar::TabAction;
+use crate::ui_kit::Item;
 use crate::{SolveApp, documents, new_window, ui_kit};
 use solidcraft_views::ViewKind;
 
-/// Menu row ids of a view's right-click menu ([`VIEW_MENU`]).
+/// Menu row ids of a view's right-click menu ([`view_menu_definition`]).
 pub const VIEW_RENAME: &str = "view.rename";
 pub const VIEW_DUPLICATE: &str = "view.duplicate";
 pub const VIEW_BESIDE: &str = "view.beside";
@@ -37,43 +38,70 @@ pub const SWITCHER_OPEN: &str = "switcher.open";
 pub const SWITCHER_REOPEN: &str = "switcher.reopen";
 pub const SWITCHER_AS_TABS: &str = "switcher.as_tabs";
 
-pub const MOVE_TO_WINDOW_MENU: TabMenuRow<'static> = TabMenuRow::new(VIEW_MOVE_TO_WINDOW, "multi_window.move_to_window", "")
-    .with_icon(solidcraft_ui_kit::icons::window_icon(false), None)
-    .for_local_view()
-    .with_children(&[TabMenuRow::new(VIEW_NEW_WINDOW, "multi_window.new_window", "").with_icon(solidcraft_ui_kit::icons::window_icon(false), None)]);
+/// Shared menu definition for moving a view; window choices are filled by the caller.
+pub(crate) fn move_to_window_menu() -> Item {
+    let mut item = tab_menu_rules(
+        tab_menu_item(VIEW_MOVE_TO_WINDOW, "multi_window.move_to_window", "", solidcraft_ui_kit::icons::window_icon(false)),
+        &["needs_local_view"],
+    );
+    item.children = vec![tab_menu_item(VIEW_NEW_WINDOW, "multi_window.new_window", "", solidcraft_ui_kit::icons::window_icon(false))];
+    item
+}
 
-/// A view's right-click menu in three groups set apart by lines: rename, copy and move; close
-/// views; close the design.
-pub const VIEW_MENU: &[TabMenuRow<'static>] = &[
-    TabMenuRow::new(VIEW_RENAME, "Rename view", "F2").with_icon("rename", None).for_local_view(),
-    TabMenuRow::new(VIEW_DUPLICATE, "Duplicate view", "").with_icon("duplicate", None).for_local_view(),
-    TabMenuRow::new("view.compass", "view_compass.visibility", "").separated().for_local_view(),
-    TabMenuRow::new(VIEW_BESIDE, "Show beside", "").with_icon("tiles", None).for_local_view(),
-    TabMenuRow::new("view.place", "design_view.place", "").with_icon("tiles", None).needing_others().for_local_view(),
-    MOVE_TO_WINDOW_MENU,
-    TabMenuRow::new(VIEW_RETURN, "view_menu.return", "").with_icon(solidcraft_ui_kit::icons::window_icon(true), None).needing_remote_view(),
-    TabMenuRow::new(VIEW_CLOSE, "Close view", "Ctrl+W").with_icon("close", None).separated(),
-    TabMenuRow::new(VIEW_CLOSE_OTHERS, "Close other views", "").needing_others().for_local_view(),
-    TabMenuRow::new(VIEW_CLOSE_RIGHT, "Close views to the right", "").needing_others().for_local_view(),
-    TabMenuRow::new(DESIGN_CLOSE, "Close design", "Ctrl+Shift+W").with_icon("close", None).separated(),
-];
+pub(crate) fn tab_menu_item(id: &str, label: &str, key: &str, icon: &str) -> Item {
+    Item::action(id, label, icon).key(key)
+}
+
+pub(crate) fn tab_menu_rules(mut item: Item, rules: &[&str]) -> Item {
+    let mut flags = serde_json::Map::new();
+    for rule in rules {
+        flags.insert((*rule).to_string(), serde_json::Value::Bool(true));
+    }
+    item.params = Some(serde_json::json!({"_tab_menu":flags}));
+    item
+}
+
+/// A view's right-click actions, grouped with ordinary separator nodes.
+pub(crate) fn view_menu_definition() -> Vec<Item> {
+    let local = |item| tab_menu_rules(item, &["needs_local_view"]);
+    let other_local = |item| tab_menu_rules(item, &["needs_local_view", "needs_others"]);
+    vec![
+        local(tab_menu_item(VIEW_RENAME, "Rename view", "F2", "rename")),
+        local(tab_menu_item(VIEW_DUPLICATE, "Duplicate view", "", "duplicate")),
+        Item::sep(),
+        local(tab_menu_item("view.compass", "view_compass.visibility", "", "")),
+        local(tab_menu_item(VIEW_BESIDE, "Show beside", "", "tiles")),
+        other_local(tab_menu_item("view.place", "design_view.place", "", "tiles")),
+        move_to_window_menu(),
+        tab_menu_rules(tab_menu_item(VIEW_RETURN, "view_menu.return", "", solidcraft_ui_kit::icons::window_icon(true)), &["needs_remote_view"]),
+        Item::sep(),
+        tab_menu_item(VIEW_CLOSE, "Close view", "Ctrl+W", "close"),
+        other_local(tab_menu_item(VIEW_CLOSE_OTHERS, "Close other views", "", "")),
+        other_local(tab_menu_item(VIEW_CLOSE_RIGHT, "Close views to the right", "", "")),
+        Item::sep(),
+        tab_menu_item(DESIGN_CLOSE, "Close design", "Ctrl+Shift+W", "close"),
+    ]
+}
 
 pub(crate) fn window_menu_entries(app: &SolveApp) -> Vec<(String, String)> {
     crate::view_windows::window_choices(app).iter().map(|choice| (format!("{WINDOW_PREFIX}{}", choice.id), choice.label.clone())).collect()
 }
 
-pub(crate) fn window_menu_rows<'a>(app: &SolveApp, entries: &'a [(String, String)]) -> Vec<TabMenuRow<'a>> {
+pub(crate) fn window_menu_rows(app: &SolveApp, entries: &[(String, String)]) -> Vec<Item> {
     let current = app.view_windows.current_window();
-    let mut new = MOVE_TO_WINDOW_MENU.children[0];
+    let mut new = tab_menu_item(VIEW_NEW_WINDOW, "multi_window.new_window", "", solidcraft_ui_kit::icons::window_icon(false));
     if !crate::view_windows::can_create(app) {
-        new.disabled_tip = Some(app.tr("multi_window.too_many"));
+        new.enabled = false;
+        new.tip = Some(app.tr("multi_window.too_many").to_string());
     }
-    [new, TabMenuRow::heading(app.tr("multi_window.open_windows")).separated()]
+    [new, Item::sep(), Item::heading(app.tr("multi_window.open_windows"))]
         .into_iter()
         .chain(entries.iter().map(|(id, label)| {
             let here = window_menu_target(id) == Some(current);
             let label = if here { app.tr("view_layout.this_window") } else { label };
-            TabMenuRow { checked: here, ..TabMenuRow::new(id, label, "").with_icon(solidcraft_ui_kit::icons::window_icon(here), None) }
+            let mut item = tab_menu_item(id, label, "", solidcraft_ui_kit::icons::window_icon(here));
+            item.checked = Some(here);
+            item
         }))
         .collect()
 }
@@ -82,45 +110,60 @@ pub(crate) fn window_menu_target(id: &str) -> Option<u32> {
     id.strip_prefix(WINDOW_PREFIX)?.parse().ok()
 }
 
-pub(crate) fn view_menu_rows<'a>(app: &SolveApp, window_rows: &'a [TabMenuRow<'a>]) -> Vec<TabMenuRow<'a>> {
+pub(crate) fn view_menu_rows(app: &SolveApp, window_rows: &[Item]) -> Vec<Item> {
     let pop_out = app.view_windows.is_child();
     let can_move = crate::view_windows::supports_pop_out(app);
-    VIEW_MENU
-        .iter()
-        .copied()
+    view_menu_definition()
+        .into_iter()
         .filter(|row| (row.id != VIEW_MOVE_TO_WINDOW || can_move) && (row.id != DESIGN_CLOSE || !pop_out))
-        .map(|row| if row.id == VIEW_MOVE_TO_WINDOW { row.with_children(window_rows) } else { row })
+        .map(|mut row| {
+            if row.id == VIEW_MOVE_TO_WINDOW {
+                row.children = window_rows.to_vec();
+            }
+            row
+        })
         .collect()
 }
 
-/// The "+" menu: a header, one row per view kind with its icon in the kind's accent (`dark` picks
-/// the accent for the menu's ground), then copy the shown view and bring back the last closed one.
-pub fn plus_menu<'a>(dark: bool) -> Vec<TabMenuRow<'a>> {
-    let kind = |id, label: &'static str, icon| TabMenuRow::new(id, label, "").with_icon(icon, Some(crate::workspace::view_icon_colour(label, dark)));
+/// The plus menu retains the original view glyphs and their theme-derived colours.
+pub fn plus_menu(dark: bool) -> Vec<Item> {
+    let kind = |id, label: &'static str, icon: &'static str| {
+        let mut item = tab_menu_item(id, label, "", icon);
+        let ink = crate::workspace::view_icon_colour(label, dark);
+        item.icon = ui_kit::ItemIcon::paint_named(icon, move |p, r, opacity| {
+            let mut p = p.clone();
+            p.multiply_opacity(opacity);
+            crate::app_bar::paint_view_glyph(&p, r, icon, ink);
+        });
+        item
+    };
     vec![
-        TabMenuRow::heading("Open as a view"),
+        Item::heading("Open as a view"),
         kind("plus.model", "Model", "model"),
         kind("plus.sheet", "Sheet", "sheet"),
         kind("plus.render", "Render", "render"),
         kind("plus.animation", "Animation", "animation"),
-        TabMenuRow::new(PLUS_BESIDE, "Another angle of this view", "").with_icon("tiles", None).separated(),
-        TabMenuRow::new(PLUS_DUPLICATE, "Duplicate this view", "").with_icon("duplicate", None),
-        TabMenuRow::new(PLUS_REOPEN, "Reopen closed view", "Ctrl+Shift+T").with_icon("reopen", None),
+        Item::sep(),
+        tab_menu_item(PLUS_BESIDE, "Another angle of this view", "", "tiles"),
+        tab_menu_item(PLUS_DUPLICATE, "Duplicate this view", "", "duplicate"),
+        tab_menu_item(PLUS_REOPEN, "Reopen closed view", "Ctrl+Shift+T", "reopen"),
     ]
 }
 
-/// The Layout button's menu: one row for each way to arrange the views in the window.
-pub fn layout_menu() -> Vec<TabMenuRow<'static>> {
-    vec![
-        TabMenuRow::new("layout.single", "Single view", ""),
-        TabMenuRow::new("layout.side_by_side", "Two side by side", ""),
-        TabMenuRow::new("layout.stacked", "Two stacked", ""),
-        TabMenuRow::new("layout.large_and_two", "One large and two small", ""),
-        TabMenuRow::new("layout.grid", "Two by two", ""),
-        TabMenuRow::new("fill.angle", "A new angle of this view", ""),
-        TabMenuRow::new("fill.standard", "Standard angles: front, right, top", ""),
-        TabMenuRow::new("fill.picker", "Empty cells that ask", ""),
+pub fn layout_menu() -> Vec<Item> {
+    [
+        ("layout.single", "Single view"),
+        ("layout.side_by_side", "Two side by side"),
+        ("layout.stacked", "Two stacked"),
+        ("layout.large_and_two", "One large and two small"),
+        ("layout.grid", "Two by two"),
+        ("fill.angle", "A new angle of this view"),
+        ("fill.standard", "Standard angles: front, right, top"),
+        ("fill.picker", "Empty cells that ask"),
     ]
+    .into_iter()
+    .map(|(id, label)| tab_menu_item(id, label, "", ""))
+    .collect()
 }
 
 /// The id of the shown design's view at place `index`.
@@ -511,21 +554,23 @@ mod tests {
     fn menu_ids_are_unique_and_plus_rows_name_every_kind() {
         let plus = plus_menu(false);
         let layouts = layout_menu();
-        let ids: Vec<&str> = VIEW_MENU.iter().chain(plus.iter()).chain(layouts.iter()).map(|r| r.id).collect();
+        let view = view_menu_definition();
+        let ids: Vec<&str> = view.iter().chain(plus.iter()).chain(layouts.iter()).filter(|r| !r.is_sep()).map(|r| r.id.as_str()).collect();
         let mut sorted = ids.clone();
         sorted.sort_unstable();
         sorted.dedup();
         assert_eq!(sorted.len(), ids.len());
         for kind in ViewKind::ALL {
-            assert!(plus.iter().any(|r| r.id.strip_prefix("plus.") == Some(kind.key()) && r.icon == kind.key() && r.accent.is_some()));
+            assert!(plus.iter().any(|r| r.id.strip_prefix("plus.") == Some(kind.key()) && r.icon == kind.key()));
         }
-        assert!(plus[0].heading, "the menu opens with a header");
-        assert!(plus.iter().filter(|r| r.heading).count() == 1, "and has no other");
+        assert!(plus[0].is_heading(), "the menu opens with a header");
+        assert!(plus.iter().filter(|r| r.is_heading()).count() == 1, "and has no other");
     }
 
     #[test]
     fn view_menu_groups_are_set_apart_by_lines() {
-        let starts: Vec<&str> = VIEW_MENU.iter().filter(|r| r.separator_before).map(|r| r.id).collect();
+        let view = view_menu_definition();
+        let starts: Vec<&str> = view.windows(2).filter(|pair| pair[0].is_sep()).map(|pair| pair[1].id.as_str()).collect();
         assert_eq!(starts, ["view.compass", VIEW_CLOSE, DESIGN_CLOSE]);
     }
 

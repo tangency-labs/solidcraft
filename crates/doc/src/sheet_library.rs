@@ -25,7 +25,7 @@ use std::sync::OnceLock;
 use serde_json::{Map, Value, json};
 
 use crate::expr;
-use crate::sheet::{AngleDisplay, ReliefShape, SheetRule};
+use crate::sheet::{AngleDisplay, ReliefShape, SheetRule, UnfoldMethod};
 
 /// The `format` a JSON pack names.
 pub const FORMAT: &str = "solidcraft-sheet-rules";
@@ -170,8 +170,22 @@ pub struct Given {
 
 impl PackRule {
     /// A design's or a person's rule as a pack row: every value is its own, K-factor and radius too.
-    pub fn of(rule: SheetRule) -> PackRule {
-        PackRule {
+    ///
+    /// A pack row unfolds from a K-factor: it has no column for a 90° bend deduction or allowance.
+    /// A rule that unfolds from one (#6794) goes in with the K-factor that value works out to, so
+    /// the pack gives the same flat pattern as the rule. `None` when that K-factor cannot be worked
+    /// out here: the rule's thickness, radius or 90° value reads a design's parameters (`BD90`), or
+    /// the value is out of range. The rule's stored K-factor is not what it unfolds by, so it is
+    /// never written in its place.
+    pub fn of(mut rule: SheetRule) -> Option<PackRule> {
+        if UnfoldMethod::parse(&rule.unfold_method) != Some(UnfoldMethod::KFactor) {
+            let no_parameters = std::collections::BTreeMap::new();
+            let values = crate::Document::default().rule_values(&no_parameters, &rule).ok()?;
+            rule.k_factor = values.k_factor.to_string();
+            rule.unfold_method = UnfoldMethod::KFactor.name().into();
+        }
+        rule.unfold_value.clear();
+        Some(PackRule {
             rule,
             gauge: String::new(),
             chart: String::new(),
@@ -179,7 +193,7 @@ impl PackRule {
             min_bend_radius: String::new(),
             given: Given { k_factor: true, bend_radius: true },
             sources: Vec::new(),
-        }
+        })
     }
 
     /// The minimum inside radius for a sheet `thickness` mm thick, when one is published.
@@ -452,7 +466,9 @@ fn pack_rule(row: usize, fields: &[(&str, String)], skipped: &mut Skipped) -> Re
     };
     let given = Given { k_factor: get("k_factor").is_some(), bend_radius: get("bend_radius").is_some() };
     let mut min_bend_radius = String::new();
-    let fields_and_min = rule.fields_mut().into_iter().chain(std::iter::once(("min_bend_radius", &mut min_bend_radius)));
+    // A pack has no 90° bend deduction or allowance (`unfold_value`): a row gives a K-factor.
+    let pack_fields = rule.fields_mut().into_iter().filter(|(key, _)| *key != "unfold_value");
+    let fields_and_min = pack_fields.chain(std::iter::once(("min_bend_radius", &mut min_bend_radius)));
     for (key, slot) in fields_and_min {
         let Some(text) = get(key) else { continue };
         if !plain_text(text, MAX_EXPRESSION) {
@@ -577,7 +593,8 @@ fn rule_json(r: &PackRule) -> Value {
     }
     for (key, text, _) in rule.fields() {
         // A K-factor or radius the row didn't give stays out: it is the bend model's or the tooling's.
-        if (key == "k_factor" && !r.given.k_factor) || (key == "bend_radius" && !r.given.bend_radius) {
+        // A pack has no 90° bend deduction or allowance either (see [`PackRule::of`]).
+        if (key == "k_factor" && !r.given.k_factor) || (key == "bend_radius" && !r.given.bend_radius) || key == "unfold_value" {
             continue;
         }
         row.insert(key.into(), json!(text));

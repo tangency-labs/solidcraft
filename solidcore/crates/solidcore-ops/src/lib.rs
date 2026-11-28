@@ -60,23 +60,29 @@ pub mod curve_knots;
 pub mod curve_plane;
 pub mod cylinder_wall;
 pub mod develop;
+pub mod dogbone;
 pub mod dome;
 pub mod dxf;
 pub mod error;
 pub mod extend;
+pub mod extended_levels;
 pub mod face_pair;
 pub mod face_surface;
 pub mod faceted;
 pub mod facing_trough;
 pub mod file;
+pub mod finger_joint;
 pub mod fit_projection;
+pub mod footprint;
 pub mod frame_gusset;
 pub mod frame_member;
 pub mod frame_trim;
 pub mod fuel;
+pub mod gap_wedge;
 pub mod heal;
 pub mod history;
 pub mod hlr;
+pub mod hole_spacing;
 pub mod hole_stacks;
 pub mod joint_turn;
 pub mod label;
@@ -84,6 +90,7 @@ pub mod measure;
 pub mod mesh;
 pub mod mid_joint;
 pub mod mid_sheet;
+pub mod morph;
 pub mod network;
 pub mod offset;
 pub mod order;
@@ -99,6 +106,8 @@ pub mod provenance;
 pub mod query;
 pub mod record_check;
 pub mod round_face;
+pub mod ruled_strip;
+pub mod scan_align;
 pub mod section_corners;
 pub mod session;
 pub mod shaft_spline;
@@ -108,8 +117,10 @@ pub mod split;
 pub mod step_assembly;
 pub mod stitch;
 pub mod stop;
+pub mod stroke_runs;
 pub mod surface;
 pub mod surface_cvs;
+pub mod surface_intersection;
 pub mod sweep;
 pub mod tangent;
 pub mod trim;
@@ -133,6 +144,7 @@ pub use blend::edge_faces_along;
 pub use blend::edge_faces_along_ordered;
 pub use blend::edges_share_wedge;
 pub use blend::fillet_variable;
+pub use blend::fillet_variable_chain_from;
 pub use blend::fillet_variable_from;
 pub use blend::fillet_variable_from_with;
 pub use blend::fillet_variable_ordered;
@@ -225,7 +237,7 @@ pub fn reduce_mesh(
     corner_normals: Option<&[[f64; 3]]>,
     target_triangles: usize,
 ) -> Result<ReducedMesh> {
-    solidcore::mesh_reduce::reduce_mesh_with_cancel(
+    solidcore::mesh_reduce::reduce_mesh_normalized_outward_with_cancel(
         positions,
         indices,
         corner_normals,

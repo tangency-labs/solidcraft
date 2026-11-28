@@ -4,8 +4,7 @@
 //! tokens every example draws with. Desktop (`cargo run -p ui-kit-gallery`) and browser
 //! (docs.solidcraft.io/kit/).
 //!
-//! The gallery is SolidCraft's own reference for contributors, under the SolidCraft Brand and
-//! Interface Licence like the kit it shows; it is not a library for other programs.
+//! The gallery is SolidCraft's own reference for contributors; it is not a library for other programs.
 
 mod pages;
 mod theme_panel;
@@ -20,7 +19,7 @@ pub use theme_panel::ThemeEditor;
 /// The kit's English messages, for the components that read their text through
 /// `solidcraft_ui_text` (button names, empty states, tooltips).
 static ENGLISH: solidcraft_ui_text::Catalog =
-    solidcraft_ui_text::Catalog::new("en", "English", include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/locales/en.json")));
+    solidcraft_ui_text::Catalog::new("en", "English", include_str!(concat!(env!("OUT_DIR"), "/gallery-en.json")));
 
 /// Install what the kit draws with, once per process before the first frame: SolidCraft's look
 /// (icon set, glyphs, built-in themes) and the English messages.

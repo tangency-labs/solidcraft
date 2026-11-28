@@ -1296,6 +1296,15 @@ pub struct SrfSrfOptions {
     /// the chord `end - start`, which heads along a circle's arc only where it is shorter than
     /// a half turn, and upstream's span is then the right curve, also a longer arc.
     pub closed_by_start_direction: bool,
+    /// Not upstream (solidcore-native, with `closed_by_start_direction`): the heading tells
+    /// only the side the curve leaves its start on (a positive dot product with it), not its
+    /// tangent within the angle tolerance. The two ways round a closed curve leave the start in
+    /// opposite directions, so the side tells them apart, and a curve approximated to the
+    /// intersection's tolerance keeps it where its tangent may stray past that angle. A curve
+    /// cut at a closed surface's seam is joined across it as without a heading (#21416), and
+    /// kept only where the joined curve leaves on that side. For a caller whose heading is
+    /// exact but whose curve may be approximated (an End's cap edge, `calc_end_cap_edges`).
+    pub heading_side_only: bool,
 }
 
 /// One candidate curve of the selection loop.
@@ -1976,7 +1985,11 @@ pub fn srf_srf_intersection_with_context(
         .filter(|_| opts.closed_by_start_direction)
         .map(|dir| Heading {
             dir,
-            cos_tol: angle_tol.cos(),
+            cos_tol: if opts.heading_side_only {
+                0.0
+            } else {
+                angle_tol.cos()
+            },
         });
 
     // surface and surf/surf intersection locals
@@ -2438,7 +2451,9 @@ pub fn srf_srf_intersection_with_context(
     // error: didn't find a curve within tol of endPoints
     if best_dist == NO_CURVE && best_len == NO_CURVE {
         // Not upstream (#21416): one curve the intersectors cut at a closed surface's seam
-        if let (Some(start_pnt), Some(end_pnt), None) = (start, end, wanted_heading) {
+        // (with a heading only by its side, and kept where the joined curve leaves on it)
+        let pairs = wanted_heading.is_none() || opts.heading_side_only;
+        if let (Some(start_pnt), Some(end_pnt), true) = (start, end, pairs) {
             // (a failure of the pairing leaves the search empty, as it was)
             if let Some(across) = ignore_status(candidates_across_seam(
                 k,
@@ -2450,7 +2465,15 @@ pub fn srf_srf_intersection_with_context(
             ))?
             .flatten()
             {
-                return Ok(across);
+                let headed = match (wanted_heading, across.curve_3d.as_ref()) {
+                    (Some(h), Some(c)) => leaves_along(k, c, h)?,
+                    (Some(_), None) => false,
+                    (None, _) => true,
+                };
+                if headed {
+                    return Ok(across);
+                }
+                headed_away = true;
             }
         }
         // Not upstream: a curve through the points that heads away from the wanted heading is
@@ -4081,6 +4104,7 @@ impl FilletBrep {
         let cp_vertex = owner
             .filleted_vertex()
             .ok_or_else(|| missing_set_up(OP, FilletSetUp::CornerVertex))?;
+        let seam_face = owner.seam_short_of_rails;
 
         let geoms = self.vertex_fillet_geoms(v)?;
         if geoms.is_empty() {
@@ -4130,9 +4154,12 @@ impl FilletBrep {
 
             // the ball's feet at the vertex, on each of the blend's faces
             let mut uvs = [Point2::new(0.0, 0.0); 2];
+            // (#21940) the solver's rail on the face whose seam ends inside the band
+            let mut seam_rail = None;
             for (ii, slot) in uvs.iter_mut().enumerate() {
                 let fs = solvers.solver(sid)?;
                 let side_eu = solver_edgeuse(fs, ii, OP)?;
+                let on_seam_face = seam_face.is_some() && eu1::face(target, side_eu)? == seam_face;
                 let offset = solver_surface(fs, ii, OP)?;
                 let distance = offset.offset_distance().abs();
                 let base = offset.base_surface().clone();
@@ -4220,6 +4247,25 @@ impl FilletBrep {
                     dropped.result_uv,
                     b.uv,
                 )?;
+                // Not the fork's (tangency-labs/solidcraft#21940): at a Join whose side seam ends
+                // inside the band (`FilletCorner::seam_short_of_rails`, this foot's face: a
+                // sphere turned so that its seam runs from a closed rim's vertex into the face,
+                // ending at a pole short of the rails), the rails never cross the seam, and the
+                // name nearest the edge use's parameters, on the seam's other side, lies past the
+                // domain's end: the foot's name in the domain is taken (the same point of the
+                // surface, moved by whole periods only). Where the rails do cross the seam at
+                // the vertex, the name on the edge use's side stays, as above.
+                if on_seam_face {
+                    seam_rail = Some(ii);
+                }
+                let foot = if on_seam_face
+                    && !domain.contains_point(foot, 0.0)
+                    && domain.contains_point(dropped.result_uv, 0.0)
+                {
+                    dropped.result_uv
+                } else {
+                    foot
+                };
                 *slot = foot;
             }
 
@@ -4232,6 +4278,14 @@ impl FilletBrep {
                 domain1.add_point(uv0);
                 domain2.add_point(uv1);
             }
+            // (#21940) the blend's rails never cross the seam that ends inside the band: its rail
+            // ends' feet on that face keep their names in the domain (`c1_collect_points`). Set
+            // each time the section is solved, so a corner rebuilt without such a seam (another
+            // size, another pass) names them as upstream again.
+            solvers.solver_ops_mut(sid)?.solver_mut().rail_end_names = match seam_rail {
+                Some(rail) => crate::blend::fillet_solver::p1::RailEndNames::InDomain { rail },
+                None => crate::blend::fillet_solver::p1::RailEndNames::TrimCurveSide,
+            };
             let (found, tsect) = point_on_plane_solve(
                 k,
                 solvers.solver_ops_mut(sid)?,

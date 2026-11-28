@@ -24,6 +24,81 @@ use solidcraft_doc::FlangeEdge;
 use super::check::whole;
 use super::types::{AngleExpr, FaceRef, FeatureCommon, IdOrName, LengthExpr, Point3, ProfilesParam, SketchRef, StringList, feature_common, present};
 
+/// A persistent central edge name, obtained from the built body's naming engine.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(transparent)]
+pub struct SheetRimName(pub solidcraft_doc::SheetEdgeName);
+
+impl JsonSchema for SheetRimName {
+    fn schema_name() -> Cow<'static, str> {
+        "SheetRimName".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A central edge name from the built flange: <face>|<face>.",
+            "type": "string",
+            "pattern": "^[^|]+(?:\\|[^|]+)+$"
+        })
+    }
+}
+
+/// The way two flanges meet at a corner.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(transparent)]
+pub struct CornerJoinType(pub solidcraft_doc::CornerJoinKind);
+
+impl JsonSchema for CornerJoinType {
+    fn schema_name() -> Cow<'static, str> {
+        "CornerJoinType".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"type": "string", "enum": ["butt", "partial_overlap", "full_overlap"]})
+    }
+}
+
+/// Join two edge flanges by their centrally named cap/bend boundaries.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CornerJoinParams {
+    /// The central edge name of the flange that covers the other.
+    pub covering: SheetRimName,
+    /// The central edge name of the covered flange.
+    pub covered: SheetRimName,
+    /// Butt by default, including an explicit null.
+    #[serde(default)]
+    pub kind: Option<CornerJoinType>,
+    /// Partial overlap's distance. Ignored by Butt and Full Overlap.
+    #[serde(default)]
+    pub overlap: Option<LengthExpr>,
+    /// Clearance between the flanges. Default: the sheet rule's gap.
+    #[serde(default)]
+    pub gap: Option<LengthExpr>,
+    /// Sheet body. Without it, the two source names must identify exactly one sheet.
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// One corner choice made with an edge flange, without a separate feature or body target.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FlangeCornerParams {
+    /// The source rim of the flange that covers the other.
+    pub covering: SheetRimName,
+    /// The source rim of the covered flange.
+    pub covered: SheetRimName,
+    /// Butt by default, including an explicit null.
+    #[serde(default)]
+    pub kind: Option<CornerJoinType>,
+    /// Partial overlap's distance. Ignored by Butt and Full Overlap.
+    #[serde(default)]
+    pub overlap: Option<LengthExpr>,
+    /// Clearance between the flanges. Default: the sheet rule's gap.
+    #[serde(default)]
+    pub gap: Option<LengthExpr>,
+}
+
 /// Points on sheet edges, as the `edges` of a hem and the `bends` of a conversion: 1 to 1000
 /// points `[x, y, z]`, `{x, y, z}` or `{point}` (read by `sheet::sheet_points`).
 #[derive(Clone, Debug, PartialEq)]
@@ -508,6 +583,11 @@ pub struct FlangeParams {
     /// contour flange.
     #[serde(default)]
     pub bend_relief_shape: Option<BendReliefShapeParam>,
+    /// Edge: corner choices by source rim names, applied after these flanges are made.
+    /// Each corner must include one of this feature's bends. Refused on base and contour flanges.
+    #[serde(default)]
+    #[schemars(length(max = 2000))]
+    pub corners: Option<Vec<FlangeCornerParams>>,
     /// Edge: further bends, each a flange on the far edge of the one before (at most 16). Refused
     /// on a base or contour flange.
     #[serde(default)]
@@ -955,6 +1035,13 @@ pub struct ManageRulesParams {
     /// How DXF bend notes show angles: bend or included, ignoring case and surrounding blanks.
     /// Ignored when deleting.
     pub angle_display: Option<AngleDisplayParam>,
+    /// Where the bends' K-factor comes from: k_factor (the rule's `k_factor`), or deduction or
+    /// allowance (worked out from `unfold_value`), ignoring case and surrounding blanks.
+    /// Ignored when deleting.
+    pub unfold_method: Option<UnfoldMethodParam>,
+    /// The 90° bend deduction or allowance a press brake chart gives for the rule's thickness and
+    /// bend radius; read only when `unfold_method` is deduction or allowance. Ignored when deleting.
+    pub unfold_value: Option<LengthExpr>,
     /// Make this the active rule. Default: true if there is no saved active rule, otherwise false.
     /// False leaves the active choice unchanged; ignored when deleting.
     pub active: Option<bool>,
@@ -1068,8 +1155,32 @@ impl JsonSchema for AngleDisplayParam {
     }
 }
 
-/// A saved rule's expressions, including the default bend-angle display which the saved
-/// design omits. These are expressions, not evaluated values.
+/// A rule's unfold method, checked by the same parser as the handler.
+#[derive(Debug)]
+pub struct UnfoldMethodParam(pub solidcraft_doc::sheet::UnfoldMethod);
+
+impl<'de> Deserialize<'de> for UnfoldMethodParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d)?
+            .as_str()
+            .and_then(solidcraft_doc::sheet::UnfoldMethod::parse)
+            .map(UnfoldMethodParam)
+            .ok_or_else(|| D::Error::custom("must be k_factor, deduction or allowance"))
+    }
+}
+
+impl JsonSchema for UnfoldMethodParam {
+    fn schema_name() -> Cow<'static, str> {
+        "SheetUnfoldMethod".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"type": "string", "description": "k_factor, deduction or allowance, ignoring case and surrounding blanks \
+            (also k-factor, k factor, kfactor, bend_deduction and bend_allowance)."})
+    }
+}
+
+/// A saved rule's expressions, including the default bend-angle display and unfold method which
+/// the saved design omits. These are expressions, not evaluated values.
 #[derive(Debug, serde::Serialize, JsonSchema)]
 pub struct RuleReply {
     pub name: String,
@@ -1087,6 +1198,9 @@ pub struct RuleReply {
     /// The material the rule is for; left out when none is set.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub material: String,
+    pub unfold_method: String,
+    /// Empty unless the rule has a 90° bend deduction or allowance.
+    pub unfold_value: String,
 }
 
 impl From<&solidcraft_doc::sheet::SheetRule> for RuleReply {
@@ -1105,11 +1219,14 @@ impl From<&solidcraft_doc::sheet::SheetRule> for RuleReply {
             gap: r.gap.clone(),
             angle_display: r.angle_display.clone(),
             material: r.material.clone(),
+            unfold_method: r.unfold_method.clone(),
+            unfold_value: r.unfold_value.clone(),
         }
     }
 }
 
 /// Evaluated rule values: lengths in millimetres, dimensionless K-factor and canonical choices.
+/// A rule that unfolds by bend deduction or allowance gives the K-factor its 90° value works out to.
 #[derive(Debug, serde::Serialize, JsonSchema)]
 pub struct RuleValuesReply {
     pub thickness: f64,

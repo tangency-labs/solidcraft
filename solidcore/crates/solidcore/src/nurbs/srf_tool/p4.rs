@@ -73,6 +73,7 @@ pub fn make_compatible_uv(sur: &mut [Surface]) -> Result<()> {
 mod tests {
     use super::*;
     use crate::error::SolidError;
+    use crate::math::det;
     use crate::nurbs::math::{CPoint, NOW};
     use crate::nurbs::srf_tool::p1::insert_knots;
     use crate::nurbs::srf_tool::p3::remove_all_knots;
@@ -83,7 +84,7 @@ mod tests {
                 (0..4)
                     .map(|j| {
                         let (x, y) = (f64::from(i), f64::from(j));
-                        CPoint::new(x, y, (x * 0.7 - y * 0.3).sin(), NOW)
+                        CPoint::new(x, y, det::sin(x * 0.7 - y * 0.3), NOW)
                     })
                     .collect()
             })

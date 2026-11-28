@@ -5,6 +5,7 @@
 //! deliberately not general-purpose arbitrary-exponent arithmetic. No square root or
 //! rounded coordinate difference enters an oracle.
 
+use crate::math::det;
 use std::cmp::Ordering;
 
 use crate::math::Point3;
@@ -139,8 +140,8 @@ impl Samples {
         (0..4096).map(move |i| {
             let scale = match i % 4 {
                 0 => 1.0,
-                1 | 2 => 2.0_f64.powi(29),
-                _ => 2.0_f64.powi(-20),
+                1 | 2 => det::powi(2.0_f64, 29),
+                _ => det::powi(2.0_f64, -20),
             };
             let a = Point3::new(
                 rng.mantissa() * scale,
@@ -168,7 +169,7 @@ mod tests {
     /// `TwoSum` retains the lost unit in `2^53 + 1`, including cancellation to zero.
     #[test]
     fn the_sum_keeps_its_residual() {
-        let a = 2.0_f64.powi(53);
+        let a = det::powi(2.0_f64, 53);
         let (s, e) = two_sum(a, 1.0);
         assert_eq!((s, e), (a, 1.0));
         assert_eq!(
@@ -181,20 +182,20 @@ mod tests {
     /// `(1+2^-27)(1-2^-27)-1 = -2^-54` despite the rounded product being 1.
     #[test]
     fn the_product_keeps_its_cancellation_sign() {
-        let d = 2.0_f64.powi(-27);
+        let d = det::powi(2.0_f64, -27);
         let (p, e) = two_product(1.0 + d, 1.0 - d);
-        assert_eq!((p, e), (1.0, -2.0_f64.powi(-54)));
+        assert_eq!((p, e), (1.0, -det::powi(2.0_f64, -54)));
         let difference = Exact::of(1.0 + d)
             .mul(&Exact::of(1.0 - d))
             .sub(&Exact::of(1.0));
-        assert_eq!(difference.0, vec![-2.0_f64.powi(-54)]);
+        assert_eq!(difference.0, vec![-det::powi(2.0_f64, -54)]);
     }
 
     /// The binary64 inputs `0.1 + 0.2 - 0.3` sum exactly to `2^-55`, not zero.
     #[test]
     fn decimal_inputs_are_compared_as_exact_binary_values() {
         let e = Exact::of(0.1).add(&Exact::of(0.2)).sub(&Exact::of(0.3));
-        assert_eq!(e.0, vec![2.0_f64.powi(-55)]);
+        assert_eq!(e.0, vec![det::powi(2.0_f64, -55)]);
         assert_eq!(e.sign(), Ordering::Greater);
     }
 }

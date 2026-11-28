@@ -95,9 +95,20 @@ The insert now takes `simplify`, the Simplify box of the Insert SVG/DXF window: 
 of the drawing as it is drawn (the same at any size factor, so the window's preview at scale 1
 and the confirmed insert retain the same edges), within which runs of lines that meet end to end
 are followed by fewer lines (Douglas-Peucker, each removed vertex no further than that from the
-outline kept; arcs, circles, splines and text stay as drawn). It is off by default, 0 — it moves the outline by up to its value — and the
-window starts it at a two-hundredth of the drawing's size when the file has more edges than the
-largest sketch takes, showing it so it can be lowered to 0.
+outline kept; arcs, circles, splines and text stay as drawn). It is off by default, 0 — it moves
+the outline by up to its value.
+
+A dense drawing's Simplify row opens on **Auto**: the smallest distance at which `sketch.insert_svg`
+actually adds the drawing to a sketch, worked out by `sketch.drawing_bounds`' `fit` on the read the
+window already does. It tries the insert on a scratch sketch at the cap (a hundredth of the
+drawing's span), doubles down to a distance that fits, then bisects to 0.01 mm, so the answer is
+the distance asked for, not a guess from the drawing's size: a distance no distance can fit (more
+splines or circles than a sketch takes, which Simplify leaves as drawn) leaves Auto unavailable
+instead. Auto owns the number; turning it off keeps it and lets it be lowered by hand. Reading and
+fitting cost a 55 mm, 900,000-edge drawing 373–402 ms (`drawing_bounds`, `profiling`, three runs),
+against 155–195 ms to read it without the fit; a 1,000,000-edge one 700 ms against 486–494 ms —
+all of it beside the window, in the operations panel's row, so nothing of it is on the window
+thread.
 
 `sketch.insert_svg` through `solidcraft-cli run`, `profiling` build, a quiet machine (load 17),
 three runs each, medians:

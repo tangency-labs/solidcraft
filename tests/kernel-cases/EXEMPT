@@ -25,6 +25,7 @@ assembly.bom.renumber             the bill of materials: its tests in crates/eng
 assembly.constraint.create        assembly placement: tested in joints_relations_tests.rs
 assembly.constraint.edit          assembly placement: tested in joints_relations_tests.rs
 body.collision                    URDF collision shape: no geometry built (crates/engine/src/cmd/urdf_tests.rs)
+body.edge_lines                   display only: which bodies draw their edge lines (crates/engine/src/cmd/component_properties_tests.rs)
 body.print_faces                  reports which bodies have a print face; crates/engine/src/cmd/print_face.rs tests
 body.remove_history               timeline bookkeeping: the body's B-rep kept as a base feature (crates/engine/src/cmd/edit_tests.rs)
 body.rename                       a body name
@@ -48,6 +49,7 @@ canvas.frame_sketch               reference images, and sketches traced from the
 canvas.insert                     reference images, and sketches traced from them (sketch only)
 canvas.straighten                 reference images, and sketches traced from them (sketch only); crates/engine/src/cmd/sketch_canvas.rs tests
 canvas.to_sketch                  reference images, and sketches traced from them (sketch only)
+component.activate.parent         the active component: tested in crates/engine/src/cmd/occurrence_tests.rs
 component.break_link              component links
 component.copies                  a listing of identical copies
 component.cycle_color             component colours
@@ -257,6 +259,7 @@ material.list                     materials and their properties
 material.properties.directional   materials and their properties
 material.properties.validate      materials and their properties
 mesh.reduce                       reduces a mesh without changing the source; tested in crates/engine/src/tests/mesh_convert.rs::reduction_persists_a_separate_mesh_for_conversion_and_undo
+mesh.section_stack                sketches on a row of planes through a mesh body, and slabs between them; crates/engine/src/cmd/mesh_tests.rs
 model.body_features               a listing of the model's timeline per body; crates/engine/src/schema/inspect_tests.rs
 model.edges                       a listing of the model's topology
 model.faces                       a listing of the model's topology
@@ -393,6 +396,7 @@ render.status                     rendering: images, cameras, stages
 render.surface.import             rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
 render.texture.list               rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
 render.texture.remove             rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
+scan.align                        rigid 3-2-1 scan placement; tested in solidcore/crates/solidcore/src/geom/scan_frame.rs, solidcore/crates/solidcore-ops/src/scan_align.rs, crates/engine/src/cmd/scan_align.rs and crates/ui-egui/src/dialogs_scan_align.rs
 select.all                        the selection
 select.boundary                   the selection; crates/engine/src/cmd/edit_tests.rs::select_boundary_takes_the_rim_of_a_face_set_and_leaves_its_holes
 select.clear                      the selection
@@ -415,6 +419,7 @@ settings.profile.save             settings profiles: preferences saved, applied 
 shaft_spline.insert               crates/engine/src/cmd/shaft_spline_tests.rs (volumes and faces against hand-derived values) and the tooth outline tests in solidcore/crates/solidcore/src/teeth/tests.rs
 sheet.bead                        formed beads pressed into a panel: crates/engine/src/cmd/sheet_surface_bead_tests.rs and solidcore/crates/solidcore/src/develop/bead_tests.rs
 sheet.convert                     every face a panel: crates/engine/src/cmd/sheet_surface_convert_tests.rs and sheet_convert_tests.rs (thin solids are sheet.recognize, which the convert-named cases here run)
+sheet.corner_join                 named flange sources, overlap modes and atomic refusal: crates/doc/src/sheet_surface_features.rs
 sheet.hardware                    a hole in a sheet's flat, no kernel operation of its own: crates/engine/src/cmd/sheet_surface_cut_tests.rs and crates/ui-egui/src/dialogs_sheet_tests.rs
 sheet.measure_body                measures a body's thickness and modelled bend radii, makes nothing: crates/engine/src/cmd/sheet_recognize_tests.rs
 sheet.rule_library                the standard library's listing, makes nothing: crates/engine/src/cmd/sheet_tests.rs and crates/doc/src/sheet_library_tests.rs
@@ -534,6 +539,8 @@ sketch.trim.path                  2D sketch only (the sketch solver and engine t
 sketch.unlink_curve_group         2D sketch only (crates/engine/src/cmd/sketch_constraints_tests.rs: unlink_curve_group_removes_one_curve_and_relinks_the_rest); no kernel operation
 sketch.update_references          projection links: engine tests in crates/engine/src/cmd/sketch_link_manage_tests.rs
 solid.cell_grid                   crates/engine/src/cmd/cell_grid_tests.rs (volumes against hand-derived values) and the planner tests in solidcore/crates/solidcore/src/cell_grid/tests.rs
+solid.dogbone                     inside-corner reliefs; tested in crates/engine/src/cmd/dogbone_tests.rs (and solidcore's and solidcore-ops' dogbone unit tests)
+solid.finger_joint                finger-joint geometry and command behavior: crates/engine/src/cmd/finger_joint_tests.rs
 storage.delete_blob               plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
 storage.get                       plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
 storage.list                      plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
@@ -541,6 +548,7 @@ storage.patch                     plugins: a plugin's own data in the design, no
 storage.set                       plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
 surface.midsurface                tested in the engine: crates/engine/src/schema/surface_midsurface_tests.rs and crates/engine/src/midsurface_samples_tests.rs (the pairing and sheets in crates/doc/src/midsurface.rs tests)
 surface.midsurface_analyze        read-only analysis, no geometry made: crates/engine/src/schema/surface_midsurface_tests.rs (the analysis in crates/doc/src/midsurface.rs tests)
+surface.morph                     tested in the engine: crates/engine/src/cmd/surface_morph.rs (and solidcore deform:: unit tests in solidcore/crates/solidcore/src/deform/brep.rs)
 tab.layout.apply                   manages an application view layout; no geometry, tested in the engine and UI
 tab.layout.list                    manages an application view layout; no geometry, tested in the engine and UI
 tab.layout.remove                  manages an application view layout; no geometry, tested in the engine and UI
@@ -646,6 +654,8 @@ view.toolbar_reset_all            toolbar preferences: crates/ui-egui/src/toolba
 view.top                          the view: camera, layout, display
 view.visual_style                 the view: camera, layout, display
 view.zoom_mode                    the view: camera only: crates/ui-egui/src/nav_mode_tests.rs
+weld.create                       a weld graphic record, no geometry: crates/engine/src/tests.rs and crates/ui-egui/src/dialogs_weld_tests.rs
+weld.delete                       removes a weld graphic record: crates/engine/src/tests.rs
 window.options.use_as_default     copies pop-out presentation settings to preferences; no geometry
 
 # Commands that make or change geometry and have no case yet. This section only shrinks: the

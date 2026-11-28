@@ -5,6 +5,7 @@
 //! between the points where its boundary crosses the plane that lie on the face.
 
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::math::det;
 use crate::math::PI;
 
 /// A surface of revolution, as a face's analytic surface gives it.
@@ -115,9 +116,12 @@ impl Meridian {
             } => {
                 let d = p - centre;
                 let (x, y) = (d.dot(e1), d.dot(e2));
-                let theta = y.atan2(x).rem_euclid(2.0 * PI);
+                let theta = det::atan2(y, x).rem_euclid(2.0 * PI);
                 let out_of_plane = d.dot(e1.cross(e2));
-                (((x * x + y * y).sqrt() - radius).hypot(out_of_plane), theta)
+                (
+                    det::hypot((x * x + y * y).sqrt() - radius, out_of_plane),
+                    theta,
+                )
             }
         }
     }
@@ -131,7 +135,7 @@ impl Meridian {
                 radius,
                 e1,
                 e2,
-            } => centre + (e1 * t.cos() + e2 * t.sin()) * radius,
+            } => centre + (e1 * det::cos(t) + e2 * det::sin(t)) * radius,
         }
     }
 
@@ -192,7 +196,7 @@ fn meridians(
             half_angle,
         } => {
             let (o, e1, e2) = axial(apex, axis)?;
-            let (sin, cos) = half_angle.sin_cos();
+            let (sin, cos) = det::sin_cos(half_angle);
             pair(&|s| Meridian::Line {
                 base: o,
                 dir: e1 * cos + e2 * (s * sin),
@@ -292,6 +296,73 @@ fn trimmed<E>(
             })
             .collect(),
     })
+}
+
+/// How far a line leaves the plane through `plane_point` spanned by `plane_x` and `plane_y`:
+/// `(tilt, offset)`, the line's unit direction's component along the plane's unit normal (the
+/// cross product of its axes), and the height of `line_point` above the plane. A plane holds the
+/// line when both are within the caller's tolerances. `None` for a number that is not finite,
+/// axes that do not span a plane or a direction of no length.
+#[must_use]
+pub fn line_plane_deviation(
+    plane_point: Point3,
+    plane_x: Vec3,
+    plane_y: Vec3,
+    line_point: Point3,
+    line_dir: Vec3,
+) -> Option<(f64, f64)> {
+    let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+    if !(finite(plane_point)
+        && finite(plane_x)
+        && finite(plane_y)
+        && finite(line_point)
+        && finite(line_dir))
+    {
+        return None;
+    }
+    let n = plane_x.cross(plane_y).unitize().ok()?;
+    let d = line_dir.unitize().ok()?;
+    Some((d.dot(n).abs(), (line_point - plane_point).dot(n).abs()))
+}
+
+/// The range `(lowest, highest)` of the speed across a plane of `points` on it, under the screw
+/// motion about the line through `axis_point` along `axis_dir` that rises `pitch` per turn: per
+/// radian of turn a point `r` from `axis_point` moves `k × r + (pitch / 2π) k` (`k` the unit
+/// axis), so its speed along the plane's unit normal `n` (the cross product of its axes) is
+/// `n · (k × r) + (pitch / 2π)(n · k)`, affine over the plane. A section on the plane sweeps
+/// without passing back over itself while that speed keeps one sign over it. `None` for a number
+/// that is not finite, axes that do not span a plane, a direction of no length or no points.
+#[must_use]
+pub fn screw_speed_range(
+    plane_x: Vec3,
+    plane_y: Vec3,
+    axis_point: Point3,
+    axis_dir: Vec3,
+    pitch: f64,
+    points: &[Point3],
+) -> Option<(f64, f64)> {
+    let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+    if !(finite(plane_x)
+        && finite(plane_y)
+        && finite(axis_point)
+        && finite(axis_dir)
+        && pitch.is_finite())
+        || points.is_empty()
+    {
+        return None;
+    }
+    let n = plane_x.cross(plane_y).unitize().ok()?;
+    let k = axis_dir.unitize().ok()?;
+    let rise = pitch / (2.0 * PI) * n.dot(k);
+    let mut range = (f64::INFINITY, f64::NEG_INFINITY);
+    for &p in points {
+        if !finite(p) {
+            return None;
+        }
+        let speed = n.dot(k.cross(p - axis_point)) + rise;
+        range = (range.0.min(speed), range.1.max(speed));
+    }
+    Some(range)
 }
 
 /// Whether the plane through `plane_point` square to `plane_normal` (any length) holds the axis

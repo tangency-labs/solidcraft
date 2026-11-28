@@ -1451,3 +1451,158 @@ fn a_root_cut_splitting_a_placed_parts_body_leaves_both_pieces_where_the_part_is
     xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
     assert_eq!(xs, [(-10.0, 8.0), (12.0, 30.0)]);
 }
+
+/// Adding primitives after a Combine (which marks `placement_local` false) evaluates the timeline
+/// once per command instead of twice, skips `param_rename_from` when feature counts differ, and
+/// avoids building `world_state()` in `frames::to_local` for identity active-frame primitives
+/// while still mapping primitives accurately inside a moved component.
+#[test]
+fn adding_primitives_after_combine_evaluates_once_and_skips_world_placement() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [5, 0, 0], "body_name": "B"}));
+    run(&mut s, "solid.combine", json!({"target": "A", "tools": ["B"]}));
+    run(&mut s, "component.create", json!({"name": "Moved", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [0, 0, 0], "body_name": "M0"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Moved:1", "translate": [100, 0, 0]}));
+    assert!(super::placed(&s));
+
+    for k in 0..5 {
+        let prev_doc = s.doc.clone();
+        let evals_before = s.evaluations;
+        let cyl = json!({"radius": 2, "height": 10, "base": [0, 30 + k * 15, 0], "axis": "Z", "body_name": format!("Pin {k}")});
+        assert!(super::to_local(&s, "solid.cylinder", &cyl).unwrap().is_none());
+        assert!(s.cached_world_state().is_none(), "identity active-frame primitive must not build world_state in to_local");
+        run(&mut s, "solid.cylinder", cyl);
+        assert_eq!(s.evaluations, evals_before + 1, "step {k}: add_feature must evaluate once, not twice");
+        assert!(s.doc.param_rename_from(&prev_doc).is_none());
+    }
+
+    // Inside the moved component, `to_local` maps world coordinates without building `world_state()`.
+    run(&mut s, "component.activate", json!({"component": "Moved"}));
+    assert!(s.cached_world_state().is_none());
+    let moved_cyl = json!({"radius": 2, "height": 10, "base": [110, 20, 0], "axis": "Z", "body_name": "MovedPin"});
+    let mapped = super::to_local(&s, "solid.cylinder", &moved_cyl).unwrap().expect("moved active component maps base");
+    assert!(s.cached_world_state().is_none(), "active-frame-only primitive must not force world_state");
+    assert_eq!(mapped["base"], json!([10.0, 20.0, 0.0]));
+    run(&mut s, "solid.cylinder", moved_cyl);
+    let world = s.world_state().unwrap();
+    let moved_pin = world.body("MovedPin").expect("MovedPin body");
+    let center = solidcraft_doc::kernel::measure_mass(&moved_pin.body).unwrap().centroid;
+    assert!((center.x - 110.0).abs() < 1e-6 && (center.y - 20.0).abs() < 1e-6 && (center.z - 5.0).abs() < 1e-6, "{center:?}");
+}
+
+/// `Session::already_refreshed` must not skip a post-command refresh while an import check is
+/// still running or has finished without being settled yet.
+#[test]
+fn already_refreshed_is_guarded_against_pending_and_unsettled_import_checks() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "A"}));
+    let fid = s.doc.features[0].id;
+    s.refresh();
+    assert!(s.already_refreshed());
+
+    // A running import check attached after a refresh invalidates refresh reuse both while
+    // running and once it finishes with an unsettled issue.
+    let end = s.model.running_import_check_for_tests(fid);
+    assert!(s.model.checking_imports());
+    assert!(s.model.has_pending_import_checks());
+    assert!(!s.already_refreshed(), "running import check must prevent refresh reuse");
+    end(vec![solidcraft_doc::kernel::ImportIssue {
+        kind: solidcraft_doc::kernel::IssueKind::NeedsRepair,
+        item: None,
+        part: "A".into(),
+        paths: Vec::new(),
+        faces: 0,
+        times: 1,
+        detail: "solid 'A': needs repair".into(),
+    }]);
+    assert!(!s.model.checking_imports());
+    assert!(s.model.has_pending_import_checks(), "unsettled import issue must keep import checks pending");
+    assert!(!s.already_refreshed(), "ended but unsettled import check must prevent refresh reuse");
+
+    // Refreshing settles the check's findings and restores refresh reuse.
+    s.refresh();
+    assert!(!s.model.has_pending_import_checks());
+    assert!(s.already_refreshed());
+    assert!(s.model.result(fid).and_then(|r| r.warning.as_deref()).is_some_and(|w| w.contains("needs repair")));
+
+    // A refresh that completes while an import check is still running does not record
+    // `refreshed_doc`, so even a clean completion afterward does not falsely skip a refresh.
+    let end2 = s.model.running_import_check_for_tests(fid);
+    s.refresh();
+    assert!(!s.already_refreshed());
+    end2(Vec::new());
+    assert!(!s.already_refreshed());
+    s.refresh();
+    assert!(s.already_refreshed());
+}
+
+/// a draft's neutral plane with its origin in the air, on a block placed three ways, drafts
+/// as the unplaced block does with the same local values.
+#[test]
+fn placed_draft_neutral_plane_in_the_air_maps_into_the_blocks_frame() {
+    fn block(place: usize) -> Session {
+        let mut s = Session::default();
+        let make = |s: &mut Session| {
+            run(s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        };
+        match place {
+            0 | 1 => {
+                let part = run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+                make(&mut s);
+                let mut p = json!({"occurrence": part["occurrence"], "translate": [50, 0, 100]});
+                if place == 1 {
+                    p["axis"] = json!([1, 0, 0]);
+                    p["angle"] = json!("90 deg");
+                }
+                run(&mut s, "occurrence.move", p);
+            }
+            _ => {
+                let outer = run(&mut s, "component.create", json!({"name": "Outer", "grounded": false}));
+                let inner = run(&mut s, "component.create", json!({"name": "Inner", "grounded": false}));
+                make(&mut s);
+                run(
+                    &mut s,
+                    "occurrence.move",
+                    json!({"occurrence": inner["occurrence"], "translate": [5, 0, 30], "axis": [0, 1, 0], "angle": "90 deg"}),
+                );
+                run(&mut s, "occurrence.move", json!({"occurrence": outer["occurrence"], "translate": [20, 10, 70]}));
+            }
+        }
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        s
+    }
+    let world = |s: &Session, local: [f64; 3]| {
+        let frames = s.body_frames();
+        let (_, _, m) = frames.iter().find(|(w, _, _)| w == "Block").expect("Block is placed");
+        let p = solidcraft_doc::apply_point(m, Vec3::new(local[0], local[1], local[2]));
+        json!([p.x, p.y, p.z])
+    };
+    let world_dir = |s: &Session, local: [f64; 3]| {
+        let frames = s.body_frames();
+        let (_, _, m) = frames.iter().find(|(w, _, _)| w == "Block").expect("Block is placed");
+        let d = solidcraft_doc::apply_vector(m, Vec3::new(local[0], local[1], local[2]));
+        json!([d.x, d.y, d.z])
+    };
+    for neutral_z in [-30.0, 5.0] {
+        let mut flat = Session::default();
+        run(&mut flat, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        run(
+            &mut flat,
+            "solid.draft",
+            json!({"faces": [[10, 20, 5]], "neutral": {"origin": [10, 10, neutral_z], "normal": [0, 0, 1]}, "pull": [0, 0, 1], "angle": "5 deg", "body": "Block"}),
+        );
+        let want = volume(&mut flat);
+        for place in 0..3 {
+            let mut s = block(place);
+            let faces = json!([world(&s, [10.0, 20.0, 5.0])]);
+            let neutral = json!({"origin": world(&s, [10.0, 10.0, neutral_z]), "normal": world_dir(&s, [0.0, 0.0, 1.0])});
+            let pull = world_dir(&s, [0.0, 0.0, 1.0]);
+            run(&mut s, "solid.draft", json!({"faces": faces, "neutral": neutral, "pull": pull, "angle": "5 deg", "body": "Block"}));
+            let got = volume(&mut s);
+            assert!((got - want).abs() < 1e-6, "place {place}, neutral z {neutral_z}: volume {got}, unplaced {want}");
+        }
+    }
+}

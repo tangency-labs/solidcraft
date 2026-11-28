@@ -27,6 +27,7 @@
 
 use crate::error::mass::MassFailure;
 use crate::geom::tol::are_same;
+use crate::math::det;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQ};
 use crate::{Kernel, Result, SolidError};
 
@@ -426,7 +427,7 @@ impl OdeIntegrator {
             errmax /= accuracy;
             if errmax <= 1.0 {
                 let next = if errmax > 1.89e-4 {
-                    0.9 * h * errmax.powf(-0.2)
+                    0.9 * h * det::powf(errmax, -0.2)
                 } else {
                     5.0 * h
                 };
@@ -436,7 +437,7 @@ impl OdeIntegrator {
                     next,
                 });
             }
-            let htemp = 0.9 * h * errmax.powf(-0.25);
+            let htemp = 0.9 * h * det::powf(errmax, -0.25);
             h = if h >= 0.0 {
                 htemp.max(0.1 * h)
             } else {
@@ -1170,7 +1171,7 @@ mod tests {
         let tight =
             OdeIntegrator::default().integrate(&mut y, 0.0, 1.0, options(1e-300), |x, _, d| {
                 if let Some(d) = d.first_mut() {
-                    *d = (10.0 * x).sin();
+                    *d = det::sin(10.0 * x);
                 }
                 Ok(())
             });
@@ -1203,11 +1204,15 @@ mod tests {
             let d: f64 = DIVIDED_DIFFERENCE_5
                 .iter()
                 .zip(nodes)
-                .map(|(w, c): (&f64, f64)| w * c.powi(power))
+                .map(|(w, c): (&f64, f64)| w * det::powi(c, power))
                 .sum();
             let want = if power == 5 { 1.0 } else { 0.0 };
             assert!((d - want).abs() < 1e-9, "s^{power}: {d}");
-            let q = weighted(QUADRATURE_ERROR_WEIGHTS, 1.0, nodes.map(|c| c.powi(power)));
+            let q = weighted(
+                QUADRATURE_ERROR_WEIGHTS,
+                1.0,
+                nodes.map(|c| det::powi(c, power)),
+            );
             assert!(
                 (q - want * FIFTH_ORDER_ERROR_ON_S5).abs() < 1e-12,
                 "s^{power}: {q}"
@@ -1216,7 +1221,7 @@ mod tests {
         let miss: f64 = fifth
             .iter()
             .zip(nodes)
-            .map(|(w, c): (&f64, f64)| w * c.powi(5))
+            .map(|(w, c): (&f64, f64)| w * det::powi(c, 5))
             .sum::<f64>()
             - 1.0 / 6.0;
         assert!((miss - FIFTH_ORDER_ERROR_ON_S5).abs() < 1e-15, "{miss}");
@@ -1232,7 +1237,7 @@ mod tests {
             EMBEDDED_ERROR_WEIGHTS
                 .iter()
                 .zip(nodes)
-                .map(|(w, c): (&f64, f64)| w * c.powi(power))
+                .map(|(w, c): (&f64, f64)| w * det::powi(c, power))
                 .sum()
         };
         let a = -on(5) / on(4);
@@ -1254,7 +1259,7 @@ mod tests {
                         rate: None,
                     },
                     |t, _, dy| {
-                        dy[0] = t.powi(5) + a * t.powi(4);
+                        dy[0] = det::powi(t, 5) + a * det::powi(t, 4);
                         Ok(())
                     },
                 )
@@ -1322,7 +1327,7 @@ mod tests {
                         rate: Some(0.2),
                     },
                     |t, _, dy| {
-                        dy[0] = t.powi(4);
+                        dy[0] = det::powi(t, 4);
                         Ok(())
                     },
                 )
@@ -1346,16 +1351,16 @@ mod tests {
         type Case = (fn(f64) -> f64, f64, f64, f64);
         let cases: [Case; 3] = [
             // e^t on [0, 4]: e^4 - 1
-            (f64::exp, 0.0, 4.0, 4.0_f64.exp() - 1.0),
+            (det::exp, 0.0, 4.0, det::exp(4.0_f64) - 1.0),
             // Runge's 1 / (1 + 25 t^2) on [-1, 1]: 2/5 atan 5
             (
                 |t| 1.0 / (1.0 + 25.0 * t * t),
                 -1.0,
                 1.0,
-                0.4 * 5.0_f64.atan(),
+                0.4 * det::atan(5.0_f64),
             ),
             // 2 + sin 20t on [0, pi]: 2 pi (the sine's ten periods cancel)
-            (|t| 2.0 + (20.0 * t).sin(), 0.0, PI, 2.0 * PI),
+            (|t| 2.0 + det::sin(20.0 * t), 0.0, PI, 2.0 * PI),
         ];
         for (g, a, b, exact) in cases {
             let rate = exact / (b - a);

@@ -9,13 +9,16 @@
     clippy::float_cmp
 )]
 
+use crate::math::det;
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_6, PI};
 
 use crate::math::Vec2;
 use crate::prism::profile::{Loop2, Seg2};
 
 use crate::cell_grid::lattice::{Lattice, CIRCLE_SIDES};
-use crate::cell_grid::region::{clip_halfplane, poly_area, Bounds, Convex, Loop, Prim, Region};
+use crate::cell_grid::region::{
+    clip_halfplane, poly_area, Bounds, Convex, Loop, Prim, Region, EPS,
+};
 use crate::cell_grid::snap::{piece_hits, simple, snap_loop as snap_loop_by};
 use crate::cell_grid::vec::{ring_next, ring_prev, Vec2Ext};
 use crate::cell_grid::*;
@@ -181,7 +184,7 @@ fn random_polygon(rng: &mut Rng, ndirs: usize, size: f64, lo: usize, hi: usize) 
         .iter()
         .map(|&k| {
             let a = k as f64 * 2.0 * PI / ndirs as f64 + FRAC_PI_2;
-            ((a.cos(), a.sin()), rng.range(0.35, 0.5) * size)
+            ((det::cos(a), det::sin(a)), rng.range(0.35, 0.5) * size)
         })
         .collect();
     // The planes cut out of a large box, so a plane that touches nothing adds no corner.
@@ -403,7 +406,7 @@ fn the_chords_and_for_squares_and_triangles_the_sides_of_a_cell_are_lattice_line
                     }
                 }
                 for (nrm, off) in lines {
-                    let k = lat.direction_index((-nrm.x).atan2(nrm.y)).unwrap();
+                    let k = lat.direction_index(det::atan2(-nrm.x, nrm.y)).unwrap();
                     assert!(
                         lat.on_line(k, off + nrm.dot(c), 1e-9),
                         "{shape:?} cell ({i}, {j}): a side or chord is off the lattice"
@@ -477,7 +480,7 @@ fn a_triangle_cell_is_only_ever_whole_and_alternates_up_and_down() {
         (lat.key(0, 0), lat.key(1, 0), lat.key(0, 1), lat.key(-1, 0)),
         (0, 1, 1, 1)
     );
-    assert!((lat.cell_area - 3.0 * SQRT3 * (S / 2.0).powi(2)).abs() < 1e-12);
+    assert!((lat.cell_area - 3.0 * SQRT3 * det::powi(S / 2.0, 2)).abs() < 1e-12);
     for key in 0..2 {
         // The inscribed circle of each cell has diameter S.
         let o = lat.outline(key);
@@ -500,7 +503,7 @@ fn circles_on_either_grid_are_a_web_apart_and_polygons_have_flats_a_web_apart_on
             .map(|(i, j)| c0.distance(lat.center(i, j)))
             .fold(f64::INFINITY, f64::min);
         assert!((nearest - P).abs() < 1e-12, "{grid:?}");
-        assert!((lat.cell_area - PI * (S / 2.0).powi(2)).abs() < 1e-12);
+        assert!((lat.cell_area - PI * det::powi(S / 2.0, 2)).abs() < 1e-12);
         assert!(!lat.snappable());
         assert_eq!(lat.outline(0).len(), CIRCLE_SIDES);
     }
@@ -701,7 +704,7 @@ fn notched_field_spec() -> CellGridSpec {
 fn notched_field() -> Loop2 {
     let (cx, r) = (-39.5, 7.1);
     let y = (r * r - 6.0 * 6.0_f64).sqrt();
-    let a = y.atan2(-6.0);
+    let a = det::atan2(y, -6.0);
     Loop2 {
         segs: vec![
             Seg2::Line {
@@ -833,7 +836,7 @@ fn line_meets_chords_of(arc: &Prim, line: &Prim) -> bool {
     let n = (sweep.abs() / (PI / 16.0)).ceil().max(1.0) as usize;
     let pt = |k: usize| {
         let a = a0 + sweep * k as f64 / n as f64;
-        c + v(r * a.cos(), r * a.sin())
+        c + v(r * det::cos(a), r * det::sin(a))
     };
     let side = |a: Vec2, b: Vec2, x: Vec2| cross2(b - a, x - a) > 0.0;
     (0..n).any(|k| {
@@ -850,7 +853,7 @@ fn a_snapped_edge_that_cuts_an_arc_between_its_chord_samples_is_found_to_cross_i
     // chords (at pi/16) lie 0.048 inside the circle, so they never reach the edge.
     let (c, r) = (v(0.0, 0.0), 10.0);
     let arc = Prim::arc(c, r, 0.0, PI / 8.0);
-    let at = |radius: f64| v(radius * (PI / 32.0).cos(), radius * (PI / 32.0).sin());
+    let at = |radius: f64| v(radius * det::cos(PI / 32.0), radius * det::sin(PI / 32.0));
     let ring = [
         arc,
         Prim::line(arc.end(), c),
@@ -1678,7 +1681,7 @@ fn free_trims_a_circle_cell_to_a_straight_edge_with_the_exact_segment_area() {
         &with_clip(CellShape::Circle, Clip::Free),
     );
     let cell = p.cells.iter().find(|c| (c.i, c.j) == (0, 0)).unwrap();
-    let expect = r * r * (-d / r).acos() + d * (r * r - d * d).sqrt();
+    let expect = r * r * det::acos(-d / r) + d * (r * r - d * d).sqrt();
     assert!(
         (cell.area - expect).abs() < 1e-9,
         "{} against {expect}",
@@ -1705,8 +1708,8 @@ fn free_follows_a_round_field_with_arcs_and_matches_a_fine_polygon_of_it() {
     let disc: Vec<Vec2> = (0..n)
         .map(|k| {
             v(
-                cx + r * (2.0 * PI * k as f64 / n as f64).cos(),
-                cy + r * (2.0 * PI * k as f64 / n as f64).sin(),
+                cx + r * det::cos(2.0 * PI * k as f64 / n as f64),
+                cy + r * det::sin(2.0 * PI * k as f64 / n as f64),
             )
         })
         .collect();
@@ -1793,7 +1796,7 @@ fn a_grid_split_over_two_fields_has_every_cell_of_either_half_in_the_whole_field
         // The whole field is a rotated rectangle; each half is one side of a cut across it.
         let rot = |x: f64, y: f64| {
             let d = v(x, y) - s.anchor;
-            let (sn, cs) = angle.sin_cos();
+            let (sn, cs) = det::sin_cos(angle);
             (
                 s.anchor.x + cs * d.x - sn * d.y,
                 s.anchor.y + sn * d.x + cs * d.y,
@@ -1818,7 +1821,7 @@ fn a_grid_split_over_two_fields_has_every_cell_of_either_half_in_the_whole_field
             lo.cells.iter().chain(&hi.cells).map(key).collect();
         for c in whole.cells.iter().filter(|c| !halves.contains(&key(c))) {
             // Only cells the cut runs through are missing from the halves.
-            let local = (c.center - s.anchor).dot(v(-angle.sin(), angle.cos()));
+            let local = (c.center - s.anchor).dot(v(-det::sin(angle), det::cos(angle)));
             assert!(
                 (local - cut).abs() < S,
                 "angle {angle}: ({}, {}) is missing away from the cut",
@@ -1889,7 +1892,7 @@ fn a_rotated_grid_over_a_rotated_field_gets_the_cells_of_the_unrotated_one() {
     for angle in [FRAC_PI_6, 0.7, -2.0] {
         let anchor = v(2.0, -3.0);
         let rot = |x: f64, y: f64| {
-            let (sn, cs) = angle.sin_cos();
+            let (sn, cs) = det::sin_cos(angle);
             (anchor.x + cs * x - sn * y, anchor.y + sn * x + cs * y)
         };
         let field = polygon(&[rot(x0, y0), rot(x1, y0), rot(x1, y1), rot(x0, y1)]);
@@ -2222,7 +2225,7 @@ fn a_loop_of_many_pieces_is_counted_once() {
     let pts: Vec<(f64, f64)> = (0..n)
         .map(|k| {
             let a = 2.0 * PI * f64::from(k) / f64::from(n);
-            (50.0 * a.cos(), 50.0 * a.sin())
+            (50.0 * det::cos(a), 50.0 * det::sin(a))
         })
         .collect();
     let p = run(
@@ -2659,7 +2662,7 @@ fn square_and_hexagon_cells_keep_their_margin_from_a_cubic_within_the_chords_bou
         (0..n)
             .map(|k| {
                 let a = turn + std::f64::consts::TAU * k as f64 / n as f64;
-                c + v(a.cos(), a.sin()) * r
+                c + v(det::cos(a), det::sin(a)) * r
             })
             .collect()
     };
@@ -2718,7 +2721,7 @@ fn a_conic_and_a_segment_are_measured_on_the_curve_not_its_samples() {
 #[test]
 fn a_segment_far_from_the_origin_keeps_its_clearance_from_an_arc() {
     use crate::cell_grid::exact::Edge;
-    let unit = |a: f64| v(a.cos(), a.sin());
+    let unit = |a: f64| v(det::cos(a), det::sin(a));
     let full = Edge::of(&Seg2::Arc {
         center: v(0.0, 0.0),
         radius: 1.0,
@@ -2775,7 +2778,7 @@ fn conic_chords_stay_within_the_chord_bound_of_the_curve_for_every_weight() {
         .map(|i| (1.0 - i as f64 / DENSE as f64, i as f64 / DENSE as f64))
         .collect();
     for k in 0..200 {
-        let e = 10.0_f64.powf(-f64::from(k) / 8.0) * 0.5;
+        let e = det::powf(10.0_f64, -f64::from(k) / 8.0) * 0.5;
         ts.extend([
             (1.0 - e, e),
             (e, 1.0 - e),
@@ -2870,4 +2873,973 @@ fn a_conic_whose_chord_is_too_short_to_measure_stays_within_the_tolerance_of_its
             .fold(f64::INFINITY, f64::min);
         assert!(near <= TOL, "t {i}/20000: {near} from the chords");
     }
+}
+
+// --- sketched cells ---
+
+/// An L of lines with a half-circle cap on its stem: the foot is `[0, 10] x [0, 4]`, the stem
+/// `[0, 4] x [4, 10]`, and the arc from `(4, 10)` over `(2, 12)` to `(0, 10)` (centre `(2, 10)`,
+/// radius 2). Area `40 + 24 + 2 pi`.
+fn sk_l_arc() -> Loop2 {
+    let line = |a: (f64, f64), b: (f64, f64)| Seg2::Line {
+        a: v(a.0, a.1),
+        b: v(b.0, b.1),
+    };
+    Loop2 {
+        segs: vec![
+            line((0.0, 0.0), (10.0, 0.0)),
+            line((10.0, 0.0), (10.0, 4.0)),
+            line((10.0, 4.0), (4.0, 4.0)),
+            line((4.0, 4.0), (4.0, 10.0)),
+            Seg2::Arc {
+                center: v(2.0, 10.0),
+                radius: 2.0,
+                start: 0.0,
+                sweep: PI,
+            },
+            line((0.0, 10.0), (0.0, 0.0)),
+        ],
+    }
+}
+
+const SK_L_AREA: f64 = 64.0 + 2.0 * PI;
+
+fn sk_cell(profile: Loop2, origin: Option<Vec2>, px: f64, py: f64, stagger: f64) -> SketchCell {
+    SketchCell {
+        profile,
+        origin,
+        pitch_x: px,
+        pitch_y: py,
+        stagger,
+        cell_angle: 0.0,
+        flip: false,
+    }
+}
+
+/// An L cell with its origin at the profile's zero.
+fn sk_l(px: f64, py: f64, stagger: f64) -> SketchCell {
+    sk_cell(sk_l_arc(), Some(v(0.0, 0.0)), px, py, stagger)
+}
+
+/// A square cell of side 10 on pitch 12 (a web of 2 apart), the origin at its centre, so with
+/// `anchor` (5, 5) cell `(i, j)` covers `[12 i, 12 i + 10] x [12 j, 12 j + 10]`.
+fn sk_square() -> SketchCell {
+    sk_cell(rect(0.0, 0.0, 10.0, 10.0), None, 12.0, 12.0, 0.0)
+}
+
+fn sk_spec(clip: Clip) -> CellGridSpec {
+    CellGridSpec {
+        clip,
+        web: 2.0,
+        anchor: v(5.0, 5.0),
+        ..CellGridSpec::default()
+    }
+}
+
+fn sk_run(field: &[Loop2], cell: &SketchCell, spec: &CellGridSpec) -> CellGridPlan {
+    plan_sketch(field, cell, spec).unwrap()
+}
+
+fn sk_close(a: f64, b: f64) {
+    assert!((a - b).abs() < 1e-6, "{a} is not {b}");
+}
+
+fn sk_points(cell: &GridCell) -> Vec<Vec2> {
+    cell.loops
+        .iter()
+        .flat_map(|l| l.segs.iter().map(Seg2::start))
+        .collect()
+}
+
+#[test]
+fn square_cells_on_a_square_lattice_are_kept_whole_or_trimmed_by_the_field() {
+    // Cell (i, j) covers [12 i, 12 i + 10] in x and likewise in y; the field is [0, 100]^2.
+    // Whole: 12 i >= 0 and 12 i + 10 <= 100 give i = 0..=7 (the last ends at 94, the next at 106),
+    // 8 x 8 = 64 cells of area 100, the first column and row flush with the field's edges.
+    let field = [rect(0.0, 0.0, 100.0, 100.0)];
+    let whole = sk_run(&field, &sk_square(), &sk_spec(Clip::Whole));
+    assert_eq!((whole.whole, whole.partial, whole.cells.len()), (64, 0, 64));
+    sk_close(whole.open_area, 6400.0);
+    // Free: the ninth column and row (i = 8, from x = 96) are cut to 4 wide, so 81 cells: 64 whole
+    // and 8 + 8 + 1 = 17 trimmed. Each axis is covered 8 x 10 + 4 = 84, so the area is 84^2 = 7056.
+    let free = sk_run(&field, &sk_square(), &sk_spec(Clip::Free));
+    assert_eq!((free.whole, free.partial, free.cells.len()), (64, 17, 81));
+    sk_close(free.open_area, 7056.0);
+}
+
+#[test]
+fn a_keep_out_removes_the_cells_it_covers_whole_and_trims_those_it_cuts_free() {
+    // Keep-out [40, 60]^2. The cells overlapping it are i, j in {3, 4}: [36, 46] and [48, 58]
+    // (i = 2 ends at 34, i = 5 starts at 60 and only touches it, which keeps it). That is 4 cells.
+    // Whole: 64 - 4 = 60 cells, area 6000.
+    let field = [rect(0.0, 0.0, 100.0, 100.0), rect(40.0, 40.0, 60.0, 60.0)];
+    let whole = sk_run(&field, &sk_square(), &sk_spec(Clip::Whole));
+    assert_eq!((whole.whole, whole.partial), (60, 0));
+    sk_close(whole.open_area, 6000.0);
+    // Free: of the keep-out, the cells cover x in [40, 46] and [48, 58] (6 + 10 = 16 wide, the
+    // same in y), 16 x 16 = 256 mm2, so the area is 7056 - 256 = 6800. Cell (4, 4) lies wholly
+    // inside the keep-out and goes; (3, 3) keeps 100 - 36 = 64, (3, 4) and (4, 3) keep 100 - 60 = 40
+    // each. So 80 cells: 60 whole and 17 + 3 = 20 trimmed (6000 + 656 + 144 = 6800).
+    let free = sk_run(&field, &sk_square(), &sk_spec(Clip::Free));
+    assert_eq!((free.whole, free.partial, free.cells.len()), (60, 20, 80));
+    sk_close(free.open_area, 6800.0);
+    assert!(!free.cells.iter().any(|c| (c.i, c.j) == (4, 4)));
+    let cut = free.cells.iter().find(|c| (c.i, c.j) == (3, 3)).unwrap();
+    sk_close(cut.area, 64.0);
+}
+
+#[test]
+fn a_keep_out_may_follow_a_different_mode_than_the_field() {
+    // Field mode whole, keep-out mode free: the cells at the field's edge (none cross it here, all
+    // 64 fit) are as before, the four cells the keep-out cuts are trimmed, and (4, 4) goes.
+    let field = [rect(0.0, 0.0, 100.0, 100.0), rect(40.0, 40.0, 60.0, 60.0)];
+    let spec = CellGridSpec {
+        keepout_clip: Some(Clip::Free),
+        ..sk_spec(Clip::Whole)
+    };
+    let plan = sk_run(&field, &sk_square(), &spec);
+    assert_eq!((plan.whole, plan.partial), (60, 3));
+    sk_close(plan.open_area, 6000.0 + 144.0);
+}
+
+#[test]
+fn a_curved_field_edge_touching_a_cell_drops_it_when_the_fields_mode_is_whole_whatever_the_keep_outs(
+) {
+    // A margin needs every mode whole, so the split of the exact check between the field's edges
+    // and the keep-outs' shows only at margin 0, on a curve (a curve is measured exactly, a line
+    // or arc may touch the cell). The field is [0, 94] x [0, 100] with its right side a cubic
+    // bulging out from (94, 0) to (94, 100). Cell i covers [12 i, 12 i + 10], so cell (7, 0) has
+    // its corner exactly on the curve's end (94, 0); no other cell is within 0.002 mm of the
+    // curve (the next nearest is 6 mm from its end), and the cells i, j = 0..=7 all lie inside the
+    // field: 64. The curve touches (7, 0), so a whole field drops it: 63, the same with the
+    // keep-outs free (there are none; their mode is not the field's).
+    let curved = Loop2 {
+        segs: vec![
+            Seg2::Line {
+                a: v(0.0, 0.0),
+                b: v(94.0, 0.0),
+            },
+            Seg2::Cubic {
+                p0: v(94.0, 0.0),
+                p1: v(109.0, 12.0),
+                p2: v(109.0, 88.0),
+                p3: v(94.0, 100.0),
+            },
+            Seg2::Line {
+                a: v(94.0, 100.0),
+                b: v(0.0, 100.0),
+            },
+            Seg2::Line {
+                a: v(0.0, 100.0),
+                b: v(0.0, 0.0),
+            },
+        ],
+    };
+    let kept = |clip: Clip, keepout_clip: Option<Clip>| {
+        let spec = CellGridSpec {
+            keepout_clip,
+            ..sk_spec(clip)
+        };
+        let plan = sk_run(std::slice::from_ref(&curved), &sk_square(), &spec);
+        plan.cells
+            .iter()
+            .any(|c| (c.i, c.j) == (7, 0) && c.kind == CellKind::Whole)
+    };
+    assert!(
+        !kept(Clip::Whole, None),
+        "a whole field drops the cell the curve touches"
+    );
+    assert!(
+        !kept(Clip::Whole, Some(Clip::Free)),
+        "so does one whose keep-outs are free"
+    );
+}
+
+#[test]
+fn a_notch_a_keep_out_takes_from_a_large_cell_drops_it_though_it_is_a_tiny_share_of_its_area() {
+    // Cells of 1e5 x 1e5 mm (area 1e10 mm2) on a pitch with a web of 2 between them, from cell
+    // (0, 0) at [0, 1e5]^2. A keep-out of 2 x 2 straddles the right side of cell (0, 0) at its
+    // middle, so it takes a notch of 1 x 2 = 2 mm2 from it. A keep-out of 2 x 0.1 straddles the
+    // right side of cell (1, 1) (at x = 200002) and takes a notch 1 mm deep and 0.1 mm wide,
+    // 0.1 mm2: 1e-11 of the cell, though 1e6 times the EPS it is measured by. Each cell is cut by
+    // a whole keep-out, so both go; (0, 1) and (1, 0) are whole.
+    let side = 1e5;
+    let field = [
+        rect(-10.0, -10.0, 2.0 * side + 12.0, 2.0 * side + 12.0),
+        rect(side - 1.0, 4.9e4, side + 1.0, 4.9e4 + 2.0),
+        rect(2.0 * side + 1.0, 1.5e5, 2.0 * side + 3.0, 1.5e5 + 0.1),
+    ];
+    let cell = sk_cell(
+        rect(0.0, 0.0, side, side),
+        None,
+        side + 2.0,
+        side + 2.0,
+        0.0,
+    );
+    let spec = CellGridSpec {
+        anchor: v(side / 2.0, side / 2.0),
+        ..sk_spec(Clip::Whole)
+    };
+    let plan = sk_run(&field, &cell, &spec);
+    let mut kept: Vec<(i64, i64)> = plan.cells.iter().map(|c| (c.i, c.j)).collect();
+    kept.sort_unstable();
+    assert_eq!(kept, vec![(0, 1), (1, 0)]);
+}
+
+#[test]
+fn a_clip_edge_with_its_middle_near_a_spike_of_the_cell_is_not_the_cells_own() {
+    // A 1e5 square cell with a slot from its top to 5e-7 above y = 0, and its bottom at -1e-5. A
+    // whole keep-out (-1, -1) to (100001, 0) cuts a strip 1e-5 deep off the bottom, leaving the
+    // clip edge y = 0 from x = 0 to 1e5. Its middle (5e4, 0) is 5e-7 (under EPS) from the slot's
+    // tip, but its ends are 1e-5 from the bottom side, so it is not on one piece of the outline:
+    // the cell was cut and, the keep-out being whole, it goes. The pitch is so large that this is
+    // the only cell in the field.
+    let line = |a: (f64, f64), b: (f64, f64)| Seg2::Line {
+        a: v(a.0, a.1),
+        b: v(b.0, b.1),
+    };
+    let pts = [
+        (0.0, -1e-5),
+        (1e5, -1e-5),
+        (1e5, 1e5),
+        (50100.0, 1e5),
+        (50100.0, 100.0),
+        (50000.0, 5e-7),
+        (49900.0, 100.0),
+        (49900.0, 1e5),
+        (0.0, 1e5),
+    ];
+    let profile = Loop2 {
+        segs: (0..pts.len())
+            .filter_map(|k| Some(line(*pts.get(k)?, *pts.get((k + 1) % pts.len())?)))
+            .collect(),
+    };
+    let cell = sk_cell(profile, Some(v(0.0, 0.0)), 3e5, 3e5, 0.0);
+    let spec = CellGridSpec {
+        anchor: v(0.0, 0.0),
+        ..sk_spec(Clip::Whole)
+    };
+    let field = [
+        rect(-5.0, -5.0, 100010.0, 100010.0),
+        rect(-1.0, -1.0, 100001.0, 0.0),
+    ];
+    let plan = sk_run(&field, &cell, &spec);
+    assert!(plan.cells.is_empty(), "{:?}", plan.cells.len());
+}
+
+#[test]
+fn a_clipped_piece_is_the_cells_own_only_on_one_outline_piece_of_its_kind() {
+    use crate::cell_grid::sketch::unchanged;
+    let one = |prims: Vec<Prim>, cell: &[Prim]| unchanged(&[(prims, 1.0)], cell, 1.0);
+    // An arc of radius 1000 about the origin from angle 0, sweeping 0.002 rad (a chord of 2 mm).
+    let t = 0.002;
+    let arc = Prim::arc(v(0.0, 0.0), 1000.0, 0.0, t);
+    let cell = [arc];
+    assert!(one(vec![arc], &cell), "the arc itself");
+    assert!(
+        one(
+            vec![Prim::arc(v(0.0, 0.0), 1000.0, t / 4.0, t / 2.0)],
+            &cell
+        ),
+        "a part of it"
+    );
+    assert!(
+        !one(vec![Prim::arc(v(0.0, 0.0), 1000.0, t, -t)], &cell),
+        "the same circle turned the other way"
+    );
+    assert!(
+        !one(vec![Prim::arc(v(0.0, 0.0), 1000.0, -t / 2.0, t)], &cell),
+        "starting before the outline arc, though inside the tolerance of its end"
+    );
+    // A circle of radius 1001 through the same two ends, bulging the same way. The chord is
+    // c = 2 * 1000 * sin(0.001) = 2 mm, so the sagitta c^2 / (8 r) is 4 / 8 * (1 / 1000 - 1 / 1001)
+    // = 5e-7 mm less at the middle: the ends and the middle are all within EPS of the outline
+    // arc, yet the circle is another, so it is a change.
+    let (p, q) = (arc.start(), arc.end());
+    let m = (p + q) * 0.5;
+    let half = p.distance(q) * 0.5;
+    let toward = m * (-1.0 / m.length());
+    let c2 = m + toward * (1001.0_f64 * 1001.0 - half * half).sqrt();
+    let (a, b) = (
+        det::atan2(p.y - c2.y, p.x - c2.x),
+        det::atan2(q.y - c2.y, q.x - c2.x),
+    );
+    let other = Prim::arc(c2, 1001.0, a, b - a);
+    assert!(arc.distance(other.start()) <= EPS && arc.distance(other.end()) <= EPS);
+    assert!(
+        arc.distance(other.mid()) <= EPS,
+        "{}",
+        arc.distance(other.mid())
+    );
+    assert!(!one(vec![other], &cell), "another circle");
+    // Directed containment: an outline arc of radius 10 from 0 to 270 degrees (counter-clockwise).
+    // A piece over 0..90 or 180..270 lies on it, one starting at its start (0..270) does, but the
+    // piece 270..360 on the same circle has both its ends on the outline (at 270 and, at 360, its
+    // start) and runs outside it, so it is not the cell's own.
+    let big = Prim::arc(v(0.0, 0.0), 10.0, 0.0, 3.0 * FRAC_PI_2);
+    let outline = [big];
+    let part = |from: f64, sweep: f64| Prim::arc(v(0.0, 0.0), 10.0, from, sweep);
+    assert!(one(vec![part(0.0, FRAC_PI_2)], &outline), "0..90");
+    assert!(one(vec![part(PI, FRAC_PI_2)], &outline), "180..270");
+    assert!(
+        one(vec![part(0.0, 3.0 * FRAC_PI_2)], &outline),
+        "the whole arc"
+    );
+    assert!(
+        one(vec![part(-1e-9, FRAC_PI_2)], &outline),
+        "a rounding before the start"
+    );
+    assert!(
+        !one(vec![part(3.0 * FRAC_PI_2, FRAC_PI_2)], &outline),
+        "270..360 runs outside"
+    );
+    // Lines: on one segment, or across two, and a line against an arc.
+    let square = [
+        Prim::line(v(0.0, 0.0), v(10.0, 0.0)),
+        Prim::line(v(10.0, 0.0), v(10.0, 10.0)),
+    ];
+    assert!(one(vec![Prim::line(v(2.0, 0.0), v(9.0, 1e-7))], &square));
+    assert!(
+        !one(vec![Prim::line(v(5.0, 0.0), v(10.0, 5.0))], &square),
+        "a corner cut"
+    );
+    assert!(
+        !one(vec![Prim::line(p, q)], &cell),
+        "a chord is not its arc"
+    );
+    assert!(!one(vec![arc], &square), "an arc is not a line");
+}
+
+#[test]
+fn the_neighbour_budget_leaves_out_the_cell_itself() {
+    // A strip 0.5 wide and 999.8 tall on pitch 1 along the row and 1001 between rows, the web 0.5:
+    // the reach is sqrt(499.9^2 + 0.25^2) = 499.9, so neighbours are looked for within
+    // l = 2 * 499.9 + 0.5 = 1000.3 mm, which holds the columns -1000..=1000 of the cell's own row
+    // (the next row is 1001 off): 2000 neighbours, exactly the limit, so it is planned: the
+    // columns i = 0..=9 are whole in [0, 10] x [0, 1000].
+    let strip =
+        |height: f64, pitch_y: f64| sk_cell(rect(0.0, 0.0, 0.5, height), None, 1.0, pitch_y, 0.0);
+    let spec = CellGridSpec {
+        web: 0.5,
+        anchor: v(0.25, 499.9),
+        ..sk_spec(Clip::Whole)
+    };
+    let plan = sk_run(
+        &[rect(0.0, 0.0, 10.0, 1000.0)],
+        &strip(999.8, 1001.0),
+        &spec,
+    );
+    assert_eq!((plan.whole, plan.partial), (10, 0));
+    // 1000.8 tall (l = 1001.3: columns -1001..=1001, 2002 neighbours) on rows 2000 apart: refused.
+    match plan_sketch(
+        &[rect(0.0, 0.0, 10.0, 1000.0)],
+        &strip(1000.8, 2000.0),
+        &spec,
+    ) {
+        Err(CellGridError::Layout(m)) => assert!(m.contains("neighbouring cells"), "{m}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn rows_a_pitch_apart_with_few_neighbours_in_reach_are_planned() {
+    // A strip cell 2098 x 0.5 on rows 1 mm apart, each row shifted 2100 along (pitch_x 1e6, stagger
+    // 0.0021). The reach is 1049 mm, so neighbours are looked for within 2100 mm: 2100 rows, but
+    // a row holds a neighbour only where its shift of 2100 per row, less whole pitches of 1e6,
+    // lands within that: a few of them. The layout is fine (neighbours 2 mm apart along the rows),
+    // so it is planned and cell (0, 0) is whole in the field [0, 3000] x [0, 10].
+    let cell = sk_cell(rect(0.0, 0.0, 2098.0, 0.5), None, 1e6, 1.0, 0.0021);
+    let spec = CellGridSpec {
+        anchor: v(1049.0, 0.25),
+        ..sk_spec(Clip::Whole)
+    };
+    let plan = sk_run(&[rect(0.0, 0.0, 3000.0, 10.0)], &cell, &spec);
+    assert!(plan
+        .cells
+        .iter()
+        .any(|c| (c.i, c.j) == (0, 0) && c.kind == CellKind::Whole));
+}
+
+#[test]
+fn neighbours_are_counted_in_the_disc_of_the_reach_not_in_the_square_round_it() {
+    // A square of 10 with its origin 130 mm off, on a pitch of 12 (the web 2 apart): the reach is
+    // the corner (10, 10) seen from the origin, sqrt(140^2 + 10^2) = 140.357, so neighbours are
+    // looked for within l = 2 * 140.357 + 2 = 282.71 mm = 23.56 pitches. The square of that
+    // holds 47 x 47 = 2209 offsets, more than the 2000 allowed; the disc holds about
+    // pi * 23.56^2 = 1744. The layout is fine, so it is planned, and the cells of the field
+    // [0, 100]^2: x in [135 + 12 i, 145 + 12 i] whole for i = -11..=-4 (8 columns) and
+    // y in [5 + 12 j, 15 + 12 j] for j = 0..=7 (8 rows).
+    let cell = sk_cell(
+        rect(0.0, 0.0, 10.0, 10.0),
+        Some(v(-130.0, 0.0)),
+        12.0,
+        12.0,
+        0.0,
+    );
+    let plan = sk_run(
+        &[rect(0.0, 0.0, 100.0, 100.0)],
+        &cell,
+        &sk_spec(Clip::Whole),
+    );
+    assert_eq!((plan.whole, plan.partial), (64, 0));
+}
+
+#[test]
+fn a_very_shallow_arc_still_moves_the_default_origin_by_its_cap() {
+    // A 4e4 x 1000 rectangle whose top side is an arc of radius 5e8 mm bulging up: its sweep is
+    // 8e-5 rad (under 1e-4), its sagitta 0.4 mm. The cap has the area r^2 t^3 / 12 = 10667 mm2
+    // (t the sweep) and its centroid lies 0.2 r (t / 2)^2 = 0.16 mm above the chord, so the
+    // centroid of the cell is y = (4e7 * 500 + 10667 * 1000.16) / (4e7 + 10667) mm and x = 2e4.
+    let (r, t) = (5e8_f64, 8e-5_f64);
+    let arc = Seg2::Arc {
+        center: v(2e4, 1000.0 - r * det::cos(t / 2.0)),
+        radius: r,
+        start: FRAC_PI_2 - t / 2.0,
+        sweep: t,
+    };
+    let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+    let profile = Loop2 {
+        segs: vec![
+            line(v(0.0, 0.0), v(4e4, 0.0)),
+            line(v(4e4, 0.0), arc.start()),
+            arc,
+            line(arc.end(), v(0.0, 0.0)),
+        ],
+    };
+    let cap = r * r * t * t * t / 12.0;
+    let cy = (4e7 * 500.0 + cap * (1000.0 + 0.2 * r * (t / 2.0) * (t / 2.0))) / (4e7 + cap);
+    let cell = sk_cell(profile, None, 5e4, 1100.0, 0.0);
+    let spec = CellGridSpec {
+        anchor: v(0.0, 0.0),
+        ..sk_spec(Clip::Whole)
+    };
+    let plan = sk_run(&[rect(-3e4, -2e3, 3e4, 2e3)], &cell, &spec);
+    let first = plan.cells.iter().find(|c| (c.i, c.j) == (0, 0)).unwrap();
+    let start = first.loops[0].segs[0].start();
+    assert!((start.x + 2e4).abs() < 1e-5, "{}", start.x);
+    assert!((start.y + cy).abs() < 1e-5, "{} vs {}", start.y, -cy);
+}
+
+#[test]
+fn staggered_rows_shift_by_half_a_pitch_at_a_stagger_of_one_half() {
+    // b = (6, 12): row j is shifted by 6 j, so its cells start at x = 12 i + 6 j (a cell is 10
+    // wide, rows 12 apart, so rows do not touch: a gap of 2 in y). In [0, 100] a row needs the
+    // start in [0, 90]: even rows start at 0, 12, ..., 84 (8 cells) and odd rows at 6, 18, ..., 90
+    // (8 cells, the last flush with x = 100). Rows start at y = 12 j <= 90: j = 0..=7. 64 cells.
+    let field = [rect(0.0, 0.0, 100.0, 100.0)];
+    let plan = sk_run(
+        &field,
+        &sk_cell(rect(0.0, 0.0, 10.0, 10.0), None, 12.0, 12.0, 0.5),
+        &sk_spec(Clip::Whole),
+    );
+    assert_eq!((plan.whole, plan.partial), (64, 0));
+    sk_close(plan.open_area, 6400.0);
+    let cell = |i: i64, j: i64| plan.cells.iter().find(|c| (c.i, c.j) == (i, j)).unwrap();
+    // Cell (0, 1) is half a pitch along from cell (0, 0) and a row up.
+    let (c0, c1) = (cell(0, 0).center, cell(0, 1).center);
+    sk_close(c1.x - c0.x, 6.0);
+    sk_close(c1.y - c0.y, 12.0);
+}
+
+#[test]
+fn a_skewed_stagger_shifts_every_row_by_its_fraction_of_the_pitch_more() {
+    // stagger 0.3 on pitch 12: row j is `3.6 j` along. Anchor (5.5, 5), so a cell starts at
+    // x0 = 0.5 + 12 i + 3.6 j and fits in [0, 100] for 0 <= x0 <= 90. The smallest start of row j
+    // is 0.5 + (3.6 j mod 12): 0.5, 4.1, 7.7, 11.3, 2.9, 6.5, 10.1, 1.7 for j = 0..=7, and a row
+    // holds floor((90 - start) / 12) + 1 cells: 8, 8, 7, 7, 8, 7, 7, 8 = 60. Rows start at
+    // y = 12 j <= 90: j = 0..=7.
+    let field = [rect(0.0, 0.0, 100.0, 100.0)];
+    let spec = CellGridSpec {
+        anchor: v(5.5, 5.0),
+        ..sk_spec(Clip::Whole)
+    };
+    let cell = sk_cell(rect(0.0, 0.0, 10.0, 10.0), None, 12.0, 12.0, 0.3);
+    let plan = sk_run(&field, &cell, &spec);
+    assert_eq!((plan.whole, plan.partial), (60, 0));
+    sk_close(plan.open_area, 6000.0);
+}
+
+#[test]
+fn an_l_with_an_arc_fills_a_square_and_a_staggered_lattice() {
+    // Origin at the profile's zero; the cell is 10 wide and 12 tall (the arc's top is at y = 12),
+    // pitch 14 x 16, so cell (i, j) covers [x0, x0 + 10] x [16 j, 16 j + 12] with x0 = 14 i + s j,
+    // s the row shift, and the nearest neighbours are 4 mm away: a web of 2 is kept. Whole in
+    // [0, 100]^2 needs 16 j + 12 <= 100: j = 0..=5, and 0 <= x0 <= 90.
+    let field = [rect(0.0, 0.0, 100.0, 100.0)];
+    let spec = CellGridSpec {
+        anchor: v(0.0, 0.0),
+        ..sk_spec(Clip::Whole)
+    };
+    // Square lattice (s = 0): x0 = 0, 14, ..., 84 (7 cells) in each of 6 rows: 42.
+    let square = sk_run(&field, &sk_l(14.0, 16.0, 0.0), &spec);
+    assert_eq!(square.whole, 42);
+    sk_close(square.open_area, 42.0 * SK_L_AREA);
+    // Staggered 0.5 (s = 7 j): even rows start at 0, 14, ..., 84 (7 cells), odd rows at 7, 21,
+    // ..., 77 (6 cells; the next, 91, is past 90). Rows 0, 2, 4 give 21 and rows 1, 3, 5 give 18.
+    let staggered = sk_run(&field, &sk_l(14.0, 16.0, 0.5), &spec);
+    assert_eq!(staggered.whole, 39);
+    sk_close(staggered.open_area, 39.0 * SK_L_AREA);
+}
+
+#[test]
+fn the_default_origin_is_the_centroid_of_the_outline_with_its_arcs() {
+    // Parts: the foot (area 40, centroid (5, 2)), the stem (24, (2, 7)) and the half disc of the
+    // cap (2 pi, (2, 10 + 4 r / (3 pi)) with r = 2). The centroid is their area-weighted mean.
+    let area = 64.0 + 2.0 * PI;
+    let cx = (40.0 * 5.0 + 24.0 * 2.0 + 2.0 * PI * 2.0) / area;
+    let cy = (40.0 * 2.0 + 24.0 * 7.0 + 2.0 * PI * (10.0 + 8.0 / (3.0 * PI))) / area;
+    let cell = sk_cell(sk_l_arc(), None, 14.0, 16.0, 0.0);
+    let spec = CellGridSpec {
+        anchor: v(50.0, 50.0),
+        ..sk_spec(Clip::Whole)
+    };
+    let plan = sk_run(&[rect(0.0, 0.0, 100.0, 100.0)], &cell, &spec);
+    let first = plan.cells.iter().find(|c| (c.i, c.j) == (0, 0)).unwrap();
+    // Cell (0, 0) sits with its origin on the anchor, so the profile's zero is the centroid back.
+    sk_close(first.center.x, 50.0);
+    let start = first.loops[0].segs[0].start();
+    sk_close(start.x, 50.0 - cx);
+    sk_close(start.y, 50.0 - cy);
+}
+
+#[test]
+fn a_cell_turned_on_its_own_stays_a_cell_about_its_origin() {
+    // Squares of side 10 turned 30 degrees about their centres, pitch 20, anchor (50, 50): cell
+    // (i, j) is centred at (50 + 20 i, 50 + 20 j). A turned square reaches 5 (cos 30 + sin 30) =
+    // 6.83 each way, so centres 10, 30, 50, 70, 90 (i = -2..=2) fit in [0, 100]: 5 x 5 = 25 cells.
+    let mut cell = sk_cell(rect(0.0, 0.0, 10.0, 10.0), None, 20.0, 20.0, 0.0);
+    cell.cell_angle = PI / 6.0;
+    let spec = CellGridSpec {
+        anchor: v(50.0, 50.0),
+        ..sk_spec(Clip::Whole)
+    };
+    let plan = sk_run(&[rect(0.0, 0.0, 100.0, 100.0)], &cell, &spec);
+    assert_eq!((plan.whole, plan.partial), (25, 0));
+    sk_close(plan.open_area, 2500.0);
+    // Each opening is the square turned: its corners are 5 sqrt 2 from the centre and its sides
+    // are turned by 30 degrees.
+    let c = plan.cells.iter().find(|c| (c.i, c.j) == (0, 0)).unwrap();
+    for p in sk_points(c) {
+        sk_close(p.distance(c.center), 5.0 * 2.0_f64.sqrt());
+    }
+    let first = &c.loops[0].segs[0];
+    let d = first.end() - first.start();
+    let turn = det::atan2(d.y, d.x).rem_euclid(FRAC_PI_2);
+    sk_close(turn, PI / 6.0);
+}
+
+#[test]
+fn a_grid_angle_turns_the_lattice_about_the_anchor() {
+    // The same square lattice turned a quarter turn about the anchor is the same set of cells:
+    // cell (i, j) lands where cell (-j, i) was.
+    let cell = sk_square();
+    let a = CellGridSpec {
+        anchor: v(50.0, 50.0),
+        ..sk_spec(Clip::Whole)
+    };
+    let b = CellGridSpec {
+        angle: FRAC_PI_2,
+        ..a
+    };
+    for (i, j) in [(0, 0), (1, 0), (2, 3), (-3, 1)] {
+        let p = sketch_cell_center(&b, &cell, i, j).unwrap();
+        let q = sketch_cell_center(&a, &cell, -j, i).unwrap();
+        sk_close(p.x, q.x);
+        sk_close(p.y, q.y);
+    }
+}
+
+#[test]
+fn a_cells_centre_follows_the_pitch_the_stagger_the_angle_and_the_anchor() {
+    // Cell (2, 3) on pitch 14 x 16 with stagger 0.5 is at 2 a + 3 b = (28 + 21, 48) = (49, 48)
+    // from the anchor (10, 20): (59, 68); turned a quarter about the anchor, (49, 48) becomes
+    // (-48, 49), so (-38, 69).
+    let cell = sk_l(14.0, 16.0, 0.5);
+    let spec = CellGridSpec {
+        anchor: v(10.0, 20.0),
+        ..sk_spec(Clip::Whole)
+    };
+    let p = sketch_cell_center(&spec, &cell, 2, 3).unwrap();
+    sk_close(p.x, 59.0);
+    sk_close(p.y, 68.0);
+    let turned = CellGridSpec {
+        angle: FRAC_PI_2,
+        ..spec
+    };
+    let p = sketch_cell_center(&turned, &cell, 2, 3).unwrap();
+    sk_close(p.x, -38.0);
+    sk_close(p.y, 69.0);
+}
+
+#[test]
+fn flip_mirrors_the_cells_with_i_plus_j_odd_and_lets_them_interlock() {
+    // With the L's foot 10 wide, a mirrored neighbour at pitch_x 22 spans [12, 22] against the
+    // cell's [0, 10]: 2 apart, the web. (Mirroring is in the vertical axis through the origin, so
+    // an odd cell spans [x - 10, x] about its origin x.)
+    let mut cell = sk_l(22.0, 16.0, 0.0);
+    cell.flip = true;
+    let spec = CellGridSpec {
+        anchor: v(0.0, 0.0),
+        ..sk_spec(Clip::Whole)
+    };
+    let field = [rect(-50.0, -50.0, 150.0, 150.0)];
+    let plan = sk_run(&field, &cell, &spec);
+    let x_range = |i: i64, j: i64| {
+        let c = plan.cells.iter().find(|c| (c.i, c.j) == (i, j)).unwrap();
+        let pts = sk_points(c);
+        let lo = pts.iter().map(|p| p.x).fold(f64::INFINITY, f64::min);
+        let hi = pts.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max);
+        (lo, hi)
+    };
+    // (0, 0) and (1, 1) are the cell as drawn (i + j even); (1, 0) and (0, 1) are mirrored.
+    assert_eq!(x_range(0, 0), (0.0, 10.0));
+    let (lo, hi) = x_range(1, 0);
+    sk_close(lo, 12.0);
+    sk_close(hi, 22.0);
+    let (lo, hi) = x_range(0, 1);
+    sk_close(lo, -10.0);
+    sk_close(hi, 0.0);
+    let (lo, hi) = x_range(1, 1);
+    sk_close(lo, 22.0);
+    sk_close(hi, 32.0);
+    // A mirrored loop is still counter-clockwise.
+    for c in &plan.cells {
+        for l in &c.loops {
+            assert!(l.signed_area().unwrap().value > 0.0);
+        }
+    }
+    // The same pitch without the flip puts the cells 22 apart in a row, so the flip changed them.
+    let mut plain = cell.clone();
+    plain.flip = false;
+    let plain = sk_run(&field, &plain, &spec);
+    let c = plain.cells.iter().find(|c| (c.i, c.j) == (1, 0)).unwrap();
+    assert!(sk_points(c).iter().all(|p| p.x >= 22.0 - 1e-9));
+}
+
+#[test]
+fn a_cell_that_overlaps_its_neighbour_is_refused_with_the_pitch_named() {
+    let spec = sk_spec(Clip::Whole);
+    let field = [rect(0.0, 0.0, 100.0, 100.0)];
+    // A foot 10 wide on pitch 8 overlaps the next cell's foot.
+    let e = plan_sketch(&field, &sk_l(8.0, 16.0, 0.0), &spec).unwrap_err();
+    assert!(matches!(e, CellGridError::Layout(_)), "{e}");
+    assert!(e.to_string().contains("overlaps"), "{e}");
+    assert!(e.to_string().contains("pitch_x"), "{e}");
+    // A cell of area 70 cannot fit a 5 x 5 pitch.
+    let e = plan_sketch(&field, &sk_l(5.0, 5.0, 0.0), &spec).unwrap_err();
+    assert!(matches!(e, CellGridError::Layout(_)), "{e}");
+    // Mirrored cells on pitch_x 19 overlap: the neighbour spans [9, 19] against [0, 10].
+    let mut flipped = sk_l(19.0, 16.0, 0.0);
+    flipped.flip = true;
+    assert!(matches!(
+        plan_sketch(&field, &flipped, &spec),
+        Err(CellGridError::Layout(_))
+    ));
+    // A stagger that slides a cell onto the row below overlaps it: pitch_y 6 puts the next row's
+    // cells inside the L's stem.
+    assert!(matches!(
+        plan_sketch(&field, &sk_l(14.0, 6.0, 0.5), &spec),
+        Err(CellGridError::Layout(_))
+    ));
+    // A square 10 tall on a row pitch of 9 overlaps the row above, though its area fits the pitch.
+    assert!(matches!(
+        plan_sketch(
+            &field,
+            &sk_cell(rect(0.0, 0.0, 10.0, 10.0), None, 12.0, 9.0, 0.0),
+            &spec
+        ),
+        Err(CellGridError::Layout(_))
+    ));
+}
+
+#[test]
+fn a_web_wider_than_the_gap_is_refused_and_one_within_it_is_kept() {
+    // The L's nearest neighbours are 4 mm away on pitch 14 x 16 (14 - 10 along a row, 16 - 12 up a
+    // column), so a web of 3.9 is kept and 4.5 is not.
+    let field = [rect(0.0, 0.0, 100.0, 100.0)];
+    let with_web = |web: f64| CellGridSpec {
+        web,
+        anchor: v(0.0, 0.0),
+        ..sk_spec(Clip::Whole)
+    };
+    assert!(plan_sketch(&field, &sk_l(14.0, 16.0, 0.0), &with_web(3.9)).is_ok());
+    let e = plan_sketch(&field, &sk_l(14.0, 16.0, 0.0), &with_web(4.5)).unwrap_err();
+    assert!(matches!(e, CellGridError::Layout(_)), "{e}");
+    let msg = e.to_string();
+    assert!(msg.contains("closer than the web of 4.5"), "{msg}");
+    assert!(msg.contains("pitch_x"), "{msg}");
+    // Cells that share an edge exactly are not overlapping: with a web of 0 they are accepted.
+    let tiled = sk_cell(rect(0.0, 0.0, 10.0, 10.0), None, 10.0, 10.0, 0.0);
+    let plan = plan_sketch(
+        &field,
+        &tiled,
+        &CellGridSpec {
+            web: 0.0,
+            anchor: v(5.0, 5.0),
+            ..sk_spec(Clip::Whole)
+        },
+    )
+    .unwrap();
+    assert_eq!(plan.whole, 100);
+}
+
+#[test]
+fn snap_is_refused_for_a_sketched_cell() {
+    let field = [rect(0.0, 0.0, 100.0, 100.0)];
+    let cell = sk_square();
+    for spec in [
+        sk_spec(Clip::Snap),
+        CellGridSpec {
+            keepout_clip: Some(Clip::Snap),
+            ..sk_spec(Clip::Free)
+        },
+    ] {
+        let e = plan_sketch(&field, &cell, &spec).unwrap_err();
+        assert!(matches!(e, CellGridError::Parameter(_)), "{e}");
+        assert!(
+            e.to_string()
+                .contains("snap needs the cell's own chords; use whole or free"),
+            "{e}"
+        );
+    }
+}
+
+#[test]
+fn a_margin_keeps_whole_sketched_cells_that_far_from_every_edge() {
+    // Margin 3: cell i covers [12 i, 12 i + 10], so it needs 12 i >= 3 and 12 i + 10 <= 97:
+    // i = 1..=7, 7 x 7 = 49 cells (i = 0 touches the field's edge, i = 8 is cut).
+    let spec = CellGridSpec {
+        margin: 3.0,
+        ..sk_spec(Clip::Whole)
+    };
+    let plan = sk_run(&[rect(0.0, 0.0, 100.0, 100.0)], &sk_square(), &spec);
+    assert_eq!((plan.whole, plan.partial), (49, 0));
+    // Around a keep-out as well: [40, 60]^2 with margin 3 drops the cells within 3 of it:
+    // i = 2 ends at 34 (6 away, kept), 5 starts at 60 (touching, dropped), 3 and 4 overlap.
+    let around = sk_run(
+        &[rect(0.0, 0.0, 100.0, 100.0), rect(40.0, 40.0, 60.0, 60.0)],
+        &sk_square(),
+        &spec,
+    );
+    // Columns i, rows j in 1..=7; cells dropped have i in {3, 4, 5} and j in {3, 4, 5}
+    // within reach: x in [36, 46], [48, 58], [60, 70] with y in the same three: 9 cells.
+    assert_eq!(around.whole, 49 - 9);
+}
+
+#[test]
+fn cells_round_a_circular_field_are_decided_on_the_arc() {
+    // A circle of radius 30 about (50, 50), squares centred on (50 + 12 i, 50 + 12 j), half side
+    // 5. A cell's farthest corner is sqrt((12 |i| + 5)^2 + (12 |j| + 5)^2) from the centre:
+    // 24.04 for |i| = |j| = 1 (kept), 29.43 for (2, 0) (kept), 33.6 for (2, 1) (dropped). The
+    // kept cells are |i|, |j| <= 1 (9) and the four (+-2, 0), (0, +-2): 13.
+    let field = [circle(50.0, 50.0, 30.0)];
+    let spec = CellGridSpec {
+        anchor: v(50.0, 50.0),
+        ..sk_spec(Clip::Whole)
+    };
+    let whole = sk_run(&field, &sk_square(), &spec);
+    assert_eq!((whole.whole, whole.partial), (13, 0));
+    let free = sk_run(
+        &field,
+        &sk_square(),
+        &CellGridSpec {
+            clip: Clip::Free,
+            ..spec
+        },
+    );
+    assert_eq!(free.whole, 13);
+    assert!(free.partial > 0);
+    assert!(free.open_area > whole.open_area);
+    // The trimmed cells stay inside the circle: the openings cannot add up to more than its area.
+    assert!(free.open_area < PI * 30.0 * 30.0);
+}
+
+#[test]
+fn free_trims_a_cell_that_is_not_convex_to_the_field_exactly() {
+    // Row j = 6 of the L cells on pitch 14 x 16 starts at y = 96, so the foot (4 tall) tops out
+    // exactly at the field's edge y = 100 and the stem and cap lie above it. Each of the cells
+    // i = 0..=6 (x0 = 14 i, up to 84 + 10 = 94) is cut to its foot: 10 x 4 = 40; the cell i = 7
+    // starts at x = 98, so its foot is cut to 2 wide: 2 x 4 = 8. That is 7 x 40 + 8 = 288.
+    let spec = CellGridSpec {
+        anchor: v(0.0, 0.0),
+        ..sk_spec(Clip::Free)
+    };
+    let plan = sk_run(
+        &[rect(0.0, 0.0, 100.0, 100.0)],
+        &sk_l(14.0, 16.0, 0.0),
+        &spec,
+    );
+    let row: Vec<&GridCell> = plan.cells.iter().filter(|c| c.j == 6).collect();
+    assert_eq!(row.len(), 8);
+    let area: f64 = row.iter().map(|c| c.area).sum();
+    sk_close(area, 288.0);
+    assert!(row.iter().all(|c| c.kind == CellKind::Free));
+    // Whole drops them all.
+    let whole = sk_run(
+        &[rect(0.0, 0.0, 100.0, 100.0)],
+        &sk_l(14.0, 16.0, 0.0),
+        &CellGridSpec {
+            clip: Clip::Whole,
+            ..spec
+        },
+    );
+    assert!(whole.cells.iter().all(|c| c.j <= 5));
+}
+
+#[test]
+fn two_fields_with_the_same_sketched_grid_line_up() {
+    // The cells are worked out from their indices, so a field shifted along the lattice gets the
+    // very same cells where the two overlap.
+    let cell = sk_l(14.0, 16.0, 0.3);
+    let spec = CellGridSpec {
+        anchor: v(3.0, 4.0),
+        angle: 0.2,
+        ..sk_spec(Clip::Free)
+    };
+    let a = sk_run(&[rect(0.0, 0.0, 100.0, 100.0)], &cell, &spec);
+    let b = sk_run(&[rect(50.0, 0.0, 150.0, 100.0)], &cell, &spec);
+    let again = sk_run(&[rect(0.0, 0.0, 100.0, 100.0)], &cell, &spec);
+    assert_eq!(a, again);
+    let mut shared = 0;
+    for x in &a.cells {
+        if let Some(y) = b.cells.iter().find(|y| (y.i, y.j) == (x.i, x.j)) {
+            if x.kind == CellKind::Whole && y.kind == CellKind::Whole {
+                assert_eq!(x.center, y.center);
+                assert_eq!(x.loops, y.loops);
+                shared += 1;
+            }
+        }
+    }
+    assert!(shared > 0);
+}
+
+#[test]
+fn hostile_sketched_cells_are_refused_and_never_panic() {
+    let field = [rect(0.0, 0.0, 100.0, 100.0)];
+    let spec = sk_spec(Clip::Whole);
+    let nan = f64::NAN;
+    let inf = f64::INFINITY;
+    let mut cases: Vec<(&str, SketchCell, CellGridSpec)> = Vec::new();
+    let mut add = |name: &'static str, f: &dyn Fn(&mut SketchCell, &mut CellGridSpec)| {
+        let (mut c, mut s) = (sk_square(), spec);
+        f(&mut c, &mut s);
+        cases.push((name, c, s));
+    };
+    add("pitch_x NaN", &|c, _| c.pitch_x = nan);
+    add("pitch_y NaN", &|c, _| c.pitch_y = nan);
+    add("pitch_x zero", &|c, _| c.pitch_x = 0.0);
+    add("pitch_y zero", &|c, _| c.pitch_y = 0.0);
+    add("pitch negative", &|c, _| c.pitch_x = -12.0);
+    add("pitch infinite", &|c, _| c.pitch_y = inf);
+    add("pitch huge", &|c, _| c.pitch_x = 1e12);
+    add("stagger NaN", &|c, _| c.stagger = nan);
+    add("stagger above 1", &|c, _| c.stagger = 1.5);
+    add("stagger below 0", &|c, _| c.stagger = -0.1);
+    add("cell angle NaN", &|c, _| c.cell_angle = nan);
+    add("cell angle huge", &|c, _| c.cell_angle = 1e30);
+    add("origin NaN", &|c, _| c.origin = Some(v(nan, 0.0)));
+    add("origin huge", &|c, _| c.origin = Some(v(1e12, 0.0)));
+    add("web NaN", &|_, s| s.web = nan);
+    add("web negative", &|_, s| s.web = -1.0);
+    add("web huge", &|_, s| s.web = 1e12);
+    add("grid angle NaN", &|_, s| s.angle = nan);
+    add("anchor infinite", &|_, s| s.anchor = v(inf, 0.0));
+    add("margin negative", &|_, s| s.margin = -1.0);
+    add("empty profile", &|c, _| {
+        c.profile = Loop2 { segs: Vec::new() }
+    });
+    add("open profile", &|c, _| {
+        c.profile = Loop2 {
+            segs: vec![
+                Seg2::Line {
+                    a: v(0.0, 0.0),
+                    b: v(10.0, 0.0),
+                },
+                Seg2::Line {
+                    a: v(10.0, 0.0),
+                    b: v(10.0, 10.0),
+                },
+                Seg2::Line {
+                    a: v(10.0, 10.0),
+                    b: v(0.0, 10.0),
+                },
+            ],
+        }
+    });
+    add("bow tie", &|c, _| {
+        c.profile = polygon(&[(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0)]);
+    });
+    add("zero area", &|c, _| {
+        c.profile = polygon(&[(0.0, 0.0), (10.0, 0.0)]);
+    });
+    add("profile NaN", &|c, _| {
+        c.profile = polygon(&[(0.0, 0.0), (nan, 0.0), (10.0, 10.0)]);
+    });
+    add("profile coordinate huge", &|c, _| {
+        c.profile = rect(0.0, 0.0, 1e10, 1e10);
+    });
+    add("profile reaches too far", &|c, _| {
+        c.profile = rect(0.0, 0.0, 3e6, 3e6);
+    });
+    add("profile with a spline", &|c, _| {
+        c.profile = Loop2 {
+            segs: vec![
+                Seg2::Cubic {
+                    p0: v(0.0, 0.0),
+                    p1: v(5.0, 5.0),
+                    p2: v(8.0, 5.0),
+                    p3: v(10.0, 0.0),
+                },
+                Seg2::Line {
+                    a: v(10.0, 0.0),
+                    b: v(0.0, 0.0),
+                },
+            ],
+        }
+    });
+    add("profile too many segments", &|c, _| {
+        let pts: Vec<(f64, f64)> = (0..300)
+            .map(|k| {
+                let a = f64::from(k) / 300.0 * 2.0 * PI;
+                (5.0 * det::cos(a), 5.0 * det::sin(a))
+            })
+            .collect();
+        c.profile = polygon(&pts);
+    });
+    add("arc with no radius", &|c, _| {
+        c.profile = Loop2 {
+            segs: vec![Seg2::Arc {
+                center: v(0.0, 0.0),
+                radius: 0.0,
+                start: 0.0,
+                sweep: PI,
+            }],
+        }
+    });
+    for (name, cell, spec) in &cases {
+        assert!(
+            plan_sketch(&field, cell, spec).is_err(),
+            "{name} was not refused"
+        );
+    }
+    // A tiny pitch against a big field is too many cells, not a hang; a huge but legal pitch is
+    // fine; an open field is refused as the other shapes' fields are.
+    let big = [rect(0.0, 0.0, 1e6, 1e6)];
+    let tiny = sk_cell(rect(0.0, 0.0, 0.01, 0.01), None, 0.02, 0.02, 0.0);
+    assert!(matches!(
+        plan_sketch(&big, &tiny, &CellGridSpec { web: 0.0, ..spec }),
+        Err(CellGridError::TooManyCells { .. })
+    ));
+    let sparse = sk_cell(rect(0.0, 0.0, 10.0, 10.0), None, 1e8, 1e8, 0.5);
+    assert!(plan_sketch(&field, &sparse, &spec).is_ok());
+    let open = [Loop2 {
+        segs: vec![Seg2::Line {
+            a: v(0.0, 0.0),
+            b: v(10.0, 0.0),
+        }],
+    }];
+    assert!(matches!(
+        plan_sketch(&open, &sk_square(), &spec),
+        Err(CellGridError::Field(_))
+    ));
 }
