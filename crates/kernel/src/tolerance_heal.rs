@@ -335,7 +335,10 @@ mod tests {
     fn failed(tests: &[(&str, usize)]) -> CheckFailure {
         CheckFailure {
             failures: tests.iter().map(|t| t.1).sum(),
-            tests: tests.iter().map(|&(name, times)| FailedTest { name: name.into(), number: None, owners: Vec::new(), times }).collect(),
+            tests: tests
+                .iter()
+                .map(|&(name, times)| FailedTest { name: name.into(), number: None, owners: Vec::new(), edges: Vec::new(), times })
+                .collect(),
         }
     }
 

@@ -1561,6 +1561,7 @@ fn a_part_smlibs_check_fails_is_reported_at_import_by_name() {
     assert_eq!(issue.detail, format!("solid 'Bloco': needs repair before it can be modelled: SMLib's check fails it: {summary}"));
     assert!(imp.warnings.contains(&issue.detail), "{:?}", imp.warnings);
     assert!(summary.starts_with(&format!("{} failed test", check.failures)), "{summary}");
+    assert!(summary.contains(" on edge"), "the summary names the edges: {summary}");
     // Each test the check failed is named once, with how many times it failed.
     for line in check.text.lines().filter(|l| l.contains("Test #")) {
         let name = &line[..line.find(" (").unwrap()];
@@ -1737,7 +1738,7 @@ fn heal_run(body: &Body, placements: &[M4], workers: usize) -> (Vec<ImportIssue>
 fn failed_as_read() -> crate::CheckFailure {
     crate::CheckFailure {
         failures: 1,
-        tests: vec![crate::validation::FailedTest { name: "as read".into(), number: None, owners: Vec::new(), times: 1 }],
+        tests: vec![crate::validation::FailedTest { name: "as read".into(), number: None, owners: Vec::new(), edges: Vec::new(), times: 1 }],
     }
 }
 

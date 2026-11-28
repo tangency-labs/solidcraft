@@ -299,7 +299,7 @@ pub(crate) fn failing_check_local(body: &Body, faces: &[usize], edges: &[usize])
 /// What SMLib's check failed in a body: how many tests failed, and each test that failed, where
 /// the check reports it (its site: the test's number and name, and the kind of entity it failed
 /// on), with how many times. Shown in a line ([`std::fmt::Display`]): `3 failed tests: SmEdge::Test
-/// #7 Bad Edge Length: less than edge tolerance (×2); SmLoop::Test #2 Bad Loop Orient`, in the
+/// #7 Bad Edge Length: less than edge tolerance (×2) on edges 3, 7; SmLoop::Test #2 Bad Loop Orient`, in the
 /// order the check first reported them. Each failure's own values stay in the check's text.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckFailure {
@@ -319,9 +319,15 @@ pub struct FailedTest {
     pub number: Option<u32>,
     /// The kinds of entity it failed on (`SmVertex`), each once, when the check names them.
     pub owners: Vec<String>,
+    /// The edges it failed on, each once, in the order the check first reported them, by the
+    /// index of the edge in the checked body's edge arena (`EdgeId::index`): the check's `[edge N]`.
+    pub edges: Vec<u32>,
     /// How many times it failed.
     pub times: usize,
 }
+
+/// The edges a failed test's line names before it says how many more.
+const EDGES_SHOWN: usize = 8;
 
 impl CheckFailure {
     /// The failure `check` reports, `None` when it passes.
@@ -333,9 +339,15 @@ impl CheckFailure {
         // "AssertValid skipped" says why the second half of the check did not run: not a test failed.
         for line in check.text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("AssertValid skipped")) {
             // The test's name ends where its values or its owner start.
-            let name =
-                [line.find(" ("), line.find(" [owner")].into_iter().flatten().min().map_or(line, |end| line.get(..end).unwrap_or(line)).trim_end();
-            let owner = line.rsplit_once("[owner ").and_then(|(_, rest)| rest.strip_suffix(']')).map(str::trim).filter(|o| !o.is_empty());
+            let name = [line.find(" ("), line.find(" [owner"), line.find(" [edge")]
+                .into_iter()
+                .flatten()
+                .min()
+                .map_or(line, |end| line.get(..end).unwrap_or(line))
+                .trim_end();
+            let owner =
+                line.rsplit_once("[owner ").and_then(|(_, rest)| rest.split_once(']')).map(|(owner, _)| owner.trim()).filter(|o| !o.is_empty());
+            let edge = line.rsplit_once("[edge ").and_then(|(_, rest)| rest.split_once(']')).and_then(|(n, _)| n.trim().parse::<u32>().ok());
             let i = match tests.iter().position(|t| t.name == name) {
                 Some(i) => i,
                 None => {
@@ -343,7 +355,7 @@ impl CheckFailure {
                         let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
                         digits.parse().ok()
                     });
-                    tests.push(FailedTest { name: name.to_string(), number, owners: Vec::new(), times: 0 });
+                    tests.push(FailedTest { name: name.to_string(), number, owners: Vec::new(), edges: Vec::new(), times: 0 });
                     tests.len() - 1
                 }
             };
@@ -351,6 +363,9 @@ impl CheckFailure {
                 t.times += 1;
                 if let Some(owner) = owner.filter(|o| !t.owners.iter().any(|known| known == o)) {
                     t.owners.push(owner.to_string());
+                }
+                if let Some(edge) = edge.filter(|e| !t.edges.contains(e)) {
+                    t.edges.push(edge);
                 }
             }
         }
@@ -364,7 +379,18 @@ impl std::fmt::Display for CheckFailure {
         write!(f, "{} failed test{s}: ", self.failures)?;
         for (i, t) in self.tests.iter().enumerate() {
             let sep = if i == 0 { "" } else { "; " };
-            if t.times > 1 { write!(f, "{sep}{} (×{})", t.name, t.times)? } else { write!(f, "{sep}{}", t.name)? }
+            if t.times > 1 {
+                write!(f, "{sep}{} (×{})", t.name, t.times)?
+            } else {
+                write!(f, "{sep}{}", t.name)?
+            }
+            if !t.edges.is_empty() {
+                let shown: Vec<String> = t.edges.iter().take(EDGES_SHOWN).map(u32::to_string).collect();
+                write!(f, " on edge{} {}", if t.edges.len() == 1 { "" } else { "s" }, shown.join(", "))?;
+                if t.edges.len() > EDGES_SHOWN {
+                    write!(f, " and {} more", t.edges.len() - EDGES_SHOWN)?;
+                }
+            }
         }
         Ok(())
     }
@@ -474,10 +500,30 @@ mod tests {
                 t.number.map(|n| n.to_string()),
                 t.name.split_once("Test #").map(|(_, r)| r.chars().take_while(char::is_ascii_digit).collect())
             );
-            assert!(t.owners.iter().all(|o| lines.iter().any(|l| l.starts_with(&t.name) && l.ends_with(&format!("[owner {o}]")))), "{t:?}");
+            assert!(t.owners.iter().all(|o| lines.iter().any(|l| l.starts_with(&t.name) && l.contains(&format!("[owner {o}]")))), "{t:?}");
         }
         assert!(failure.to_string().starts_with(&format!("{} failed test", report.failures)), "{failure}");
         assert_eq!(failing_check(&good).unwrap(), None, "the box passes");
+    }
+
+    #[test]
+    fn a_failed_test_on_an_edge_keeps_its_owner_and_counts_with_the_others() {
+        let line = |edge: u32| {
+            format!(
+                "SmEdge::Test #61 Valid: Bad Edge fails pE->ValidateGeometry(FALSE) check [owner SmEdge] [edge {edge}]
+"
+            )
+        };
+        let check = solidcraft_smlib::CheckReport { failures: 2, text: line(4) + &line(17) };
+        let failure = CheckFailure::of(&check).unwrap();
+        assert_eq!(failure.tests.len(), 1, "{failure:?}");
+        let test = &failure.tests[0];
+        assert_eq!((test.number, test.times, test.owners.as_slice()), (Some(61), 2, &["SmEdge".to_string()][..]));
+        assert_eq!(test.name, "SmEdge::Test #61 Valid: Bad Edge fails pE->ValidateGeometry(FALSE) check");
+        assert_eq!(test.edges, [4, 17]);
+        assert!(failure.to_string().ends_with("(×2) on edges 4, 17"), "{failure}");
+        let many = solidcraft_smlib::CheckReport { failures: 10, text: (0..10).map(line).collect() };
+        assert!(CheckFailure::of(&many).unwrap().to_string().ends_with("(×10) on edges 0, 1, 2, 3, 4, 5, 6, 7 and 2 more"));
     }
 
     #[test]
