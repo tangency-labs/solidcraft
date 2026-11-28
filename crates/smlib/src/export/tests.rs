@@ -359,7 +359,10 @@ mod native_tests {
         let mut pts: Vec<[f64; 2]> = Vec::new();
         for (pc, &(e, forward)) in curves.first().map(Vec::as_slice).unwrap_or(&[]).iter().zip(outer) {
             let [a, z] = edges.get(e as usize).unwrap().interval;
-            let mut run: Vec<[f64; 2]> = (0..=32).filter_map(|i| point2(pc, a + (z - a) * f64::from(i) / 32.0)).collect();
+            let Some([lo, hi]) = pc.interval() else { continue };
+            let mut run: Vec<[f64; 2]> = (0..=32)
+                .filter_map(|i| solidcore_ops::pcurve::eval(pc, (if i == 32 { z } else { a + (z - a) * f64::from(i) / 32.0 }).clamp(lo, hi)))
+                .collect();
             if !forward {
                 run.reverse();
             }
@@ -600,7 +603,8 @@ mod mapped_tests {
             points: vec![[0.0, 0.0, 0.0], [6.0, 1.0, 0.0], [6.0, 9.0, 0.0], [0.0, 10.0, 0.0]],
         };
         assert!((k0 + edge[1]) - edge[1] < k0, "the rounding this case is about");
-        let on_edge = |s: f64, t: f64| match (point3(&curve, s), point3(&curve, t)) {
+        let edge_eval = solidcore_ops::pcurve::EdgePointEval::new(&curve).unwrap();
+        let on_edge = |s: f64, t: f64| match (edge_eval.point(s), edge_eval.point(t)) {
             (Some(p), Some(q)) => (0..3).map(|c| (p[c] - q[c]).powi(2)).sum::<f64>().sqrt() <= 2.5e-3,
             _ => false,
         };
@@ -646,12 +650,13 @@ mod mapped_tests {
                 .collect(),
         };
         let end = 1.0 + 1.2e-7;
-        let (p, q) = (point3(&circle, 1.0).unwrap(), point3(&circle, end).unwrap());
+        let edge_eval = solidcore_ops::pcurve::EdgePointEval::new(&circle).unwrap();
+        let (p, q) = (edge_eval.point(1.0).unwrap(), edge_eval.point(end).unwrap());
         assert!(((p[0] - 0.0).abs() + (p[1] - r).abs()) < 1e-9, "{p:?}");
         let gap = (0..3).map(|c| (p[c] - q[c]).powi(2)).sum::<f64>().sqrt();
         assert!(gap > 1e-9 && gap < 1e-4, "{gap}");
         let tolerance = 1e-3;
-        let on_edge = |s: f64, t: f64| match (point3(&circle, s), point3(&circle, t)) {
+        let on_edge = |s: f64, t: f64| match (edge_eval.point(s), edge_eval.point(t)) {
             (Some(p), Some(q)) => (0..3).map(|c| (p[c] - q[c]).powi(2)).sum::<f64>().sqrt() <= tolerance,
             _ => false,
         };
@@ -680,7 +685,8 @@ mod mapped_tests {
         let line = b::Curve::Line { start: [0.0; 3], end: [1.0, 0.0, 0.0] };
         let edge = [0.0, 0.5];
         let reach = 1e-6;
-        let along = |c: &b::Curve2| along_edge(c, &plane, &line, edge, reach);
+        let line_eval = solidcore_ops::pcurve::EdgePointEval::new(&line).unwrap();
+        let along = |c: &b::Curve2| along_edge(c, &plane, Some(&line_eval), edge, reach);
         let unit = |to: f64| b::Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[0.0, 0.0], [to, 0.0]] };
         // The edge's own unit trim: the plane's x runs 0 to 0.5 along it.
         let out = mapped(&unit(0.5), true, [1.0, 0.0], edge, &|_, _| false, &along).unwrap();
@@ -692,7 +698,7 @@ mod mapped_tests {
         let e = mapped(&unit(1.0), true, [1.0, 0.0], edge, &|_, _| false, &along).unwrap_err().to_string();
         assert!(e.contains("its end 0.5 from the edge's") && e.contains("more than a rounding"), "{e}");
         // The same trim on the same edge, off its face by a hair within the tolerance, is the edge's.
-        let near = |c: &b::Curve2| along_edge(c, &plane, &line, edge, 1e-3);
+        let near = |c: &b::Curve2| along_edge(c, &plane, Some(&line_eval), edge, 1e-3);
         let hair = b::Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[0.0, 0.0], [0.5 + 1e-4, 0.0]] };
         assert!(mapped(&hair, true, [1.0, 0.0], edge, &|_, _| false, &near).is_ok());
     }
@@ -721,10 +727,10 @@ mod mapped_tests {
     }
 }
 
-/// The spline points the export reads (orientation areas, trim checks), evaluated in place, are
-/// bit for bit the points of de Boor's algorithm on a copy of the control points, as they were
-/// evaluated before: plain and rational splines in 2D and 3D, degrees 1 to 3 and 17 (past the
-/// stack buffer), across and outside the knot range.
+/// Compare the shared curve evaluators against the former independent de Boor reference.
+/// Plain and rational splines cover degrees 1 to 3 and the maximum record degree (16),
+/// endpoints and parameters outside the knot range. Degree 17 is refused for record edges.
+/// The kernel uses basis-function sums, so compare coordinates to rounding rather than bits.
 mod spline_point_tests {
     use super::*;
 
@@ -762,9 +768,22 @@ mod spline_point_tests {
         k
     }
 
+    fn assert_same_point(got: Option<Vec<f64>>, want: Option<Vec<f64>>, p: usize, t: f64) {
+        match (&got, &want) {
+            (Some(got), Some(want)) => {
+                assert_eq!(got.len(), want.len());
+                // Both algorithms evaluate the same positive-weight spline, with different
+                // floating-point operation order. The bound is 1e-12 relative, with an
+                // absolute floor at unit scale, far below the trim tolerances in these tests.
+                assert!(got.iter().zip(want).all(|(a, b)| (a - b).abs() <= 1e-12 * b.abs().max(1.0)), "p {p} t {t}: {got:?} vs {want:?}");
+            }
+            _ => assert_eq!(got, want, "p {p} t {t}"),
+        }
+    }
+
     #[test]
     fn spline_points_match_de_boor_on_copied_points() {
-        for p in [1usize, 2, 3, 17] {
+        for p in [1usize, 2, 3, 16, 17] {
             let n = p + 6;
             let k = knots(n, p);
             let p3: Vec<[f64; 3]> = (0..n).map(|i| [i as f64, (i as f64).sin(), (i as f64 * 0.7).cos()]).collect();
@@ -784,12 +803,22 @@ mod spline_point_tests {
             let rational2 = b::Curve2::RationalSpline { knots: k.clone(), homogeneous: h3.clone() };
             let w3: Vec<[f64; 4]> = p3.iter().map(|q| [q[0], q[1], q[2], 1.0]).collect();
             let w2: Vec<[f64; 3]> = p2.iter().map(|q| [q[0], q[1], 1.0]).collect();
+            let spline_eval = solidcore_ops::pcurve::EdgePointEval::new(&spline3);
+            let rational_eval = solidcore_ops::pcurve::EdgePointEval::new(&rational3);
+            if p > solidcore_record::brep::MAX_SPLINE_DEGREE {
+                assert!(spline_eval.is_none() && rational_eval.is_none(), "unsupported record degree {p}");
+            } else {
+                assert!(spline_eval.is_some() && rational_eval.is_some(), "record degree {p}");
+            }
             for i in -3..=33 {
                 let t = f64::from(i) * 0.1;
-                assert_eq!(point3(&spline3, t).map(|q| q.to_vec()), reference(&k, &w3, t, false), "p {p} t {t}");
-                assert_eq!(point3(&rational3, t).map(|q| q.to_vec()), reference(&k, &h4, t, false), "p {p} t {t}");
-                assert_eq!(point2(&spline2, t).map(|q| q.to_vec()), reference(&k, &w2, t, true), "p {p} t {t}");
-                assert_eq!(point2(&rational2, t).map(|q| q.to_vec()), reference(&k, &h3, t, true), "p {p} t {t}");
+                if let (Some(spline), Some(rational)) = (&spline_eval, &rational_eval) {
+                    assert_same_point(spline.point(t).map(|q| q.to_vec()), reference(&k, &w3, t, false), p, t);
+                    assert_same_point(rational.point(t).map(|q| q.to_vec()), reference(&k, &h4, t, false), p, t);
+                }
+                let clamped = t.clamp(0.0, 3.0);
+                assert_same_point(solidcore_ops::pcurve::eval(&spline2, clamped).map(|q| q.to_vec()), reference(&k, &w2, t, true), p, t);
+                assert_same_point(solidcore_ops::pcurve::eval(&rational2, clamped).map(|q| q.to_vec()), reference(&k, &h3, t, true), p, t);
             }
         }
     }

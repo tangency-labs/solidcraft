@@ -209,3 +209,38 @@ fn a_flat_arc_about_a_far_centre_is_built_on_its_circle() {
         }
     }
 }
+
+#[test]
+fn record_edge_point_evaluator_preserves_domains_and_rational_weights() {
+    use solidcore_ops::pcurve::EdgePointEval;
+
+    let line = Curve::Line {
+        start: [0.0; 3],
+        end: [2.0, 0.0, 0.0],
+    };
+    assert_eq!(
+        EdgePointEval::new(&line).unwrap().point(0.25),
+        Some([0.5, 0.0, 0.0])
+    );
+    let polynomial = Curve::Spline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![[0.0; 3], [2.0, 0.0, 0.0]],
+    };
+    let rational = Curve::RationalSpline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        homogeneous: vec![[0.0, 0.0, 0.0, 1.0], [4.0, 0.0, 0.0, 2.0]],
+    };
+    for (curve, mid) in [(polynomial, 1.0), (rational, 4.0 / 3.0)] {
+        let eval = EdgePointEval::new(&curve).unwrap();
+        assert!(near(eval.point(0.5).unwrap(), [mid, 0.0, 0.0]));
+        assert!(near(eval.point(0.0).unwrap(), [0.0; 3]));
+        assert!(near(eval.point(1.0).unwrap(), [2.0, 0.0, 0.0]));
+        for t in [-0.01, 1.01, f64::NAN] {
+            assert_eq!(eval.point(t), None);
+        }
+    }
+    assert!(EdgePointEval::new(&Curve::Polyline {
+        points: vec![[0.0; 3], [1.0, 0.0, 0.0]]
+    })
+    .is_none());
+}
