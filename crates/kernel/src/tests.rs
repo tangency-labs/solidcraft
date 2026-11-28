@@ -4178,3 +4178,25 @@ fn polyline_fraction_and_point_measure_by_length() {
     assert_eq!(polyline_point_at(&still, 0.5), None);
     assert_eq!(polyline_point_at(&line, f64::NAN), None);
 }
+
+#[test]
+fn offset_face_refusal_names_known_limits_and_smaller_distance_advice() {
+    use solidcore_ops::{Error, OffsetRefusal};
+    use solidcraft_smlib::Error as SmError;
+    let refusal = |why| SmError::Refused(Error::OffsetRefused { face: Some(2), why });
+    let cases = [
+        (OffsetRefusal::Collapses { distance: -5.0, radius: 4.0 }, "less than 4 mm"),
+        (OffsetRefusal::PastSide { largest: 2.5 }, "below 2.5 mm"),
+        (OffsetRefusal::FaceCloses { largest: 1.25 }, "below 1.25 mm"),
+        (OffsetRefusal::FacesApart, "a smaller distance may work"),
+        (OffsetRefusal::EdgeVanishes, "a smaller distance may work"),
+    ];
+    for (why, expected) in cases {
+        let error = crate::offset_backend::refused("offset faces", None, refusal(why));
+        assert!(error.to_string().contains(expected), "{error}");
+    }
+    let unresolved =
+        crate::offset_backend::refused("offset faces", None, refusal(OffsetRefusal::DistanceUnresolved { distance: 1e-10, resolution: 1e-6 }));
+    assert!(!unresolved.to_string().contains("smaller distance"), "{unresolved}");
+    assert!(unresolved.to_string().contains("below the body's resolution"), "{unresolved}");
+}
