@@ -12,7 +12,9 @@ use solidcraft_geom::{Mesh, UnitVec3};
 
 use super::measure_shape::{Shape, Slot, add_round, centre};
 use crate::params::bad;
-use crate::schema::inspect::{MeasureKind, MeasureResult, Measured, MeasuredItems};
+use crate::schema::inspect::{
+    MEASURE_ITEM_COUNT, MEASURE_MAX_ITEMS, MEASURE_TOO_MANY, MeasureKind, MeasureResult, Measured, MeasuredItems, Spacing, SpacingPattern,
+};
 use crate::{Result, Sel, Session};
 
 /// Geometry of a picked item, as points or triangles.
@@ -739,12 +741,51 @@ fn resolve_pick(st: &solidcraft_doc::ModelState, face: bool, value: &Value) -> s
     Ok(Sel::Edge { body, index, point })
 }
 
-/// `inspect.measure` with `items` (one or two selections).
+/// The spacing of three or more round items (#10170): the kernel reads the pattern of their
+/// centres and measures the gaps. Every item must be round (a circle, an arc or a cylinder), and
+/// the kernel refuses axes that are not parallel and two items on one centre, in its words.
+fn spacing(cmd: &str, items: &[Item]) -> Result<Spacing> {
+    let mut rounds: Vec<([f64; 3], [f64; 3])> = Vec::new();
+    for item in items {
+        let Shape::Round { center, axis, .. } = item.shape else { return Err(bad(cmd, MEASURE_ITEM_COUNT)) };
+        rounds.push((center.into(), Vec3::from(axis).into()));
+    }
+    let k = solidcraft_kernel::points::hole_spacing(&rounds).map_err(|e| {
+        // The kernel's words, without the name of its routine.
+        let words = e.to_string();
+        bad(cmd, words.split_once(": ").map_or(words.as_str(), |(_, reason)| reason).to_owned())
+    })?;
+    let pattern = match k.pattern {
+        solidcraft_kernel::points::SpacingPattern::Line => SpacingPattern::Line,
+        solidcraft_kernel::points::SpacingPattern::Circle => SpacingPattern::Circle,
+        solidcraft_kernel::points::SpacingPattern::None => SpacingPattern::None,
+    };
+    Ok(Spacing {
+        pattern,
+        order: k.order,
+        gaps: k.gaps,
+        gap_points: k.gap_points,
+        span: k.span,
+        even: k.even,
+        pitch: k.pitch,
+        odd_gaps: k.odd_gaps,
+        pcd: k.circle.as_ref().map(|c| c.diameter),
+        pcd_center: k.circle.as_ref().map(|c| c.centre),
+        angle_pitch_deg: k.circle.as_ref().and_then(|c| c.angle_pitch_deg),
+        angle_deg: k.circle.map(|c| c.angles_deg),
+    })
+}
+
+/// `inspect.measure` with `items`: one or two selections, or three or more round ones for
+/// their spacing.
 pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
     let cmd = "inspect.measure";
     let list = items.as_array().ok_or_else(|| bad(cmd, "`items` must be a list of selections"))?;
-    if list.is_empty() || list.len() > 1000 {
-        return Err(bad(cmd, "measure one or two items"));
+    if list.is_empty() {
+        return Err(bad(cmd, MEASURE_ITEM_COUNT));
+    }
+    if list.len() > MEASURE_MAX_ITEMS {
+        return Err(bad(cmd, MEASURE_TOO_MANY));
     }
     let st = s.world_state()?;
     let mut sels = Vec::new();
@@ -761,9 +802,15 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
         if !duplicate {
             sels.push(sel);
         }
-        if sels.len() > 2 {
-            return Err(bad(cmd, "measure one or two items"));
-        }
+    }
+    // Three or more measure only as round items: one that cannot be round (a body, a vertex, a
+    // plane) is refused before anything is measured, as the third item always was.
+    if sels.len() > 2
+        && !sels.iter().all(|x| {
+            matches!(x, Sel::Edge { .. } | Sel::Face { .. } | Sel::SketchCurve { .. } | Sel::ExternalSketchCurve { .. } | Sel::Profile { .. })
+        })
+    {
+        return Err(bad(cmd, MEASURE_ITEM_COUNT));
     }
     let world = s.world_state()?;
     let mut described = Vec::new();
@@ -775,6 +822,9 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
     }
     let mut out =
         MeasuredItems { items: described.iter().map(|d| d.json.as_object().cloned().unwrap_or_default()).collect(), ..MeasuredItems::default() };
+    if described.len() > 2 {
+        out.spacing = Some(spacing(cmd, &described)?);
+    }
     if let [one] = described.as_slice() {
         let copy = |k: &str| one.json.get(k).cloned();
         out.diameter = copy("diameter");

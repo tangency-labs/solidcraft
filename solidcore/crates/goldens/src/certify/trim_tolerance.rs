@@ -92,10 +92,11 @@ const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 ///   bound of a trim at the raise, where that bound is loose (its reparametrisation off the
 ///   correspondence over a short stretch, #19784's trim 3), so this test's enclosure of the
 ///   trims as kept shows none past the old tolerance; every enclosed trim is within the new
-///   one, and a line trim on a B-spline surface stays open as in `line-trim` (the same edge
-///   of `Solids/nurb_fillet.smb`, raised to 1.7e-3: `topology.brep_local_operation`'s four
-///   `fc` cases, edge 93, its trim on face 39 enclosed at 1.7e-6; `topology.brep_mirror`'s
-///   `mat0019`, `mat0049` and `mat0094`, edge 46);
+///   one, and a line trim on a B-spline surface stays open as in `line-trim` (left:
+///   `gen0014`'s edge 2). The edge of `Solids/nurb_fillet.smb` this class held, raised to 1.7e-3
+///   (`topology.brep_local_operation`'s four `fc` cases, edge 93; `topology.brep_mirror`'s
+///   `mat0019`, `mat0049` and `mat0094`, edge 46), is lowered to about 1e-5 by the drop's
+///   curve-knot rule (tangency-labs/solidcraft#22201) and certified;
 /// - `face-bound-loose`: an edge whose B-rep keeps no UV trim, whose face-gap enclosure
 ///   exceeds the new tolerance.
 /// - `blend-surface`: an edge with a trim on a procedural blend surface, which has no exact

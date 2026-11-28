@@ -82,7 +82,33 @@ macro_rules! identity {
         }
     )+};
 }
-identity!(PanelKind, InstanceId, SectionId, ColumnId, WorkspaceId, DocumentId, ViewportId, HostId, ControlId);
+identity!(PanelKind, InstanceId, SectionId, ColumnId, DocumentId, ViewportId, HostId, ControlId);
+
+/// Plugin workspace identities are scoped to a package; other panel identities stay flat.
+pub const MAX_WORKSPACE_ID_BYTES: usize = 136;
+
+pub fn valid_workspace_id(value: &str) -> PanelResult<()> {
+    if let Some(scoped) = value.strip_prefix("plugin:") {
+        let Some((plugin, workspace)) = scoped.split_once('/') else {
+            return Err(error(Rule::Id, "expected plugin:<package>/<workspace>"));
+        };
+        valid_id(plugin)?;
+        valid_id(workspace)
+    } else {
+        valid_id(value)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(transparent)]
+pub struct WorkspaceId(pub String);
+impl WorkspaceId {
+    pub fn new(value: impl Into<String>) -> PanelResult<Self> {
+        let value = value.into();
+        valid_workspace_id(&value)?;
+        Ok(Self(value))
+    }
+}
 
 /// Leading/trailing logical sides, mirrored by a host for RTL. There is no Top zone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
@@ -734,7 +760,7 @@ fn canonical_arrangement(layout: &Layout) -> Option<Layout> {
     if layout.instances.len() > MAX_INSTANCES || layout.sections.len() > MAX_SECTIONS || layout.columns.len() > MAX_SECTIONS {
         return None;
     }
-    valid_id(&layout.workspace.0).ok()?;
+    valid_workspace_id(&layout.workspace.0).ok()?;
     layout.extent_priority_context.validate().ok()?;
     for column in &layout.columns {
         valid_id(&column.id.0).ok()?;
@@ -1138,7 +1164,7 @@ pub fn validate(layout: &Layout, registry: &PanelRegistry) -> PanelResult<()> {
     if layout.version != LAYOUT_VERSION {
         return Err(error(Rule::Version, "unsupported layout version"));
     }
-    valid_id(&layout.workspace.0)?;
+    valid_workspace_id(&layout.workspace.0)?;
     if layout.instances.len() > MAX_INSTANCES || layout.sections.len() > MAX_SECTIONS || layout.columns.len() > MAX_SECTIONS {
         return Err(error(Rule::CollectionLimit, "layout collection limit"));
     }

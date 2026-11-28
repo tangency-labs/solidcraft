@@ -627,6 +627,178 @@ fn two_rings_written_as_a_torus_less_a_disc_each_import_whole() {
     }
 }
 
+/// The lens of #22669 on the sphere of radius 100 about the origin, bounded by two circle arcs
+/// that meet at A = (60, 69.28, −40) and B = (60, 69.28, 40): the sphere's circle in the plane
+/// x = 60 (radius 80 about +x) from A to B through (60, 80, 0), and its circle through B,
+/// (`x1`, y, 0) and A back to A. The sphere's frame has its axis along `pole` and its reference
+/// direction +z. Written as an open shell, or `closed` by the two planes of the circles, which
+/// meet along AB. Returns the file and, in closed form, the lens's area, the closed wedge's area
+/// and its volume.
+fn sphere_lens_step(x1: f64, pole: [f64; 3], closed: bool) -> (String, f64, f64, f64) {
+    use std::f64::consts::PI;
+    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let cross = |a: [f64; 3], b: [f64; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    let unit = |a: [f64; 3]| {
+        let l = dot(a, a).sqrt();
+        [a[0] / l, a[1] / l, a[2] / l]
+    };
+    let (radius, x0) = (100.0_f64, 60.0_f64);
+    let r1 = (radius * radius - x0 * x0).sqrt();
+    let (a, b) = ([x0, r1 * 0.75_f64.sqrt(), -0.5 * r1], [x0, r1 * 0.75_f64.sqrt(), 0.5 * r1]);
+    // The second circle: in the plane through A, B and P, about the axis it runs round from B
+    // through P to A; its centre c2 at the signed distance d along that axis.
+    let p = [x1, (radius * radius - x1 * x1).sqrt(), 0.0];
+    let n = unit(cross(sub(a, p), sub(b, p)));
+    let d = dot(n, p);
+    let c2 = [n[0] * d, n[1] * d, n[2] * d];
+    let r2 = (radius * radius - d * d).sqrt();
+    // By Gauss-Bonnet the lens's area over R² is 2π less its two corners' turns (π less the
+    // angle α between the arcs at A, the same at B) less each arc's geodesic curvature: the lens
+    // lies inside the cap of the circle at x = 60 (cos ρ = 60 / R, over its 60° arc) and outside
+    // the other's (cos ρ = |d| / R, over its arc's angle φ2).
+    let t1 = unit(cross([1.0, 0.0, 0.0], sub(a, [x0, 0.0, 0.0])));
+    let t2 = unit(cross(sub(a, c2), n));
+    let alpha = dot(t1, t2).acos();
+    let phi1 = PI / 3.0;
+    let phi2 = dot(unit(sub(b, c2)), unit(sub(a, c2))).acos();
+    let lens = radius * radius * (2.0 * alpha - x0 / radius * phi1 + d.abs() / radius * phi2);
+    // The planes' faces: each the circular segment between its arc and the chord AB. The volume
+    // is a third of the integral of p · n over the boundary: R on the sphere, the plane's
+    // signed distance from the centre on each plane (−60 facing −x, |d| facing towards c2).
+    let segment = |r: f64, phi: f64| 0.5 * r * r * (phi - phi.sin());
+    let (s1, s2) = (segment(r1, phi1), segment(r2, phi2));
+    let area = lens + s1 + s2;
+    let volume = (radius * lens - x0 * s1 + d.abs() * s2) / 3.0;
+
+    let mut lines: Vec<String> = Vec::new();
+    fn add(lines: &mut Vec<String>, body: String) -> usize {
+        lines.push(format!("#{}={body};\n", lines.len() + 1));
+        lines.len()
+    }
+    let xyz = |q: [f64; 3]| format!("({:.17E},{:.17E},{:.17E})", q[0], q[1], q[2]);
+    let frame = |lines: &mut Vec<String>, o: [f64; 3], z: [f64; 3], x: [f64; 3]| {
+        let (o, z, x) = (
+            add(lines, format!("CARTESIAN_POINT('',{})", xyz(o))),
+            add(lines, format!("DIRECTION('',{})", xyz(z))),
+            add(lines, format!("DIRECTION('',{})", xyz(x))),
+        );
+        add(lines, format!("AXIS2_PLACEMENT_3D('',#{o},#{z},#{x})"))
+    };
+    let vertex = |lines: &mut Vec<String>, q: [f64; 3]| {
+        let q = add(lines, format!("CARTESIAN_POINT('',{})", xyz(q)));
+        add(lines, format!("VERTEX_POINT('',#{q})"))
+    };
+    let (va, vb) = (vertex(&mut lines, a), vertex(&mut lines, b));
+    let f1 = frame(&mut lines, [x0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    let k1 = add(&mut lines, format!("CIRCLE('',#{f1},{r1:.17E})"));
+    let arc1 = add(&mut lines, format!("EDGE_CURVE('',#{va},#{vb},#{k1},.T.)"));
+    let f2 = frame(&mut lines, c2, n, unit(sub(b, c2)));
+    let k2 = add(&mut lines, format!("CIRCLE('',#{f2},{r2:.17E})"));
+    let arc2 = add(&mut lines, format!("EDGE_CURVE('',#{vb},#{va},#{k2},.T.)"));
+    let face = |lines: &mut Vec<String>, uses: &[(usize, bool)], surface: usize| {
+        let oriented: Vec<String> =
+            uses.iter().map(|&(e, s)| format!("#{}", add(lines, format!("ORIENTED_EDGE('',*,*,#{e},.{}.)", if s { 'T' } else { 'F' })))).collect();
+        let lp = add(lines, format!("EDGE_LOOP('',({}))", oriented.join(",")));
+        let bound = add(lines, format!("FACE_BOUND('',#{lp},.T.)"));
+        add(lines, format!("ADVANCED_FACE('',(#{bound}),#{surface},.T.)"))
+    };
+    let fs = frame(&mut lines, [0.0; 3], unit(pole), [0.0, 0.0, 1.0]);
+    let sphere = add(&mut lines, format!("SPHERICAL_SURFACE('',#{fs},{radius:.1})"));
+    let lens_face = face(&mut lines, &[(arc1, true), (arc2, true)], sphere);
+    let (item, representation) = if closed {
+        // Each plane faces out of the wedge: −x, and towards c2 (the lens lies outside the
+        // second circle's cap).
+        let o = add(&mut lines, format!("CARTESIAN_POINT('',{})", xyz(a)));
+        let dir = add(&mut lines, format!("DIRECTION('',{})", xyz(unit(sub(b, a)))));
+        let v = add(&mut lines, format!("VECTOR('',#{dir},{:.17E})", 2.0 * a[2].abs()));
+        let line = add(&mut lines, format!("LINE('',#{o},#{v})"));
+        let chord = add(&mut lines, format!("EDGE_CURVE('',#{va},#{vb},#{line},.T.)"));
+        let fp1 = frame(&mut lines, [x0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let plane1 = add(&mut lines, format!("PLANE('',#{fp1})"));
+        let fp2 = frame(&mut lines, c2, unit(c2), unit(sub(b, c2)));
+        let plane2 = add(&mut lines, format!("PLANE('',#{fp2})"));
+        let side1 = face(&mut lines, &[(arc1, false), (chord, true)], plane1);
+        let side2 = face(&mut lines, &[(arc2, false), (chord, false)], plane2);
+        let shell = add(&mut lines, format!("CLOSED_SHELL('',(#{lens_face},#{side1},#{side2}))"));
+        (add(&mut lines, format!("MANIFOLD_SOLID_BREP('wedge',#{shell})")), "ADVANCED_BREP_SHAPE_REPRESENTATION")
+    } else {
+        let shell = add(&mut lines, format!("OPEN_SHELL('',(#{lens_face}))"));
+        (add(&mut lines, format!("SHELL_BASED_SURFACE_MODEL('lens',(#{shell}))")), "MANIFOLD_SURFACE_SHAPE_REPRESENTATION")
+    };
+    let ctx = lines.len() as u64 + 2;
+    add(&mut lines, format!("{representation}('',(#{item}),#{ctx})"));
+    let mut t = String::from(HEAD);
+    t += &lines.concat();
+    t += &context(ctx, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += TAIL;
+    (t, lens, area, volume)
+}
+
+/// A sphere face whose sphere's frame holds its pole inside the face reads as the same face as
+/// with the pole outside (#22669; a dished face of a part from another CAD program has it so):
+/// the issue's lens with the pole at (100, 0, 0), outside it, then with the pole inside, on the
+/// lens up to x = 62 and on the thinner one up to x = 61, each as a sheet and closed. With the
+/// pole inside, the face gets a seam from its loop to the pole.
+/// The seam's meridian frame missed the curve record's unit-and-square check on the first
+/// ("the frame's axes are not unit and square"), and on the thinner one, whose arcs pass 0.6 mm
+/// from the pole, the loop was not found to cross the seam's angle ("a loop round a pole that
+/// misses its seam's angle"): the sheet was refused, the closed wedge came in open without it.
+#[test]
+fn a_sphere_face_that_holds_its_frames_pole_reads_as_with_the_pole_outside() {
+    for (x1, pole) in [(62.0, [1.0, 0.0, 0.0]), (62.0, [61.0, 79.6806, 0.0]), (61.0, [60.5, 79.6225, 0.0])] {
+        let inside = pole[1] != 0.0;
+        for closed in [false, true] {
+            let case = format!("x1 {x1}, pole {pole:?}, closed {closed}");
+            let (text, lens, area, volume) = sphere_lens_step(x1, pole, closed);
+            let imp = step_import(&text).unwrap_or_else(|e| panic!("{case}: {e}"));
+            assert_eq!(imp.bodies.len(), 1, "{case}: {:?}", imp.warnings);
+            let body = &imp.bodies[0];
+            assert!(body.refused.is_none(), "{case}: {:?}", imp.warnings);
+            assert_eq!((body.closed, body.body.is_surface()), (closed, !closed), "{case}: {:?}", imp.warnings);
+            let m = measure(&body.body).unwrap_or_else(|e| panic!("{case}: {e}"));
+            // The arcs (and the chord) between A and B. With the pole inside, the seam to it and
+            // the arc it starts on split in two: A and B lie at angles about the axis that the
+            // arcs' pieces passing near the pole also reach (their control hulls fan out round
+            // it), so the seam starts in the middle of the widest range of angles the loop passes
+            // once, on a new vertex.
+            let (faces, edges) = if closed { (3, 3) } else { (1, 2) };
+            let seam = 2 * usize::from(inside);
+            assert_eq!((m.faces, m.edges, m.vertices, m.shells), (faces, edges + seam, 2 + seam, 1), "{case}: {:?}", imp.warnings);
+            assert!(!imp.warnings.iter().any(|w| w.contains("left out") || w.contains("refused")), "{case}: {:?}", imp.warnings);
+            if inside {
+                // The seam ends on the pole, at R along the sphere's axis, and the sphere's face
+                // uses it twice, once each way.
+                let record = body.body.record();
+                let l = pole.iter().map(|c| c * c).sum::<f64>().sqrt();
+                let at = pole.map(|c| 100.0 * c / l);
+                let on_pole = |v: u32| {
+                    let p = record.vertices[v as usize].point;
+                    (0..3).map(|i| (p[i] - at[i]).powi(2)).sum::<f64>().sqrt() < 1e-9 * 100.0
+                };
+                let seams: Vec<usize> = (0..record.edges.len()).filter(|&e| record.edges[e].vertices.iter().any(|&v| on_pole(v))).collect();
+                assert_eq!(seams.len(), 1, "{case}: one edge to the pole");
+                let mut ways = Vec::new();
+                for face in &record.faces {
+                    for l in &face.loops {
+                        if let solidcore_record::brep::Loop::Edges { edges } = l {
+                            ways.extend(edges.iter().filter(|u| u.edge as usize == seams[0]).map(|u| u.forward));
+                        }
+                    }
+                }
+                ways.sort_unstable();
+                assert_eq!(ways, [false, true], "{case}: the seam's uses");
+            }
+            if closed {
+                assert!(rel(m.area, area) < 1e-6, "{case}: area {} vs {area}", m.area);
+                assert!(rel(m.volume, volume) < 1e-6, "{case}: volume {} vs {volume}", m.volume);
+            } else {
+                assert!(rel(m.area, lens) < 1e-6, "{case}: area {} vs {lens}", m.area);
+            }
+        }
+    }
+}
+
 /// A 30 × 30 × 10 block with a Ø14 hole through it, its top edge rounded at 1 mm, as SolidCraft
 /// 0.30.1 wrote it after reading its own file (#17929): the round on a SURFACE_OF_REVOLUTION of
 /// a rational circle, which got no pcurves, so the block came in open. The round reads as a
@@ -873,6 +1045,7 @@ fn parallel_curved_import_keeps_face_colours_and_exact_display_meshes() {
                 opacity: 0.7,
                 faces: vec![crate::FacePaint { face: 0, color: [0.8, 0.1, 0.3], opacity: 0.5, name: None }],
                 name: None,
+                layer: None,
             }))
         })
         .collect();
@@ -5490,6 +5663,31 @@ fn an_invisibility_record_hides_its_styled_item_and_representation() {
     assert!(!shown.bodies[0].hidden);
 }
 
+/// The presentation layer a file puts a body on is read with it, whether the layer lists the
+/// solid, its styled item or its representation; a body on two layers is on the first, a blank
+/// layer name is no layer, and a body on none has none.
+#[test]
+fn a_body_is_read_with_the_layer_it_is_assigned_to() {
+    let layer_of = |extra: &str| {
+        let mut t = String::from(HEAD);
+        t += &cube_entities();
+        t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+        t += "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);\n";
+        t += extra;
+        t += TAIL;
+        let imported = step_import(&t).unwrap();
+        assert_eq!(imported.bodies.len(), 1, "{:?}", imported.warnings);
+        imported.bodies[0].layer.clone()
+    };
+    assert_eq!(layer_of("#80=PRESENTATION_LAYER_ASSIGNMENT('Frame/Rails','',(#101));\n").as_deref(), Some("Frame/Rails"));
+    assert_eq!(layer_of("#70=STYLED_ITEM('',(),#101);\n#80=PRESENTATION_LAYER_ASSIGNMENT('Styled','',(#70));\n").as_deref(), Some("Styled"));
+    assert_eq!(layer_of("#80=PRESENTATION_LAYER_ASSIGNMENT('Represented','',(#60));\n").as_deref(), Some("Represented"));
+    let two = "#80=PRESENTATION_LAYER_ASSIGNMENT('First','',(#101));\n#81=PRESENTATION_LAYER_ASSIGNMENT('Second','',(#101));\n";
+    assert_eq!(layer_of(two).as_deref(), Some("First"));
+    assert_eq!(layer_of("#80=PRESENTATION_LAYER_ASSIGNMENT(' ','',(#101));\n"), None);
+    assert_eq!(layer_of(""), None);
+}
+
 /// #12291: a part styled with a surface colour and, beside it, a curve style (its edges) is the
 /// surface colour, whichever style the file lists first or last. The edge's colour once painted
 /// the whole solid, because the first colour found was taken.
@@ -6386,6 +6584,7 @@ fn the_checks_heal_a_shared_import_once_they_end() {
             file_faces: 8,
             refused: None,
             hidden: k > 1,
+            layer: None,
         })
         .collect();
     heals.apply(&mut bodies);
