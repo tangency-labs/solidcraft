@@ -1,0 +1,50 @@
+{
+  "en": {
+    "cmd.mesh_section_stack": "Section Stack",
+    "help.mesh.section_stack": "Cuts a mesh body with a row of parallel planes and puts a sketch of fitted lines, arcs and circles on each. Use it to model against a 3D scan or an STL, or extrude the sections into stepped slabs that stand in for it.",
+    "SECTION STACK": "SECTION STACK",
+    "Extrude slabs": "Extrude slabs"
+  },
+  "ar": {
+    "cmd.mesh_section_stack": "مجموعة مقاطع",
+    "help.mesh.section_stack": "يقطع جسم شبكة بصف من المستويات المتوازية ويضع على كل مستوى رسمًا من خطوط وأقواس ودوائر مطابقة. استخدمه للنمذجة وفق مسح ثلاثي الأبعاد أو ملف STL، أو لبثق المقاطع إلى شرائح متدرجة تحل محله.",
+    "SECTION STACK": "مجموعة مقاطع",
+    "Extrude slabs": "بثق الشرائح"
+  },
+  "de": {
+    "cmd.mesh_section_stack": "Schnittstapel",
+    "help.mesh.section_stack": "Schneidet einen Netzkörper mit einer Reihe paralleler Ebenen und legt auf jede eine Skizze aus eingepassten Linien, Bögen und Kreisen. Damit modellieren Sie an einem 3D-Scan oder einer STL entlang oder extrudieren die Schnitte zu gestuften Scheiben, die ihn ersetzen.",
+    "SECTION STACK": "SCHNITTSTAPEL",
+    "Extrude slabs": "Scheiben extrudieren"
+  },
+  "he": {
+    "cmd.mesh_section_stack": "ערימת חתכים",
+    "help.mesh.section_stack": "חותך גוף רשת בשורה של מישורים מקבילים ומניח על כל מישור סקיצה של קווים, קשתות ועיגולים מותאמים. השתמשו בו כדי לבנות מודל לפי סריקה תלת־ממדית או קובץ STL, או כדי לשחול את החתכים לפרוסות מדורגות שמחליפות אותו.",
+    "SECTION STACK": "ערימת חתכים",
+    "Extrude slabs": "שחילת פרוסות"
+  },
+  "ja": {
+    "cmd.mesh_section_stack": "断面スタック",
+    "help.mesh.section_stack": "平行な平面の列でメッシュボディを切断し、各平面にフィットした線分、円弧、円のスケッチを作成します。3DスキャンやSTLに合わせてモデリングするとき、または断面を押し出して代わりになる段状のスラブを作るときに使います。",
+    "SECTION STACK": "断面スタック",
+    "Extrude slabs": "スラブを押し出し"
+  },
+  "ko": {
+    "cmd.mesh_section_stack": "단면 스택",
+    "help.mesh.section_stack": "평행한 평면들로 메시 바디를 자르고 각 평면에 맞춤 선, 호, 원으로 된 스케치를 만듭니다. 3D 스캔이나 STL에 맞춰 모델링하거나, 단면을 돌출해 그것을 대신하는 계단형 슬래브를 만들 때 사용합니다.",
+    "SECTION STACK": "단면 스택",
+    "Extrude slabs": "슬래브 돌출"
+  },
+  "vi": {
+    "cmd.mesh_section_stack": "Chồng mặt cắt",
+    "help.mesh.section_stack": "Cắt một thân lưới bằng một dãy mặt phẳng song song và đặt lên mỗi mặt phẳng một bản phác thảo gồm các đoạn thẳng, cung và đường tròn được khớp. Dùng để dựng mô hình theo bản quét 3D hoặc tệp STL, hoặc đùn các mặt cắt thành các lớp dạng bậc thay thế cho nó.",
+    "SECTION STACK": "CHỒNG MẶT CẮT",
+    "Extrude slabs": "Đùn các lớp"
+  },
+  "zh": {
+    "cmd.mesh_section_stack": "截面堆叠",
+    "help.mesh.section_stack": "用一排平行平面切割网格实体，并在每个平面上放置由拟合直线、圆弧和圆组成的草图。用于参照 3D 扫描或 STL 建模，或将截面拉伸成替代它的阶梯状切片。",
+    "SECTION STACK": "截面堆叠",
+    "Extrude slabs": "拉伸切片"
+  }
+}

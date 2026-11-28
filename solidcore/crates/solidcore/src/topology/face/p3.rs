@@ -1819,6 +1819,7 @@ pub fn is_degenerate(
                     contact: sol.contact,
                     unique: sol.unique,
                     shared_contact: sol.shared_contact,
+                    limit_root: sol.limit_root,
                 })
                 .collect();
 

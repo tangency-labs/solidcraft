@@ -1214,7 +1214,7 @@ mod feature_executive {
 /// * **trims on edges**: every trim each written body holds lies on its edge within the
 ///   edge's tolerance ([`crate::trims_on_edges`], rounded interval arithmetic), so each
 ///   added trim is the edge's own.
-mod trim_blocks {
+pub(crate) mod trim_blocks {
     use super::digest;
     use crate::trim_hook::with_hook;
     use crate::trims_on_edges::{certify_brep, TrimCertificate};
@@ -1224,10 +1224,11 @@ mod trim_blocks {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    struct Row {
-        case: &'static str,
-        new: u64,
-        main: u64,
+    /// A row: its case, this branch's output digest and main's with trims cleared.
+    pub(crate) struct Row {
+        pub(crate) case: &'static str,
+        pub(crate) new: u64,
+        pub(crate) main: u64,
     }
 
     fn clear_trims(b: &mut Brep) {
@@ -1238,7 +1239,7 @@ mod trim_blocks {
     }
 
     /// Certifies `rows` of `runner`'s unit (see the module docs): the trims certified.
-    fn certify(runner: &dyn UnitDiff, rows: &[Row]) -> usize {
+    pub(crate) fn certify(runner: &dyn UnitDiff, rows: &[Row]) -> usize {
         let mut trims = 0;
         for row in rows {
             let case = crate::case::regression_case(runner, row.case);

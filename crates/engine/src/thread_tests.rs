@@ -200,8 +200,10 @@ fn metric_shaft_and_hole_threads_keep_their_class_after_reopen() {
             let saved = s.doc.to_json();
             let value: Value = serde_json::from_str(&saved).unwrap();
             assert_eq!(value["features"].as_array().unwrap().last().unwrap()["designation"], given, "saved as given");
+            // The class is part of format 73 since the 0.51.1 release, so it is never pending,
+            // whatever other changes are.
             if let Some(pending) = value.get("format_pending").and_then(Value::as_array) {
-                assert!(pending.iter().any(|c| c == "metric-thread-class"), "{pending:?}");
+                assert!(!pending.iter().any(|c| c == "metric-thread-class"), "{pending:?}");
             }
             assert_thread(&Session::new(solidcraft_doc::Document::from_json(&saved).unwrap()));
         }

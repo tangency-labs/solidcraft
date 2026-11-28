@@ -179,6 +179,9 @@ impl Product {
         Self::ALL.iter().copied().find(|product| product.id() == instance.0).ok_or_else(|| error(Rule::MissingTarget, "unknown application panel"))
     }
     fn available(self, app: &crate::SolveApp) -> bool {
+        if !crate::plugin_workspaces::builtin_available(app, self.id()) {
+            return false;
+        }
         let render = crate::render_workspace::active(app);
         match self {
             Self::Browser => !render && !crate::render_ui::focused(app),
@@ -238,7 +241,11 @@ impl Product {
                 ]);
                 entries
             }
-            Self::Assistant => vec![("new-chat", "ui.agent_chat_new", "new")],
+            Self::Assistant => vec![
+                ("new-chat", "ui.agent_chat_new", "new"),
+                #[cfg(not(target_arch = "wasm32"))]
+                ("export-chat", "ui.agent_chat_export", "export"),
+            ],
             Self::RenderBrowser => vec![
                 ("by-object", "render.tree_by_object", "list"),
                 ("by-look", "render.tree_by_look", "list"),
@@ -309,13 +316,23 @@ impl Product {
                         }),
                 )
                 .collect(),
-            Self::Assistant => vec![RuntimeAction {
-                id: ControlId("new-chat".into()),
-                label: solidcraft_ui_text::tr("ui.agent_chat_new").into(),
-                enabled: true,
-                disabled_reason: None,
-                pressed: None,
-            }],
+            Self::Assistant => self
+                .header_actions()
+                .into_iter()
+                .map(|action| {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let enabled = action.id.0 != "export-chat" || app.agent_chat.can_export_conversation();
+                    #[cfg(target_arch = "wasm32")]
+                    let enabled = true;
+                    RuntimeAction {
+                        id: action.id,
+                        label: solidcraft_ui_text::tr(&action.label_key).into(),
+                        enabled,
+                        disabled_reason: (!enabled).then(|| solidcraft_ui_text::tr("ui.agent_chat_export_empty").into()),
+                        pressed: None,
+                    }
+                })
+                .collect(),
             Self::RenderBrowser => [
                 ("by-object", "render.tree_by_object", !app.render_workspace.view.by_look),
                 ("by-look", "render.tree_by_look", app.render_workspace.view.by_look),
@@ -471,6 +488,7 @@ struct ProductionSnapshot {
     visibility: [Option<VisibilityIntent>; Product::ALL.len()],
     panels: [PanelSnapshot; Product::ALL.len()],
     actions: VecDeque<QueuedAction>,
+    dispatching_widget_actions: bool,
 }
 struct VisibilityIntent {
     document: DocumentId,
@@ -505,7 +523,18 @@ impl ProductionState {
                 extent: None,
             }),
             actions: VecDeque::new(),
+            dispatching_widget_actions: false,
         }))))
+    }
+
+    pub(super) fn with_widget_actions(&self, dispatch: impl FnOnce() -> PanelResult<()>) -> PanelResult<()> {
+        let previous = {
+            let mut snapshot = self.0.try_borrow_mut().map_err(|_| error(Rule::Lifecycle, "application panel actions are borrowed"))?;
+            std::mem::replace(&mut snapshot.dispatching_widget_actions, true)
+        };
+        let result = dispatch();
+        self.0.try_borrow_mut().map_err(|_| error(Rule::Lifecycle, "application panel actions are borrowed"))?.dispatching_widget_actions = previous;
+        result
     }
 }
 
@@ -674,7 +703,12 @@ pub(crate) fn drain_production_actions(app: &mut crate::SolveApp) -> PanelResult
                     crate::timeline::run_transport(app, control);
                 }
             }
-            Product::Assistant => crate::agent_chat::request_new_chat(app),
+            Product::Assistant => match action.action.0.as_str() {
+                "new-chat" => crate::agent_chat::request_new_chat(app),
+                #[cfg(not(target_arch = "wasm32"))]
+                "export-chat" => crate::agent_chat::request_export(&mut app.agent_chat),
+                _ => {}
+            },
             Product::RenderBrowser => {
                 let params = match action.action.0.as_str() {
                     "by-object" => json!({"by_look":false}),
@@ -981,6 +1015,9 @@ pub(crate) fn sync_production_visibility(app: &mut crate::SolveApp) -> PanelResu
 }
 
 fn sync_bom(app: &mut crate::SolveApp) -> PanelResult<()> {
+    if !crate::plugin_workspaces::builtin_available(app, Product::Bom.id()) {
+        return Ok(());
+    }
     let Some(integration) = app.panel_runtime.as_ref() else { return Ok(()) };
     let Some(state) = integration.production.clone() else { return Ok(()) };
     let mut snapshot = state.0.try_borrow_mut().map_err(|_| error(Rule::Lifecycle, "BOM focus is borrowed"))?;
@@ -1030,6 +1067,9 @@ fn open_bom(integration: &AppPanelRuntime, layout: &Layout, instance: InstanceId
 }
 
 fn sync_sketch_options(app: &mut crate::SolveApp) -> PanelResult<()> {
+    if !crate::plugin_workspaces::builtin_available(app, Product::SketchOptions.id()) {
+        return Ok(());
+    }
     let Some(integration) = app.panel_runtime.as_ref() else { return Ok(()) };
     let Some(state) = integration.production.clone() else { return Ok(()) };
     let mut snapshot = state.0.try_borrow_mut().map_err(|_| error(Rule::Lifecycle, "application panel visibility is borrowed"))?;
@@ -1484,6 +1524,11 @@ impl PanelController for ProductionController {
         self.availability(owner, services.models).require()?;
         self.prepare_action(owner, action, services.models)?;
         let mut snapshot = self.state.0.try_borrow_mut().map_err(|_| error(Rule::Lifecycle, "application panel actions are borrowed"))?;
+        // The in-app host commits header and overflow clicks through the same action.
+        // Programmatic calls must not open the export dialog.
+        if self.product == Product::Assistant && action.0 == "export-chat" && !snapshot.dispatching_widget_actions {
+            return Ok(());
+        }
         if snapshot.actions.len() >= MAX_ACTIONS {
             return Err(error(Rule::CollectionLimit, "application panel action queue is full"));
         }
@@ -1550,7 +1595,7 @@ struct ProductionServices {
 }
 impl AppPanelServices for ProductionServices {
     fn refresh_workspace(&mut self, workspace: &WorkspaceId) -> PanelResult<()> {
-        if !WORKSPACES.iter().any(|(id, _, _)| *id == workspace.0) {
+        if !WORKSPACES.iter().any(|(id, _, _)| *id == workspace.0) && !workspace.0.starts_with("plugin:") {
             return Err(error(Rule::Placement, "unregistered application layout workspace"));
         }
         self.local.workspace = workspace.clone();
@@ -1577,7 +1622,9 @@ struct ProductionLocal {
 impl ProductionLocal {
     fn validate(&self, scope: &LocalScope, instance: &InstanceId) -> PanelResult<()> {
         scope.validate()?;
-        Product::from_instance(instance)?;
+        if Product::from_instance(instance).is_err() && !instance.0.starts_with("plugin.") {
+            return Err(error(Rule::MissingTarget, "unknown application panel"));
+        }
         if scope.workspace != self.workspace || scope.document.as_ref() != Some(&self.document) || scope.viewport != self.viewport {
             return Err(error(Rule::Placement, "application panel service has a different owner scope"));
         }
@@ -1689,6 +1736,20 @@ pub(crate) struct ProductionFrame<'a> {
     pub app: &'a mut crate::SolveApp,
     pub(super) state: ProductionState,
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ProductionFrame<'_> {
+    pub(super) fn finish_native_window(&mut self, active: &InstanceId, action: Option<&super::NativeWindowAction>, ctx: &egui::Context) {
+        if active.0 != Product::Assistant.id() {
+            return;
+        }
+        if matches!(action, Some(super::NativeWindowAction::Content(_, action)) if action.0 == "export-chat") {
+            crate::agent_chat::request_export(&mut self.app.agent_chat);
+        }
+        crate::agent_chat::finish_native_window(self.app, ctx);
+    }
+}
+
 impl FramePanelContent for ProductionFrame<'_> {
     fn header_action_context_menu(&mut self, instance: &InstanceId, at: egui::Pos2) {
         if instance.0 == Product::History.id() {

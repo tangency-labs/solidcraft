@@ -328,6 +328,7 @@ pub fn calculate_tight_bounding_box(
 
     if !curve_bbox.is_contained_by(&edge_bbox, tol) {
         // Do the tight BBox computation.
+        k.work_counters.add_edge_tight_box_solve();
         let curve_bbox = curve.calculate_tight_bounding_box(k, &e.interval)?;
 
         edge_bbox = edge_bbox.union(&curve_bbox);
