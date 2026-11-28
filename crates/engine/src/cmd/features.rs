@@ -3114,6 +3114,125 @@ fn chamfer(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
+/// The bodies a combine changes or consumes, as one placement of a part: a body of a part that is
+/// placed more than once is copied at its placement into a component of its own (no link), and its
+/// placement is removed from the part, so the other placements keep their link and place.
+/// Returns the names to combine, and (body, copy, note anchor) for each body made independent. A
+/// note says so (the design's notes list it), and a placement a joint holds is refused.
+fn separate_placements(
+    s: &mut Session,
+    cmd: &str,
+    target: &str,
+    tools: Vec<String>,
+    keep_tools: bool,
+    join: bool,
+) -> Result<(String, Vec<String>, Vec<(String, String, Vec3)>)> {
+    // (name as given, is the target)
+    let wanted: Vec<(String, bool)> = std::iter::once((target.to_string(), true)).chain(tools.iter().map(|t| (t.clone(), false))).collect();
+    // Each body by its part, placement and source name, which stay as the others are separated.
+    let mut keys = Vec::new();
+    {
+        let state = s.model.state();
+        let frames = s.doc.body_frames_with_source(&state);
+        for (name, is_target) in &wanted {
+            let key = frames.iter().find(|f| f.0 == *name).map(|f| (f.2, f.3.clone(), f.1.clone()));
+            keys.push((name.clone(), *is_target, key));
+        }
+    }
+    let mut done: Vec<(String, String, Vec3)> = Vec::new();
+    let mut names: Vec<String> = Vec::new();
+    let mut target_component = None;
+    for (name, is_target, key) in keys {
+        let Some((comp, path, source)) = key else {
+            names.push(name);
+            continue;
+        };
+        let shared = s.doc.placements().iter().filter(|(c, ..)| *c == comp).count() > 1;
+        let own = if is_target { s.active_component == comp } else { keep_tools || Some(comp) == target_component };
+        // A cut's or intersect's tool that is a further placement is kept, with a warning (#20040).
+        let kept_tool = !is_target && !join && {
+            let state = s.model.state();
+            s.doc.body_frames_with_source(&state).iter().any(|f| f.0 == name && f.0 != f.1)
+        };
+        if !shared || own || kept_tool {
+            if is_target {
+                target_component = Some(comp);
+            }
+            // The name now: separating other placements renumbers them. The target is a body of
+            // the model: a further placement of it is its source's body.
+            let state = s.model.state();
+            let current = s.doc.body_frames_with_source(&state).into_iter().find(|f| f.2 == comp && f.3 == path && f.1 == source);
+            drop(state);
+            let own_name = current.map(|f| if is_target { f.1 } else { f.0 });
+            names.push(own_name.unwrap_or(name));
+            continue;
+        }
+        // The name now (earlier separations can renumber the placements), and where it stands.
+        let (_, world) = {
+            let state = s.model.state();
+            let frames = s.doc.body_frames_with_source(&state);
+            match frames.iter().find(|f| f.2 == comp && f.3 == path && f.1 == source) {
+                Some(f) => (f.0.clone(), f.4),
+                None => {
+                    names.push(name);
+                    continue;
+                }
+            }
+        };
+        let occurrence = match path.as_slice() {
+            [only] => *only,
+            _ => {
+                return Err(bad(
+                    cmd,
+                    format!("`{name}` is placed inside an assembly that is placed more than once: make that placement independent first"),
+                ));
+            }
+        };
+        let held = s.doc.assembly.joints.iter().any(|j| j.a.occurrences().chain(j.b.occurrences()).any(|o| o == occurrence));
+        if held {
+            return Err(bad(
+                cmd,
+                format!("`{name}` is a placement with a joint: remove its joints first, as making it independent would delete them"),
+            ));
+        }
+        // Which body of the part it is, to find its copy in the independent one.
+        let index = {
+            let state = s.model.state();
+            let frames = s.doc.body_frames_with_source(&state);
+            frames.iter().filter(|f| f.2 == comp && f.3 == path).position(|f| f.1 == source)
+        };
+        let made = s.execute("component.paste_new", &json!({"component": comp, "occurrence": occurrence}))?;
+        let copy_comp = made["component"].as_u64().ok_or_else(|| bad(cmd, format!("`{name}` could not be copied")))?;
+        let copy_occurrence = made["occurrence"].as_u64();
+        s.doc_mut().remove_occurrences(&std::collections::BTreeSet::from([occurrence]));
+        s.refresh();
+        let copy = {
+            let state = s.model.state();
+            let frames = s.doc.body_frames_with_source(&state);
+            let first = copy_occurrence.map(|o| vec![o]);
+            let found = frames.iter().filter(|f| f.2 == copy_comp && first.as_ref().is_none_or(|p| f.3.last() == p.last())).nth(index.unwrap_or(0));
+            found.map(|f| f.0.clone())
+        }
+        .ok_or_else(|| bad(cmd, format!("`{name}` could not be found in its copy")))?;
+        if is_target {
+            target_component = Some(copy_comp);
+        }
+        done.push((name.clone(), copy.clone(), Vec3::new(world[3][0], world[3][1], world[3][2])));
+        names.push(copy);
+    }
+    let mut it = names.into_iter();
+    let target = it.next().unwrap_or_else(|| target.to_string());
+    let tools: Vec<String> = it.collect();
+    for (from, to, anchor) in &done {
+        let text = format!(
+            "`{from}` was one of several placements of a part. Combining it made it independent: a copy at its placement, `{to}`, unlinked from the part. The other placements keep their link and places."
+        );
+        let id = s.doc_mut().allocate_id()?;
+        s.doc_mut().notes.push(solidcraft_doc::notes::Note { id, anchor: *anchor, text, hidden: false });
+    }
+    Ok((target, tools, done))
+}
+
 fn combine(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.combine";
     let target = str_(p, "target").ok_or_else(|| bad(cmd, "`target` must be a body name"))?.to_string();
@@ -3172,6 +3291,10 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "`offset_radius` must be positive"));
         }
     }
+    let keep_tools = bool_(p, "keep_tools").unwrap_or(false);
+    // A body that is one of several placements of a part is made independent first, so the
+    // combine takes this placement only.
+    let (target, tools, made_independent) = separate_placements(s, cmd, &target, tools, keep_tools, op == Operation::Join)?;
     let mut out = add_feature(
         s,
         p,
@@ -3179,13 +3302,16 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
             target: target.clone().into(),
             tools: tools.into_iter().map(BodyName).collect(),
             operation: op,
-            keep_tools: bool_(p, "keep_tools").unwrap_or(false),
+            keep_tools,
             offset,
             offset_edges,
             offset_faces,
             offset_radius,
         },
     )?;
+    if !made_independent.is_empty() {
+        out["independent"] = json!(made_independent.iter().map(|(from, to, _)| json!({"body": from, "copy": to})).collect::<Vec<_>>());
+    }
     // New Component: the result goes into a component of its own.
     if bool_(p, "new_component").unwrap_or(false) {
         let name = str_(p, "component_name").map(str::to_string).unwrap_or_else(|| format!("{target} Combined"));
