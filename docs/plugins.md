@@ -1358,6 +1358,10 @@ An MCP caller uses `execute` with the same `<plugin>.<entry>` command and an env
 and `event`, remain entry data and do not invoke `ui-provider.on-event`. Programmatic calls open
 no forms.
 
+A button's event carries in `row` the selection of the table or item list the user picked in last;
+tables with `select: "none"` leave it alone, and with nothing picked there is no `row`. A
+multi-select table sends its picked row ids joined with commas.
+
 The component updates cells with `ui.set-data`, for example `/jobs/0/id` = `text("op1")` and
 `/jobs/0/name` = `text("Pocket")`. Values are typed scalars, with lengths in mm and angles in
 degrees. Slash paths identify cells; no JSON arrays cross the UI WIT interface. A table row may
