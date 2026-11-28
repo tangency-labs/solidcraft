@@ -6,10 +6,15 @@
 //!
 //! Each call makes its curves from the list (the kernel's constructors), checks its numbers
 //! before the kernel sees them, runs the kernel's sweep and hands the result over only when it
-//! is what was asked for ([`finish`]): a closed manifold solid when the ends are capped, never a
-//! body without faces. What a path is (one line, arcs about one axis, lines and arcs turning
-//! with it) is the kernel's certified query; a path it leaves undecided is refused, naming the
-//! piece and the comparison, never fitted instead ([`sweep_placed`]).
+//! is what was asked for ([`finish_closed`], [`crate::Contract::Closed`]): a closed manifold
+//! solid when the ends are capped, by the topology test alone, never a body without faces. No
+//! proof is made, so a caller that wants the result proved valid and facing out asks for it
+//! ([`Body::check_solid`]). Two calls differ: [`sweep_placed`] proves its solid and keeps the
+//! proof, and [`curve_sweep`] runs under the contract its caller names.
+//!
+//! What a path is (one line, arcs about one axis, lines and arcs turning with it) is the
+//! kernel's certified query; a path it leaves undecided is refused, naming the piece and the
+//! comparison, never fitted instead ([`sweep_placed`]).
 //!
 //! The arcs of a profile on one circle: whether to make them one wall is the application's
 //! rule; [`arcs_on_one_circle`], [`curves_meet`] and [`join_arcs`] answer and build for it.
@@ -77,7 +82,7 @@ pub use solidcore::geom::certified::Verdict;
 /// kernel's own reasons.
 pub use solidcore::sweep::api_brep::TaperCornerRefusal as CornerRefusal;
 
-use crate::body::{finish, finish_proved, finish_under, Body, Contract, Expect, Outward};
+use crate::body::{finish_closed, finish_proved, finish_under, Body, Contract, Expect, Outward};
 use crate::error::status;
 use crate::order::{self, Order};
 use crate::session::{read_body, run, with_body};
@@ -598,7 +603,7 @@ pub fn planar_faces(loops: &[Curve]) -> Result<Body> {
             return Ok(Err(status(e)));
         }
         b.refresh_cached_topology();
-        finish(k, b, Expect::FACES)
+        finish_closed(k, b, Expect::FACES)
     })
 }
 
@@ -963,7 +968,7 @@ pub fn extrude(
             cap,
             &DRAFT,
         ) {
-            Ok(TaperExtrude::Solid(r)) => finish(k, r, expect),
+            Ok(TaperExtrude::Solid(r)) => finish_closed(k, r, expect),
             Ok(TaperExtrude::Refused(r)) => Ok(Err(refused(r))),
             Err(SolidError::InvalidInput { operation, .. }) if operation == kextrude::OP => {
                 Ok(Err(Error::Argument))
@@ -1004,7 +1009,7 @@ pub fn revolve(
         // a whole turn at most
         let degrees = degrees(angle).min(360.0);
         match directed::revolve(k, &made.refs(), v3(origin), v3(axis), degrees, cap) {
-            Ok(r) => finish(k, r, if cap { Expect::SOLID } else { Expect::FACES }),
+            Ok(r) => finish_closed(k, r, if cap { Expect::SOLID } else { Expect::FACES }),
             Err(e) => Ok(Err(directed_or_status(e))),
         }
     })
@@ -1518,7 +1523,7 @@ pub fn loft(sections: &[Vec<Curve>], degree: u32, cap: bool) -> Result<Body> {
             return Ok(planar);
         }
         match create_skin_primitive(k, &counts, &made.refs(), degree as usize, cap) {
-            Ok(r) => finish(k, r.brep, if cap { Expect::SOLID } else { Expect::FACES }),
+            Ok(r) => finish_closed(k, r.brep, if cap { Expect::SOLID } else { Expect::FACES }),
             Err(e) => Ok(Err(status(e))),
         }
     })
@@ -1628,7 +1633,7 @@ fn planar_sides(
         return Ok(None);
     }
     b.refresh_cached_topology();
-    finish(k, b, if cap { Expect::SOLID } else { Expect::FACES }).map(Some)
+    finish_closed(k, b, if cap { Expect::SOLID } else { Expect::FACES }).map(Some)
 }
 
 /// Whether a loft section (its plane's normal and its middle) faces back from the section
@@ -1724,7 +1729,7 @@ pub fn loft_sheet(sections: &[Vec<Curve>], degree: u32) -> Result<(Body, Option<
                 SkinSources::Traced(faces) => Some(faces),
                 SkinSources::NotTraced { .. } => None,
             };
-            Ok(finish(k, skin.brep, Expect::FACES)?.map(|b| (b, traced)))
+            Ok(finish_closed(k, skin.brep, Expect::FACES)?.map(|b| (b, traced)))
         },
     )?;
     let (brep, traced) = made?;
@@ -1766,7 +1771,7 @@ pub fn loft_sheet_planar_g1(
     });
     let made = run("loft_sheet_planar_g1", |k| {
         match skin_planar_g1(k, &given, tangent_at, crown, faced, MAX_CURVES) {
-            Ok(skin) => Ok(finish(k, skin.brep, Expect::FACES)?.map(|b| (b, skin.sources))),
+            Ok(skin) => Ok(finish_closed(k, skin.brep, Expect::FACES)?.map(|b| (b, skin.sources))),
             Err(e) => Ok(Err(status(e))),
         }
     })??;
@@ -1842,7 +1847,7 @@ pub fn loft_with_ends(sections: &[Vec<Curve>], cap: bool, ends: [LoftEnd; 2]) ->
         }
         let counts: Vec<usize> = sections.iter().map(Vec::len).collect();
         match skin_with_ends(k, &counts, &made.refs(), cap, ends) {
-            Ok(Ok(b)) => finish(k, b, if cap { Expect::SOLID } else { Expect::FACES }),
+            Ok(Ok(b)) => finish_closed(k, b, if cap { Expect::SOLID } else { Expect::FACES }),
             Ok(Err(e)) => Ok(Err(e)),
             Err(e) => Ok(Err(status(e))),
         }
@@ -1979,7 +1984,7 @@ pub fn loft_to_point(section: &[Curve], apex: [f64; 3]) -> Result<Body> {
             return Ok(Err(status(e)));
         }
         b.refresh_cached_topology();
-        finish(k, b, Expect::SOLID)
+        finish_closed(k, b, Expect::SOLID)
     })
 }
 
@@ -2107,7 +2112,7 @@ pub fn loft_to_point_through(
             return Ok(Err(status(e)));
         }
         b.refresh_cached_topology();
-        finish(k, b, Expect::SOLID)
+        finish_closed(k, b, Expect::SOLID)
     })
 }
 
@@ -2167,7 +2172,7 @@ pub fn sweep_stations(profile: &[Curve], stations: &[Affine], end: Ends) -> Resu
                 Err(e) => return Ok(Err(status(e))),
             }
         }
-        finish(
+        finish_closed(
             k,
             r,
             if end == Ends::Open {
@@ -2323,7 +2328,7 @@ pub fn screw_sweep_with(
             walls,
         );
         match built {
-            Ok(b) => finish(k, b, Expect::SOLID),
+            Ok(b) => finish_closed(k, b, Expect::SOLID),
             Err(e) => Ok(Err(status(e))),
         }
     })
@@ -2929,5 +2934,49 @@ mod tests {
         let body = loft(&[lower, upper], 1, true).expect("loft");
         assert_eq!(body.counts().expect("counts"), [6, 12, 8]);
         assert!((body.volume(1.0e-3).expect("volume") - 96.0).abs() < 1.0e-6);
+    }
+
+    /// #22655: a sweep's plain call tests its solid for closure only ([`finish_closed`],
+    /// `Contract::Closed`), so it decides no volume sign. Since #21968 every extrusion and
+    /// revolution SolidCraft made, a cut's tools among them, was proved valid and facing out,
+    /// one decided volume sign each, and nothing read the proof. Counted on the kernel, so the
+    /// same on every machine. A caller that wants the proof asks for it: `check_solid` on the
+    /// same body decides one.
+    #[test]
+    fn a_plain_sweep_decides_no_volume_sign() {
+        use crate::session::counted;
+        use solidcore::kernel::WorkCounters;
+        const Z: [f64; 3] = [0.0, 0.0, 1.0];
+        let circle = [Curve::Arc {
+            center: [0.0, 0.0, 0.0],
+            axis: Z,
+            reference: [1.0, 0.0, 0.0],
+            radius: 3.0,
+            start: 0.0,
+            end: 2.0 * PI,
+        }];
+        let (cylinder, decided) = counted(WorkCounters::volume_sign_decisions, || {
+            extrude(&circle, Z, 2.0, 0.0, DraftCorner::default(), true)
+        });
+        let cylinder = cylinder.expect("extrude");
+        assert_eq!(decided, 0, "the extrusion");
+        // x 10 to 20, z 0 to 30 in the XZ plane, turned 270 degrees about Z
+        let p = [[10.0, 0.0], [20.0, 0.0], [20.0, 30.0], [10.0, 30.0]];
+        let rectangle: Vec<Curve> = (0..4)
+            .map(|i| Curve::Line {
+                start: [p[i][0], 0.0, p[i][1]],
+                end: [p[(i + 1) % 4][0], 0.0, p[(i + 1) % 4][1]],
+            })
+            .collect();
+        let (ring, decided) = counted(WorkCounters::volume_sign_decisions, || {
+            revolve(&rectangle, [0.0; 3], Z, 1.5 * PI, true)
+        });
+        ring.expect("revolve");
+        assert_eq!(decided, 0, "the revolution");
+        let (checked, decided) = counted(WorkCounters::volume_sign_decisions, || {
+            cylinder.check_solid()
+        });
+        assert_eq!(checked, Ok(()));
+        assert_eq!(decided, 1, "the proof asked for");
     }
 }

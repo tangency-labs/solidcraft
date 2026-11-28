@@ -13,7 +13,7 @@
 mod common;
 
 use common::{all_fixes, built, edge_at};
-use solidcore::boolean::api_brep::{boolean_difference, boolean_intersection};
+use solidcore::boolean::api_brep::{boolean_difference, boolean_intersection, boolean_union};
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore_ops::session;
@@ -532,45 +532,211 @@ fn three_chamfers_of_a_pyramid_s_apex_build_a_solid() {
     b.check_solid().unwrap();
 }
 
-/// The L block (the box less a notch at its top), its inner top vertex (20, 15, 20) where the
-/// upright is concave and the two top edges convex: three chamfers of both convexities, which
-/// the kernel refuses as bevels at that vertex. ops refuses them with the kernel's reason and
-/// the vertex's point, and the body is unchanged.
+/// The L block: the 40 x 30 x 20 box less the notch `x > 20, y > 15`, volume 18000, 8 faces.
+fn l_block() -> Body {
+    built(|k| {
+        let block = create_box(k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0)?;
+        let cut = create_box(k, Point3::new(20.0, 15.0, -1.0), 21.0, 16.0, 22.0)?;
+        boolean_difference(k, block, cut)
+    })
+}
+
+/// The L block, its inner top vertex V = (20, 15, 20) where the upright is concave and the two
+/// top edges convex: three chamfers of both convexities, mitred (SolidCraft #23136).
+///
+/// In V's frame (`u = x - 20`, `v = y - 15`, `w = 20 - z`) the material is `u < 0` or `v < 0`,
+/// the top face its reflex face. The concave chamfer adds the wedge `u, v > 0, u + v < s` the
+/// whole height: `20 s^2 / 2`. The convex chamfers' planes `v = w - s` and `u = w - s` run on
+/// over that wedge and take everything above both: at depth `w < s` the part `u > w - s,
+/// v > w - s` of the L (the strips along the top edges, of lengths 20 and 15, the square between
+/// them at V and the wedge's whole section): `(s - w) (35 + s - w) + s^2 / 2`, `35 s^2 / 2 +
+/// 5 s^3 / 6` in all; at depth `s < w < 3 s / 2` what is left of the wedge between the planes,
+/// `(3 s - 2 w)^2 / 2`, `s^3 / 12` in all, down to the mitre point `(s / 2, s / 2, 3 s / 2)`.
+/// So the solid is `18000 - 15 s^2 / 2 - 11 s^3 / 12`, with three more faces. The mitre is the
+/// corner whether asked or not; a Facet asked there is refused, naming the vertex, and leaves
+/// the body as it was.
 #[test]
-fn an_l_block_s_inner_corner_of_three_chamfers_is_refused_naming_the_vertex() {
+fn an_l_block_s_inner_corner_of_three_chamfers_is_mitred() {
     all_fixes();
-    for corner in [ChamferCorner::Mitre, ChamferCorner::Facet] {
-        let b = built(|k| {
-            let block = create_box(k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0)?;
-            let cut = create_box(k, Point3::new(20.0, 15.0, -1.0), 21.0, 16.0, 22.0)?;
-            boolean_difference(k, block, cut)
-        });
+    let s = 2.0_f64;
+    let want = 18000.0 - 7.5 * s * s - 11.0 * s * s * s / 12.0;
+    for corner in [None, Some(ChamferCorner::Mitre)] {
+        let b = l_block();
         let e =
             [[20.0, 15.0, 10.0], [30.0, 15.0, 20.0], [20.0, 22.0, 20.0]].map(|p| edge_at(&b, p));
-        let r = blend_with(
-            &b,
-            Blend::Chamfer,
-            &e,
-            &[2.0],
-            &[],
-            Corners::Filled,
-            BlendOptions {
-                chamfer_corner: corner,
-                ..BlendOptions::default()
-            },
-        );
+        match corner {
+            None => blend(&b, Blend::Chamfer, &e, &[s], &[], Corners::Filled).map(|_| ()),
+            Some(corner) => blend_with(
+                &b,
+                Blend::Chamfer,
+                &e,
+                &[s],
+                &[],
+                Corners::Filled,
+                BlendOptions {
+                    chamfer_corner: corner,
+                    ..BlendOptions::default()
+                },
+            )
+            .map(|_| ()),
+        }
+        .unwrap();
+        let v = b.volume(1e-10).unwrap();
+        assert!((v - want).abs() <= 1e-9 * want, "{corner:?}: {v} vs {want}");
+        assert_eq!(b.counts().unwrap()[0], 11, "{corner:?}");
+        assert!(b.check(CheckLevel::All).unwrap().is_valid(), "{corner:?}");
+    }
+
+    let b = l_block();
+    let e = [[20.0, 15.0, 10.0], [30.0, 15.0, 20.0], [20.0, 22.0, 20.0]].map(|p| edge_at(&b, p));
+    let r = blend_with(
+        &b,
+        Blend::Chamfer,
+        &e,
+        &[s],
+        &[],
+        Corners::Filled,
+        BlendOptions {
+            chamfer_corner: ChamferCorner::Facet,
+            ..BlendOptions::default()
+        },
+    );
+    match r {
+        Err(Error::CornerUnsupported {
+            why: Some(why),
+            at: Some(at),
+        }) if why.contains("a facet of chamfers of convex and of concave edges is not built")
+            && at == [20.0, 15.0, 20.0] => {}
+        other => panic!("the facet: refused as {other:?}"),
+    }
+    let v = b.volume(1e-10).unwrap();
+    assert!((v - 18000.0).abs() <= 1e-9 * 18000.0, "the facet: {v}");
+    assert_eq!(b.counts().unwrap()[0], 8, "the facet");
+}
+
+/// The L block's upright chamfered with the top edges and the bottom edges at both its ends:
+/// two corners of both convexities that share the concave chamfer. The top and the bottom each
+/// take the strips and the corner of
+/// [`an_l_block_s_inner_corner_of_three_chamfers_is_mitred`], and the wedge is added once:
+/// `18000 + 10 s^2 - 2 (35 s^2 / 2 + 11 s^3 / 12)`, with five more faces.
+#[test]
+fn an_l_block_s_inner_corners_at_the_top_and_the_bottom_are_mitred_together() {
+    all_fixes();
+    let s = 2.0_f64;
+    let want = 18000.0 + 10.0 * s * s - 2.0 * (17.5 * s * s + 11.0 * s * s * s / 12.0);
+    let b = l_block();
+    let e = [
+        [20.0, 15.0, 10.0],
+        [30.0, 15.0, 20.0],
+        [20.0, 22.0, 20.0],
+        [30.0, 15.0, 0.0],
+        [20.0, 22.0, 0.0],
+    ]
+    .map(|p| edge_at(&b, p));
+    blend(&b, Blend::Chamfer, &e, &[s], &[], Corners::Filled).unwrap();
+    let v = b.volume(1e-10).unwrap();
+    assert!((v - want).abs() <= 1e-9 * want, "{v} vs {want}");
+    assert_eq!(b.counts().unwrap()[0], 13);
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+}
+
+/// A pillar 20 x 20 x 20 on a plate 40 x 40 x 4, at the plate's corner: at V = (20, 20, 4) the
+/// pillar's upright edge is convex and its two foot edges concave, the plate's top the reflex
+/// face. The material's complement there is the L block's corner, so the three chamfers' mitre
+/// is that corner with material and space exchanged: the foot chamfers add `s^2 / 2` times
+/// their lengths (20 each), the upright's takes `s^2 / 2` times its length (20), and the corner
+/// adds `11 s^3 / 12`: `14400 + 10 s^2 + 11 s^3 / 12`, with three more faces.
+#[test]
+fn a_pillar_s_foot_corner_of_three_chamfers_is_mitred() {
+    all_fixes();
+    let s = 2.0_f64;
+    let want = 14400.0 + 10.0 * s * s + 11.0 * s * s * s / 12.0;
+    let b = built(|k| {
+        let plate = create_box(k, Point3::new(0.0, 0.0, 0.0), 40.0, 40.0, 4.0)?;
+        let pillar = create_box(k, Point3::new(0.0, 0.0, 4.0), 20.0, 20.0, 20.0)?;
+        boolean_union(k, plate, pillar)
+    });
+    let faces = b.counts().unwrap()[0];
+    let e = [[20.0, 20.0, 14.0], [10.0, 20.0, 4.0], [20.0, 10.0, 4.0]].map(|p| edge_at(&b, p));
+    blend(&b, Blend::Chamfer, &e, &[s], &[], Corners::Filled).unwrap();
+    let v = b.volume(1e-10).unwrap();
+    assert!((v - want).abs() <= 1e-9 * want, "{v} vs {want}");
+    assert_eq!(b.counts().unwrap()[0], faces + 3);
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+}
+
+/// The L block's inner top corner with the concave chamfer 0.5 and the convex ones 1 and 2.
+/// The mitre point lies between the concave chamfer's rails only while the convex chamfers'
+/// sizes differ by less than the concave one's (in V's frame of
+/// [`an_l_block_s_inner_corner_of_three_chamfers_is_mitred`] the planes `u + v = c`,
+/// `v = w - a` and `u = w - b` meet at `u = (c + a - b) / 2`, which is positive for
+/// `b < a + c`). So the chamfer of 2 is too wide and builds up to 1.5, less the fit margin,
+/// asked a corner type or not; the refusal names its edge's middle and leaves the body as it
+/// was. With 1.4 in its place the corner builds, a valid body of three more faces.
+#[test]
+fn unequal_convex_chamfers_at_an_l_block_s_inner_corner_are_refused_past_their_fit() {
+    all_fixes();
+    for corner in [None, Some(ChamferCorner::Mitre)] {
+        let b = l_block();
+        let e =
+            [[20.0, 15.0, 10.0], [30.0, 15.0, 20.0], [20.0, 22.5, 20.0]].map(|p| edge_at(&b, p));
+        let options = BlendOptions {
+            chamfer_corner: corner.unwrap_or(ChamferCorner::Mitre),
+            ..BlendOptions::default()
+        };
+        let r = match corner {
+            None => blend(
+                &b,
+                Blend::Chamfer,
+                &e,
+                &[0.5, 1.0, 2.0],
+                &[],
+                Corners::Filled,
+            )
+            .map(|_| ()),
+            Some(_) => blend_with(
+                &b,
+                Blend::Chamfer,
+                &e,
+                &[0.5, 1.0, 2.0],
+                &[],
+                Corners::Filled,
+                options,
+            )
+            .map(|_| ()),
+        };
         match r {
-            Err(Error::CornerUnsupported {
-                why: Some(why),
+            Err(Error::TooLarge {
+                size,
+                kind: FitKind::Distance,
                 at: Some(at),
-            }) if why.contains("chamfers of convex and of concave edges meet at the vertex")
-                && at == [20.0, 15.0, 20.0] => {}
+                ..
+            }) => {
+                assert!(size < 1.5 && size > 1.48, "{corner:?}: fit {size}");
+                // the middle of the edge from (20, 15, 20) to (20, 30, 20), to rounding
+                let off = (at[0] - 20.0).abs() + (at[1] - 22.5).abs() + (at[2] - 20.0).abs();
+                assert!(off < 1e-9, "{corner:?}: at {at:?}");
+            }
             other => panic!("{corner:?}: refused as {other:?}"),
         }
         let v = b.volume(1e-10).unwrap();
         assert!((v - 18000.0).abs() <= 1e-9 * 18000.0, "{corner:?}: {v}");
         assert_eq!(b.counts().unwrap()[0], 8, "{corner:?}");
     }
+
+    let b = l_block();
+    let e = [[20.0, 15.0, 10.0], [30.0, 15.0, 20.0], [20.0, 22.5, 20.0]].map(|p| edge_at(&b, p));
+    blend(
+        &b,
+        Blend::Chamfer,
+        &e,
+        &[0.5, 1.0, 1.4],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    assert_eq!(b.counts().unwrap()[0], 11);
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
 }
 
 /// Past s = 1 the bands of two top chamfers reach past each other across the short top edge

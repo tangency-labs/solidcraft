@@ -1084,6 +1084,12 @@ A `ui.drag` from `measure:label` or one of the axis labels moves that label (scr
 while the measured items stay the same; a double-click puts it back). It picks nothing and starts
 no box selection.
 
+The Measure panel's **Spacing of several holes** option (handle `measure:spacing`, off by default)
+lets picks add up past two: three or more round edges or holes then measure as a row or a bolt
+circle (`inspect.measure`'s `spacing`). The view draws each gap between neighbouring centres with
+its length, handles `measure:gap:1`, `measure:gap:2`, … in order along the row (dragged as
+`measure:label` is), and numbers each centre as the panel lists the items (`measure:item:N`).
+
 ## UI
 
 | Method | Params | Notes |
@@ -1324,6 +1330,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `sketch_square_rectangles` (default false: Shift held while drawing a Two-Point or Center Rectangle prefers a line midpoint, as it always has. True: it makes the rectangle a square instead, the second corner going to the larger of the two distances from the first, and adds an Equal constraint between two sides so one dimension defines it, unless both a width and a height are typed, which then win; #18114)
 - `sketch_state_icons` (default true: a sketch's icon in History and the browser takes the colour of its solve state, `sketch` under constrained, `sketch_fixed` fully constrained, `error` while its constraints conflict, and its tooltip names the state; false: every sketch row's icon and tooltip as before, #7245)
 - `sketch_tab_always` (default false: the SKETCH tab stays in the ribbon right after MODEL while no sketch is open; a tool in its CREATE or REFERENCE section then opens Create Sketch, on the selected plane or planar face or else on the plane picked next, and starts in the new sketch, #7904)
+- `slicer_file_name` (string, default empty: Send to Slicer names its file after the design, followed by a code, as before; otherwise the name of the file Send to Slicer writes, with the placeholders of `export_name` replaced, #16440; [export file names](book/src/guide/files.md#export-file-names))
 - `smooth_wheel_zoom` (default true)
 - `space_mouse_horizon_lock` (default false: the cap's twist rolls the view; true keeps the horizon level, so Tilt turns the view up and down, Roll and Spin turn it about the world's up axis, and a view already rolled is eased level; with `free_orbit` too the tilt goes on over the poles, the horizon still level)
 - `space_mouse_model_pivot` (default false: Classic orbit around the view's centre; true opts into Traced orbit around the model for the 3D mouse and navigation bridge)
@@ -1396,7 +1403,10 @@ Other `ui.prefs` parameters:
 - `stand_up: true` stands up a just-opened Y-up file, `stand_up: false` leaves it as it is ("Leave it": the offer, dialog or note, closes and `offer_stand_up` stays on)
 - the dialog's buttons are the handles `stand_up:stand`, `stand_up:leave` and `stand_up:never`
 
-`ui.workspace {workspace?: "design" | "render" | "drawing"}` reads or changes the active workspace.
+`ui.workspace {workspace?: "design" | "render" | "drawing" | "plugin:<plugin-id>/<workspace-id>"}`
+reads or changes the active workspace. Enabled plugins that declare `runtime.ui.workspaces` add their own
+workspaces to the same switcher. Unknown, disabled or inapplicable workspaces return an error;
+programmatic switching opens no dialogs. See [Plugin workspaces](plugins.md#plugin-workspaces).
 Entering Render requires finishing the current modelling operation; returning restores
 the Design camera. See [the integrated Render workspace](render-workspace.md).
 Drawing currently exposes the native UI scaffold with a blank canvas. Planned
