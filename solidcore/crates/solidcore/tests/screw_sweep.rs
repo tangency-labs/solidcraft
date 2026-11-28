@@ -1122,3 +1122,96 @@ fn issue_22930_a_cylinder_pieces_path_trims_are_proved_at_once() {
     // (two cylinders, an edge along each side of each of their six half-turn pieces)
     assert!(proved >= 24, "{proved} cylinder piece trims");
 }
+
+// ---- tangency-labs/solidcore#3446: a drop onto a wall finds no saddle ---------------------
+
+/// tangency-labs/solidcore#3446: the coil of SolidCraft's helical groove cut from a shaft's
+/// end face, a circle of radius 1 about (10, 0, 30) in the plane z = 30, carried 6 turns at
+/// pitch 3 down the axis (-z through (0, 0, 30)). Every point of the circle lies on the
+/// wall: the wall's first station is the profile itself (`sweep::screw`, "a point at turn 0
+/// is the point itself"), so a point's drop onto the wall is that point, up to the drop's
+/// convergence; the B-rep holds an edge on the circle on the wall only within the wall's
+/// zone tolerance, so the drop must land within it. Near the circle's
+/// inner point (9, 0, 30), where its tangent runs almost along the screw motion (the wall's
+/// partials there 3° apart), the distance from a point of the circle has a saddle about
+/// 0.0137 away, which the drop returned: its Newton step converged to it, and the check
+/// measured the cut's edge on the circle that far off the wall. The points are those the
+/// check's gap function samples on the cut's edge, the circle's inner arc between its
+/// crossings with radius 10 at parameters 0.2587536620883 and 0.7412463379116 (21 even
+/// steps; the 12th, next to the inner point at 0.5, dropped to the saddle), and the steps
+/// between them; each is dropped without a guess and seeded with the previous point's
+/// foot, as the gap function does.
+#[test]
+fn issue_3446_a_point_of_a_walls_start_station_drops_onto_it() {
+    use solidcore::curve::arc::ArcDefinition;
+    use solidcore::curve::path::PathPiece;
+    use solidcore::surface::surface::p4::NoObject;
+    use solidcore::surface::surface::p5::DropPointOptions;
+    let mut k = Kernel::default();
+    let arc = PathPiece::of_arc(
+        &k,
+        &ArcDefinition {
+            centre: Point3::new(10.0, 0.0, 30.0),
+            axis: Z,
+            reference: Vec3::X,
+            radius: 1.0,
+            start: 0.0,
+            end: 2.0 * PI,
+        },
+    )
+    .unwrap();
+    let circle = arc.curve().clone();
+    let (pitch, turns) = (3.0, 6.0);
+    let b = screw_sweep(
+        &mut k,
+        std::slice::from_ref(&circle),
+        Point3::new(0.0, 0.0, 30.0),
+        -Z,
+        pitch,
+        turns,
+        pitch * 1e-4,
+    )
+    .unwrap();
+    let wall = p1::faces(&b, None)
+        .unwrap()
+        .into_iter()
+        .find(|&f| {
+            let s = face::p2::surface(&b, f).unwrap().unwrap();
+            matches!(s.kind(), SurfaceKind::BSpline(_))
+        })
+        .unwrap();
+    let s = face::p2::surface(&b, wall).unwrap().unwrap();
+    let domain = face::p2::uv_domain(&b, wall).unwrap();
+    let zone = face::p2::tolerance(&b, wall).unwrap();
+    let (first, last) = (0.258_753_662_088_38, 0.741_246_337_911_62);
+    for n in [20_u32, 40] {
+        let mut guess = None;
+        for i in 0..=n {
+            let t = first + (last - first) * f64::from(i) / f64::from(n);
+            let p = circle.evaluate_point(&k, t).unwrap();
+            for (seed, opts) in [
+                ("no guess", DropPointOptions::default()),
+                (
+                    "the previous foot",
+                    DropPointOptions {
+                        guess_uv: guess,
+                        ..Default::default()
+                    },
+                ),
+            ] {
+                let d = s.drop_point::<NoObject>(&k, p, &domain, &opts).unwrap();
+                assert!(d.success, "t {t}, {seed}");
+                let foot = s.evaluate_point(&k, d.result_uv).unwrap();
+                assert!(
+                    d.gap <= zone && (foot - p).length() <= zone,
+                    "t {t}, {seed}: dropped to {:?}, {} off",
+                    d.result_uv,
+                    d.gap
+                );
+                if seed == "the previous foot" {
+                    guess = Some(d.result_uv);
+                }
+            }
+        }
+    }
+}

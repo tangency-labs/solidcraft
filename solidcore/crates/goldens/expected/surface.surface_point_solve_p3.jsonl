@@ -460,7 +460,7 @@
 {"case":"matrix_0453","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,3.0,0.0,1.0,1.8470282665325595,1.8727591053180332,17.07278165155423,1.0,0.0,1.0,1.0],"status":[0.0]}}
 {"case":"matrix_0454","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,0.9287954522131711,0.5519923773611622,0.24990078273768734,1.0,2.0,1.0,1.0],"status":[0.0]}}
 {"case":"matrix_0455","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,2.2801872799702867,0.6410197845507726,1.22530719272515,1.0,2.0,1.0,1.0],"status":[0.0]}}
-{"case":"matrix_0456","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,1.0,1.0,1.944306708297762,2.443312161179006,1.509922000139111,1.0,0.0,1.0,1.0],"status":[0.0]}}
+{"case":"matrix_0456","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,5.0,1.0,2.1423356505230373,2.2820179446609665,1.5007710047484124,1.0,0.0,1.0,1.0],"status":[0.0]}}
 {"case":"matrix_0457","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.26289741142230205,0.12005380834751056,0.0,0.0,0.0,0.0],"status":[0.0]}}
 {"case":"matrix_0458","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,3.0,3.0,1.0,1.0,0.6626360212845711,0.9097946423812374,1.0,0.0,1.0,1.0],"status":[0.0]}}
 {"case":"matrix_0459","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,1.0,1.0,2.798804096858673,-0.9443888210989012,9.296297065475301e-11,1.0,0.0,1.0,1.0],"status":[0.0]}}
@@ -1294,7 +1294,7 @@
 {"case":"review106_wrapped_torus_2_solver_3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,1.0,1.0,0.0,90.00000000000001,2.220446049250313e-16,1.0,0.0,1.0,1.0],"status":[0.0]}}
 {"case":"review106_wrapped_torus_2_solver_4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,3.0,1.0,0.0,89.99999999999999,0.0,1.0,0.0,1.0,1.0],"status":[0.0]}}
 {"case":"review106_wrapped_torus_3_solver_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,0.0,1.0,0.0,360.0,1.0,1.0,0.0,1.0,1.0],"status":[0.0]}}
-{"case":"review106_wrapped_torus_3_solver_3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,0.0,1.0,0.0,360.0,1.0,1.0,0.0,1.0,1.0],"status":[0.0]}}
+{"case":"review106_wrapped_torus_3_solver_3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,0.0,1.0,0.0,180.0,6.123233995736766e-17,1.0,0.0,1.0,1.0],"status":[0.0]}}
 {"case":"review106_wrapped_torus_3_solver_4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,0.0,1.0,0.0,360.0,1.0,1.0,0.0,1.0,1.0],"status":[0.0]}}
 {"case":"upstream_closest_00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,0.4829649120100369,0.2003997276038322,0.005513941048770947,1.0,2.0,1.0,1.0],"status":[0.0]}}
 {"case":"upstream_closest_01","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1.0,1.0,0.47832569130318603,0.2000958941493488,0.007532856532710203,1.0,2.0,1.0,1.0],"status":[0.0]}}
