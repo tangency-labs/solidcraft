@@ -30,7 +30,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Hole Callout", cr
          point?}; status: resolved | suppressed (the feature is) | failed (it did not evaluate; a later feature removed the hole, moved it \
          some way other than solid.move, or changed its diameter or depth; or it is in sheet metal, not supported yet) | lost (the feature or \
          the point is gone; never moved to another hole); reason? (failed, lost); callout? {count (holes the feature drills), diameter (the \
-         drilled one), thread?, thread_depth? (from the face the hole starts on, past any counterbore or countersink), extent (this hole's): {type: through} | {type: blind, depth (from the face the \
+         drilled one), thread? (its standard designation: M8x1, a coarse one without its pitch, M8), thread_class? (the feature's, such as 6H or 2B), hand? (right | left, with thread; the text writes the thread as ISO 965-1 and ASME B1.1 designate it: M22x1-6H-LH, 1/4-20 UNC-2B-LH), thread_depth? (from the face the hole starts on, past any counterbore or countersink), extent (this hole's): {type: through} | {type: blind, depth (from the face the \
          hole starts on)}, form: {type: simple} | {type: drilled, tip_angle} | {type: counterbore, diameter, depth} | {type: countersink, \
          diameter, angle}, start, start_face, direction (in the model as it is now, after a solid.move of the body, in the hole's own \
          component)} in mm and radians; lines?, text? (the lines joined by newlines). Works with a drawing open or with none. Holes of other \
