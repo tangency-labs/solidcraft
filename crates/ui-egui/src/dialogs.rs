@@ -1747,8 +1747,11 @@ impl Dialog {
             return;
         }
         self.started_from_sketch = Some(sketch);
+        // With no profile picked, what the field holds is the default taken with no sketch left
+        // open, which can be a later sketch's: the one just edited comes first (#23342).
+        let picked = s.selection.iter().any(|x| matches!(x, Sel::Profile { .. }));
         if let Some(inp) = self.inputs.first_mut()
-            && inp.items.is_empty()
+            && (inp.items.is_empty() || (!picked && inp.items.iter().all(|x| matches!(x, Sel::Profile { .. }))))
         {
             inp.items = single_profile(s, sketch);
             self.advance();
