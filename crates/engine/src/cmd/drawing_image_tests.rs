@@ -338,3 +338,46 @@ fn a_logo_travels_in_a_template_file() {
     assert_eq!(shows(&s), bytes, "the older .json template");
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// #19105: a placement, not the underlying shared image file, is a selectable object.
+/// Delete respects the sheet and keeps bytes that another placement still uses.
+#[test]
+fn placed_images_can_be_selected_and_deleted_with_shared_commands() {
+    let (dir, file) = on_disk("selected", &png(32, 32));
+    let (mut s, first) = drawing();
+    s.execute("drawing.sheet.add", &json!({"name":"Other"})).unwrap();
+    let second = ids::encode(s.drawing("test").unwrap().sheets[1].id);
+    let add = |s: &mut Session, sheet: &str| s.execute(ADD, &json!({"sheet":sheet,"file":file,"rect_mm":RECT})).unwrap()["image"].clone();
+    let a = add(&mut s, &first);
+    let b = add(&mut s, &second);
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    let item = |image: &Value| json!({"type":"drawing","drawing":drawing,"object":image});
+    let before = s.doc.clone();
+    let selected = s.execute("select.set", &json!({"items":[item(&a)]})).unwrap();
+    assert_eq!(selected["selected"], 1);
+    assert!(std::sync::Arc::ptr_eq(&before, &s.doc));
+    s.execute("select.all", &json!({"sheet":first})).unwrap();
+    let id_a = ids::decode(a.as_str().unwrap()).unwrap();
+    let id_b = ids::decode(b.as_str().unwrap()).unwrap();
+    // Keep the existing Select All behavior: placed images require explicit selection.
+    assert!(!s.selection.iter().any(|sel| matches!(sel, crate::Sel::Drawing { object, .. } if *object == id_a)));
+    assert!(!s.selection.iter().any(|sel| matches!(sel, crate::Sel::Drawing { object, .. } if *object == id_b)));
+    assert!(std::sync::Arc::ptr_eq(&before, &s.doc));
+    s.execute("select.set", &json!({"items":[item(&a)]})).unwrap();
+    assert!(s.selection.iter().any(|sel| matches!(sel, crate::Sel::Drawing { object, .. } if *object == id_a)));
+    let dry = s.execute("selection.delete", &json!({"items":[item(&a)],"dry_run":true})).unwrap();
+    assert_eq!(dry["images"], json!([a]));
+    assert!(std::sync::Arc::ptr_eq(&before, &s.doc));
+    let gone = s.execute("selection.delete", &json!({"items":[item(&a)]})).unwrap();
+    assert_eq!(gone["images"], json!([a]));
+    let left = s.drawing("test").unwrap();
+    assert!(!left.has_object(id_a) && left.has_object(id_b));
+    assert_eq!((left.sheet_images.len(), left.images.len()), (1, 1));
+    s.execute("selection.delete", &json!({"items":[item(&b)]})).unwrap();
+    assert!(s.drawing("test").unwrap().images.is_empty());
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(s.drawing("test").unwrap().has_object(id_b));
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(s.drawing("test").unwrap().has_object(id_a));
+    std::fs::remove_dir_all(dir).unwrap();
+}

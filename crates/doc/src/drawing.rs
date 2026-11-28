@@ -632,6 +632,7 @@ impl Drawing {
             || self.centre_mark(id).is_some()
             || self.centre_line(id).is_some()
             || self.notes.by_id(id).is_some()
+            || self.sheet_images.by_id(id).is_some()
     }
 
     /// What is on sheet `id`: its views and their annotations, and its images, sketches and fills.
