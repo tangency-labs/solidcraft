@@ -118,8 +118,9 @@ fn docked_ribbon_geometry_and_search() {
                     fonts.layout_no_wrap("S".to_owned(), egui::FontId::monospace(t.font_small), t.form_dim).size().x,
                 )
             });
-            // Two outer paddings, two item gaps, and total keycap padding.
-            assert_eq!(search.width(), (hint_width + key_width + t.space_16 + t.space_4 * 5.0 + t.space_2).ceil());
+            // Two outer paddings, two item gaps, and total keycap padding: the shared pill
+            // padding (`space_10`) applies closed too, as in every other search field (#22642).
+            assert_eq!(search.width(), (hint_width + key_width + t.space_16 + t.space_4 * 4.0 + t.space_10 + t.space_2).ceil());
             assert!(ribbon.contains_rect(search));
             assert!(search.left() > workspace.right());
             assert!(h.app.viewport.rect.unwrap().top() < ribbon.bottom(), "the ribbon overlays the viewport");

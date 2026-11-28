@@ -1162,8 +1162,12 @@ pub fn tabs(ui: &mut egui::Ui, row_data: &Tabs, row: Rect) -> TabsOut {
                     ui.painter().rect(tr, corner, style.fill, Stroke::new(1.0, style.outline), egui::StrokeKind::Inside);
                     text(ui, tr.center(), tab.label, t.font_button, style.ink, active || tab.contextual);
                     if ui.clip_rect().contains(tr.center()) {
+                        // The rectangle published for picking is the strip the clip actually shows:
+                        // the last partial tab stops at the clip's edge rather than reaching under
+                        // the reserved search field (#22642). Clicks still land on the whole tab.
+                        let visible = tr.intersect(ui.clip_rect());
                         solidcraft_ui_registry::publish_target(&handle(h.tab, tab.id), tr);
-                        solidcraft_ui_registry::publish_rect(&handle(h.tab_rect, tab.id), tr);
+                        solidcraft_ui_registry::publish_rect(&handle(h.tab_rect, tab.id), visible);
                         for alias in tab.aliases {
                             solidcraft_ui_registry::publish_handle(&handle(h.tab, alias), tr.center());
                         }

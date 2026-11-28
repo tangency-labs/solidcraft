@@ -36,7 +36,9 @@ impl FieldSpacing {
             right: egui::lerp(t.space_4..=t.space_10, progress),
             icon_gap: egui::lerp(t.space_4..=t.space_12, progress),
             key_gap: egui::lerp(t.space_4..=t.space_10, progress),
-            key_padding: egui::lerp(t.space_4..=t.space_10, progress),
+            // The same pill padding at every expansion: one shortcut-cap style in every
+            // search field, the closed ribbon field's cap included (#22642).
+            key_padding: t.space_10,
             editor_margin: egui::lerp(0.0..=t.form_inset, progress),
         }
     }
@@ -188,7 +190,9 @@ impl CommandSearch {
     fn key_with_padding(ui: &Ui, right: egui::Pos2, label: &str, padding: f32) -> f32 {
         let t = Tokens::get();
         let galley = ui.painter().layout_no_wrap(label.to_owned(), FontId::monospace(t.font_small), t.form_dim);
-        let size = galley.size() + vec2(padding, t.space_4);
+        // One point above and below the glyph: a chip, not a box, even inside the short
+        // closed ribbon field (#22642).
+        let size = galley.size() + vec2(padding, t.space_2);
         let r = Rect::from_min_size(pos2(right.x - size.x, right.y - size.y / 2.0), size);
         t.container_rect(ui.painter(), r, Self::inner_radius(), t.dialog_footer, t.dialog_rule);
         let at = super::text::centred_in(ui.painter(), &galley, r.center());
@@ -417,6 +421,43 @@ mod tests {
         assert_eq!(t.radius_xl, 10);
         assert_eq!(CommandSearch::inner_radius(), 4);
         assert_eq!(f32::from(CommandSearch::inner_radius()), f32::from(t.radius_xl) - t.space_6);
+    }
+
+    #[test]
+    fn closed_and_open_keycaps_are_drawn_with_one_pill_style() {
+        // #22642: the cap at the end of the closed ribbon field was drawn unlike the
+        // Preferences pill: the closed field padded the shared painter by `space_4`, and the
+        // cap stood `space_4` over its glyph, filling the short field like a box.
+        let t = Tokens::get();
+        let ctx = crate::test_support::context();
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 100.0))), ..Default::default() };
+        for (progress, open, cap) in [(0.0, false, "S"), (1.0, true, "Esc")] {
+            let radius = CommandSearch::field_radius(progress, false);
+            let mut query = String::new();
+            let output = crate::test_support::raw_frame(&ctx, input.clone(), |ui| {
+                CommandSearch::field(ui, &mut query, false, false, open, SearchFieldGeometry { height: 40.0, radius, progress }, Some("S"), 4096);
+            });
+            let text = ctx.fonts_mut(|fonts| fonts.layout_no_wrap(cap.to_owned(), FontId::monospace(t.font_small), t.form_dim).size());
+            let pill = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect) if rect.fill == t.dialog_footer => Some(rect),
+                    _ => None,
+                })
+                .next()
+                .expect("the shortcut cap is drawn");
+            assert!(
+                (pill.rect.width() - (text.x + t.space_10)).abs() < 0.5,
+                "the cap at progress {progress} keeps the shared pill padding: {:?}",
+                pill.rect
+            );
+            assert!(
+                (pill.rect.height() - (text.y + t.space_2)).abs() < 0.5,
+                "the cap at progress {progress} stays a chip, not a box: {:?}",
+                pill.rect
+            );
+        }
     }
 
     #[test]
