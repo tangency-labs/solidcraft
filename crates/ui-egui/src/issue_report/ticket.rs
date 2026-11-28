@@ -528,7 +528,7 @@ pub fn new_ticket(app: &mut SolveApp, draft: &Draft, ctx: Option<&egui::Context>
         _ => (draft.title.clone(), draft.description.clone()),
     };
     let mut form = payload::Form { app: api::DEFAULT_APP.into(), title, description, kind: payload::Kind::Bug };
-    // The crash report, like the design, is the person's to tick: never ticked to start with.
+    // The crash report's details start ticked (the person can untick them); the design never does.
     let mut ticks = payload::Ticks::default();
     if let Some(ask) = &draft.agent {
         // What the agent asked for, but the design and crash report stay the person's to tick.

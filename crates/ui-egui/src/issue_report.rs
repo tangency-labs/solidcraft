@@ -3335,7 +3335,7 @@ mod tests {
     #[test]
     fn ticket_report_review_fixes_hold() {
         use tickets::api::{allowed_url, answer, on_server};
-        // A crash report is offered, never ticked to start with.
+        // A crash report's details are offered ticked; the design is not.
         let (mut app, _, _, _) = ticket_app(true, None);
         let ctx = crate::fonts::test_context();
         begin_crash(
@@ -3345,7 +3345,17 @@ mod tests {
         );
         let draft = app.issue_report.draft.take().unwrap();
         let t = ticket::new_ticket(&mut app, &draft, None);
-        assert!(t.evidence.crash.is_some() && !t.ticks.crash && !t.ticks.design);
+        assert!(t.evidence.crash.is_some() && t.ticks.crash && !t.ticks.design);
+        // Building the report is what Submit does: ticked, the crash report's JSON goes (never a
+        // minidump); unticked, nothing of it, and the consent record says so.
+        let crash_form = payload::Form { title: "Crash".into(), ..Default::default() };
+        let ticked = payload::build(&crash_form, t.ticks, &t.evidence, "test");
+        assert!(ticked.files.iter().any(|f| f.kind == "crash" && f.name == "crash-c1.json"), "{:?}", ticked.files);
+        assert!(ticked.files.iter().all(|f| !f.name.ends_with(".dmp")), "the minidump stays local");
+        assert!(ticked.ticket["consent"]["kinds"].as_array().unwrap().contains(&json!("crash")));
+        let unticked = payload::build(&crash_form, payload::Ticks { crash: false, ..t.ticks }, &t.evidence, "test");
+        assert!(unticked.files.iter().all(|f| f.kind != "crash"), "{:?}", unticked.files);
+        assert!(!unticked.ticket["consent"]["kinds"].as_array().unwrap().contains(&json!("crash")));
         assert_eq!(t.evidence.failing.as_ref().and_then(|f| f.origin.as_deref()), Some("app"), "from the crash's kind");
 
         // Only a refusal of the report itself is final; a busy or broken server is tried again.
