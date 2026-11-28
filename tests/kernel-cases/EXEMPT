@@ -329,6 +329,20 @@ pointcloud.edit                   point clouds: points drawn, never a body
 pointcloud.insert                 point clouds: points drawn, never a body
 pointcloud.list                   point clouds: points drawn, never a body
 pointcloud.reload                 point clouds: points drawn, never a body; tested in crates/engine/src/cmd/point_cloud.rs
+print.unfold.bed                  Unfold for Printing: crates/engine/src/cmd/print_unfold_tests.rs (the printer bed the flat pattern is checked against, no geometry)
+print.unfold.bend                 Unfold for Printing: crates/engine/src/cmd/print_unfold_tests.rs (marks an edge as a bend of the pattern)
+print.unfold.edit                 Unfold for Printing: crates/engine/src/cmd/print_unfold_tests.rs (back to setting bends and cuts)
+print.unfold.flatten              Unfold for Printing: crates/engine/src/cmd/print_unfold_tests.rs (lays the pattern flat)
+print.unfold.group                Unfold for Printing: crates/engine/src/cmd/print_unfold_tests.rs (carves faces out into a part of their own)
+print.unfold.joint                Unfold for Printing: crates/engine/src/cmd/print_unfold_tests.rs (one edge's joint, no geometry until make)
+print.unfold.joints               Unfold for Printing: crates/engine/src/cmd/print_unfold_tests.rs (the wall and joints chosen, no geometry until make)
+print.unfold.make                 Unfold for Printing: crates/engine/src/cmd/print_unfold_tests.rs (the printable parts: volumes, pieces and sizes measured there)
+print.unfold.split                Unfold for Printing: crates/engine/src/cmd/print_unfold_tests.rs (splits the flat pattern at a bend)
+print.unfold.start                Unfold for Printing: crates/engine/src/cmd/print_unfold_tests.rs (copies the body into a design of its own)
+print.unfold.state                Unfold for Printing: crates/engine/src/cmd/print_unfold_tests.rs (reads the state, no geometry)
+print.unfold.surface              Unfold for Printing: crates/engine/src/cmd/print_unfold_tests.rs (every face as a sheet of its own)
+print.unfold.ungroup              Unfold for Printing: crates/engine/src/cmd/print_unfold_tests.rs (puts carved-out faces back)
+print.unfold.unmake               Unfold for Printing: crates/engine/src/cmd/print_unfold_tests.rs (removes the printable parts)
 pulley.insert                     timing-belt pulleys built from sketch, extrude and cylinder features: volumes against the outline's area worked out by hand in crates/engine/src/cmd/pulleys_tests.rs
 render.aging.describe             rendering: images, cameras, stages
 render.backends                   rendering: images, cameras, stages
