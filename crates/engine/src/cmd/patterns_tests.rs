@@ -4832,6 +4832,17 @@ fn mirror_combine_unmerged_copies_inherit_seed_material() {
     }
 }
 
+/// A pattern count that works out to less than one is refused with its range, not accepted.
+#[test]
+fn a_pattern_count_below_one_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "n", "expression": "0"}));
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Peg"}));
+    let made = s.execute("solid.pattern.rectangular", &json!({"bodies": ["Peg"], "dir1": [1, 0, 0], "count1": "n", "spacing1": 5}));
+    let failed = made.is_err() || s.model.results.iter().any(|r| r.error.as_deref().is_some_and(|e| e.contains("pattern count must be")));
+    assert!(failed, "a count of 0 must be refused");
+}
+
 /// A pattern of picked placements adds them again once and keeps no timeline feature, so a body
 /// pattern redefined into one says so instead of "did not make a feature" (#22942).
 #[test]

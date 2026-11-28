@@ -5041,6 +5041,12 @@ pub struct DesignLink {
     /// Legacy rows without a creation identity keep `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub configuration_identity: Option<u64>,
+    /// Values the link builds the part with, on top of the selected row: the part's parameter
+    /// names to expressions (`50 mm`, `2 * pitch`). Update Links applies them in order after the
+    /// row, within the part's own declared limits. Absent: the part as its row or saved state
+    /// has it. A generator's part keeps its ordering code's numbers here.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub parameters: std::collections::BTreeMap<String, String>,
     /// Last inherited values, by Import body slot. Differing assembly assignments are
     /// local overrides and survive a source update. Older links start with no baseline.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

@@ -472,7 +472,41 @@ fn validate_rows(s: &Session, cmd: &str) -> Result<()> {
 }
 
 /// Adds `value` as a rule, or replaces the rule with its id.
+/// A rule names a feature by its id; a name (`"Rail cap 1"`) is looked up here, at any depth of the
+/// rule's condition and effect, so a script need not know ids.
+fn resolve_feature_names(s: &Session, value: &mut Value, cmd: &str) -> Result<()> {
+    match value {
+        Value::Object(map) => {
+            for (key, v) in map.iter_mut() {
+                match (key.as_str(), &*v) {
+                    ("feature", Value::String(name)) => {
+                        let id = s
+                            .doc
+                            .features
+                            .iter()
+                            .find(|f| f.name == *name)
+                            .map(|f| f.id)
+                            .ok_or_else(|| bad(cmd, format!("there is no feature named `{name}`")))?;
+                        *v = Value::from(id);
+                    }
+                    _ => resolve_feature_names(s, v, cmd)?,
+                }
+            }
+        }
+        Value::Array(items) => {
+            for v in items {
+                resolve_feature_names(s, v, cmd)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 fn put_rule(s: &mut Session, value: &Value, cmd: &str) -> Result<()> {
+    let mut value = value.clone();
+    resolve_feature_names(s, &mut value, cmd)?;
+    let value = &value;
     solidcraft_doc::config::validate_rules_json(&json!({"configs":{"rules":[value]}})).map_err(|e| bad(cmd, e.to_string()))?;
     let mut rule: solidcraft_doc::config::ConfigRule = serde_json::from_value(value.clone()).map_err(|e| bad(cmd, e.to_string()))?;
     if rule.length_unit.is_none() {

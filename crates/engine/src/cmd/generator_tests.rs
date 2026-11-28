@@ -1,0 +1,289 @@
+//! The generator commands: an ordering code inserts a parametric part through the normal command
+//! path, the part keeps its parameters and rebuilds within the design's declared limits, and what
+//! cannot be built changes nothing.
+
+use serde_json::json;
+
+use crate::Session;
+use crate::generator::tests::{nut_package, run};
+
+fn body_count(s: &mut Session) -> usize {
+    run(s, "inspect.measure", json!({"names_only": true}))["body_count"].as_u64().unwrap() as usize
+}
+
+fn volume(s: &mut Session) -> f64 {
+    run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap()
+}
+
+fn path(dir: &tempfile::TempDir) -> String {
+    dir.path().to_string_lossy().into_owned()
+}
+
+fn close(a: f64, b: f64) -> bool {
+    (a - b).abs() < 1e-6 * b.abs().max(1.0)
+}
+
+#[test]
+fn a_code_inserts_a_part_with_the_figures_its_row_and_length_give() {
+    let dir = nut_package(None);
+    let mut s = Session::default();
+    let r = run(&mut s, "generator.insert", json!({"generator": path(&dir), "code": "tn m4 40"}));
+    assert_eq!(r["code"], "TN-M4-40");
+    assert_eq!(r["configuration"], "M4");
+    assert_eq!(r["parameters"], json!({"length": "40 mm"}));
+    assert_eq!(r["provenance"]["status"], "verified");
+    // 7 x 3.2 x 40 plate, and 2 pegs of 8 mm3 (the count follows the length).
+    assert!(close(r["volume_mm3"].as_f64().unwrap(), 912.0), "{r}");
+    let size: Vec<f64> = r["bbox_mm"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+    assert!(close(size[0], 40.0 + 0.0) || size[0] >= 40.0, "{size:?}");
+    // One undo step takes the whole part away.
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(body_count(&mut s), 0);
+}
+
+#[test]
+fn the_inserted_part_stays_parametric_and_stays_within_its_limits() {
+    let dir = nut_package(None);
+    let mut s = Session::default();
+    let r = run(&mut s, "generator.insert", json!({"generator": path(&dir), "code": "TN-M4-40"}));
+    let component = r["component"].as_u64().unwrap();
+    assert!(close(volume(&mut s), 912.0));
+    // A longer part: the plate grows and the row of pegs gets a third peg.
+    run(&mut s, "component.set_link_parameters", json!({"component": component, "parameters": {"length": "60 mm"}}));
+    assert!(close(volume(&mut s), 7.0 * 3.2 * 60.0 + 3.0 * 8.0), "{}", volume(&mut s));
+    // Out of the declared range: refused, naming the rule, and nothing changes.
+    let e = s.execute("component.set_link_parameters", &json!({"component": component, "parameters": {"length": "120 mm"}})).unwrap_err().to_string();
+    assert!(e.contains("Length range"), "{e}");
+    assert!(close(volume(&mut s), 7.0 * 3.2 * 60.0 + 3.0 * 8.0));
+    // A name the design does not have is refused too.
+    assert!(s.execute("component.set_link_parameters", &json!({"component": component, "parameters": {"nope": "1 mm"}})).is_err());
+    // Undo goes back to 40 mm; clearing the parameters goes back to the row's own length.
+    run(&mut s, "edit.undo", json!({}));
+    assert!(close(volume(&mut s), 912.0));
+    run(&mut s, "component.set_link_parameters", json!({"component": component, "parameters": null}));
+    assert!(close(volume(&mut s), 912.0));
+}
+
+#[test]
+fn parameters_are_kept_by_the_link_and_saved_with_the_design() {
+    let dir = nut_package(None);
+    let out = tempfile::tempdir().unwrap();
+    let file = out.path().join("assembly.sc");
+    let mut s = Session::default();
+    run(&mut s, "generator.insert", json!({"generator": path(&dir), "parameters": {"size": "M6", "length": 80}}));
+    let want = 10.0 * 5.0 * 80.0 + 4.0 * 8.0;
+    assert!(close(volume(&mut s), want), "{}", volume(&mut s));
+    run(&mut s, "file.save", json!({"path": file}));
+    let mut again = Session::default();
+    run(&mut again, "doc.open", json!({"path": file}));
+    assert!(close(volume(&mut again), want), "{}", volume(&mut again));
+    let c = again.doc.components.iter().find(|c| c.id != 0).unwrap();
+    let metadata = serde_json::to_value(&c.metadata).unwrap();
+    let saved = metadata.to_string();
+    assert!(saved.contains("org.solidcraft.generator"), "{saved}");
+    assert!(saved.contains("metric-t-nut") && saved.contains("M6"), "{saved}");
+    let component = run(&mut again, "component.links", json!({}))["links"][0]["component"].as_u64().unwrap();
+    // Update Links builds it again with the saved values.
+    run(&mut again, "component.update_links", json!({"component": component}));
+    assert!(close(volume(&mut again), want));
+}
+
+#[test]
+fn parse_code_and_template_answer_without_changing_the_design() {
+    let dir = nut_package(None);
+    let mut s = Session::default();
+    let r = run(&mut s, "generator.parse", json!({"generator": path(&dir), "code": "TN-M5-20-S"}));
+    assert_eq!(r["ok"], true);
+    assert_eq!(r["fields"], json!({"size": "M5", "length": 20, "grade": "steel", "grade_code": "S"}));
+    assert_eq!(r["configuration"], "M5");
+    assert_eq!(r["warnings"].as_array().unwrap().len(), 1);
+    let refused = run(&mut s, "generator.parse", json!({"generator": path(&dir), "code": "TN-M8-40"}));
+    assert_eq!((refused["ok"].clone(), refused["reason"].clone()), (json!(false), json!("not_modelled")));
+    assert!(refused["message"].as_str().unwrap().contains("not modelled"));
+    let c = run(&mut s, "generator.code", json!({"generator": path(&dir), "parameters": r["fields"]}));
+    assert_eq!(c["code"], "TN-M5-20-S");
+    assert!(s.execute("generator.code", &json!({"generator": path(&dir), "parameters": {"size": "M9", "length": 20}})).is_err());
+    let t = run(&mut s, "generator.template", json!({"template": "MGN{size: 7|9|12|15}R{length: int 40..2000}", "code": "mgn15r600"}));
+    assert_eq!(t["parameters"], json!({"size": "15", "length": 600}));
+    assert_eq!(t["prefixes"], json!(["MGN7", "MGN9", "MGN12", "MGN15"]));
+    assert_eq!(body_count(&mut s), 0);
+}
+
+#[test]
+fn a_refused_code_is_an_error_that_changes_nothing() {
+    let dir = nut_package(None);
+    let mut s = Session::default();
+    for (code, words) in [("TN-M8-40", "not modelled"), ("TN-M4-45", "ordering code"), ("", "ordering code")] {
+        let e = s.execute("generator.insert", &json!({"generator": path(&dir), "code": code})).unwrap_err().to_string();
+        assert!(e.contains(words), "{code}: {e}");
+    }
+    assert!(s.execute("generator.insert", &json!({"generator": path(&dir)})).is_err());
+    assert!(s.execute("generator.insert", &json!({"generator": path(&dir), "code": "TN-M4-40", "parameters": {}})).is_err());
+    assert!(s.execute("generator.insert", &json!({"generator": path(&dir), "code": "TN-M4-40", "placement": {"colour": 1}})).is_err());
+    assert!(s.execute("generator.insert", &json!({"generator": "no-such-generator", "code": "TN-M4-40"})).is_err());
+    assert_eq!(body_count(&mut s), 0);
+}
+
+#[test]
+fn the_part_is_placed_and_named_from_the_code() {
+    let dir = nut_package(None);
+    let mut s = Session::default();
+    let r = run(&mut s, "generator.insert", json!({"generator": path(&dir), "code": "TN-M6-30", "placement": {"translate": [100, 0, 0]}}));
+    assert_eq!(r["description"], "T-nut M6 x 30 mm, zinc");
+    let links = run(&mut s, "component.links", json!({}));
+    assert_eq!(links["links"].as_array().unwrap().len(), 1);
+    let comps = run(&mut s, "component.list", json!({}));
+    assert!(comps.to_string().contains("TN-M6-30"), "{comps}");
+}
+
+#[test]
+fn check_runs_the_declared_examples_and_reports_a_wrong_figure() {
+    let dir = nut_package(None);
+    let mut s = Session::default();
+    let r = run(&mut s, "generator.check", json!({"generator": path(&dir)}));
+    assert_eq!(r["passed"], true, "{r}");
+    assert_eq!(r["results"].as_array().unwrap().len(), 2);
+    let wrong = std::fs::read_to_string(dir.path().join("generator.toml")).unwrap().replace("volume_mm3 = 912.0", "volume_mm3 = 900.0");
+    std::fs::write(dir.path().join("generator.toml"), wrong).unwrap();
+    let r = run(&mut s, "generator.check", json!({"generator": path(&dir)}));
+    assert_eq!(r["passed"], false);
+    assert!(r["results"][0]["problems"][0].as_str().unwrap().contains("volume"), "{r}");
+}
+
+#[test]
+fn list_answers_with_the_installed_generators_and_what_it_skipped() {
+    let mut s = Session::default();
+    let r = run(&mut s, "generator.list", json!({}));
+    assert!(r["generators"].is_array() && r["skipped"].is_array(), "{r}");
+}
+
+#[test]
+fn merge_changes_one_parameter_and_keeps_the_others() {
+    let dir = nut_package(None);
+    let mut s = Session::default();
+    let r = run(&mut s, "generator.insert", json!({"generator": path(&dir), "code": "TN-M4-40"}));
+    let component = r["component"].as_u64().unwrap();
+    // An unknown name is refused with the design's own words, whether it replaces or merges.
+    for merge in [false, true] {
+        let e = s
+            .execute("component.set_link_parameters", &json!({"component": component, "parameters": {"nope": "1 mm"}, "merge": merge}))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("nope"), "{e}");
+    }
+    let r = run(&mut s, "component.set_link_parameters", json!({"component": component, "parameters": {"length": "60 mm"}, "merge": true}));
+    assert_eq!(r["parameters"], json!({"length": "60 mm"}));
+    assert!(close(volume(&mut s), 7.0 * 3.2 * 60.0 + 3.0 * 8.0));
+}
+
+#[test]
+fn a_limit_marked_enforce_on_edit_holds_on_an_ordinary_parameter_change() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "10 mm"}));
+    run(&mut s, "solid.box", json!({"length": "w", "width": 5, "height": 5, "body_name": "Bar"}));
+    run(&mut s, "config.configure", json!({"params": ["w"]}));
+    let rule = |on: bool| {
+        json!({"rule": {"id": "range", "name": "Width range", "enforce_on_edit": on, "condition": {"type": "always"},
+            "effect": {"type": "parameter_range", "parameter": "w", "minimum": "5 mm", "maximum": "40 mm"}}})
+    };
+    run(&mut s, "config.rule", rule(false));
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "90 mm"}));
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "20 mm"}));
+    run(&mut s, "config.rule", rule(true));
+    let e = s.execute("parameters.change", &json!({"name": "w", "expression": "90 mm"})).unwrap_err().to_string();
+    assert!(e.contains("Width range"), "{e}");
+    let e = s.execute("parameters.change", &json!({"changes": {"w": "99 mm"}})).unwrap_err().to_string();
+    assert!(e.contains("Width range"), "{e}");
+    assert_eq!(s.doc.param_values().0["w"].v, 20.0, "a refused edit leaves the value");
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "30 mm"}));
+}
+
+#[test]
+fn parse_refuses_a_resolution_outside_the_source_limits() {
+    let dir = nut_package(None);
+    std::fs::write(
+        dir.path().join("generator.rhai"),
+        r#"fn resolve(f) {
+        #{ configuration: "M4", parameters: #{ length: "120 mm" } }
+    }"#,
+    )
+    .unwrap();
+    let mut s = Session::default();
+    let before = s.doc.clone();
+    let r = run(&mut s, "generator.parse", json!({"generator": path(&dir), "code": "TN-M4-40"}));
+    assert_eq!(r["ok"], false, "{r}");
+    assert!(r["message"].as_str().unwrap().contains("Length range"), "{r}");
+    assert_eq!(s.doc, before);
+}
+
+#[test]
+fn insertion_metadata_refusal_rolls_back_the_whole_part() {
+    let dir = nut_package(None);
+    let mut s = Session::default();
+    s.set_command_check(Some(std::sync::Arc::new(
+        |id, _, _| {
+            if id == "component.metadata.set" { Err("part properties forbidden".into()) } else { Ok(()) }
+        },
+    )));
+    let before = s.doc.clone();
+    let undo = s.undo.len();
+    let err = s.execute("generator.insert", &json!({"generator": path(&dir), "code": "TN-M4-40"})).unwrap_err();
+    assert!(err.to_string().contains("part properties forbidden"));
+    assert_eq!(s.doc, before);
+    assert_eq!(s.undo.len(), undo);
+    assert_eq!(body_count(&mut s), 0);
+}
+
+#[test]
+fn field_insertion_uses_the_same_canonical_choices_as_code_insertion() {
+    let dir = nut_package(None);
+    std::fs::write(
+        dir.path().join("generator.rhai"),
+        r#"fn resolve(f) {
+        if f.size != "M6" { refuse("invalid", "noncanonical size"); }
+        #{ configuration: f.size, parameters: #{ length: f.length.to_string() + " mm" } }
+    }"#,
+    )
+    .unwrap();
+    let mut s = Session::default();
+    let r = run(&mut s, "generator.insert", json!({"generator": path(&dir), "parameters": {"size": "m6", "length": 40}}));
+    assert_eq!(r["code"], "TN-M6-40");
+    assert_eq!(r["configuration"], "M6");
+}
+
+#[test]
+fn invalid_examples_fail_when_the_resolver_cannot_decide() {
+    let dir = nut_package(None);
+    let file = dir.path().join("generator.toml");
+    let manifest = std::fs::read_to_string(&file).unwrap();
+    std::fs::write(&file, manifest.replace("message_contains = \"not modelled\"", "").replace("code = \"TN-M8-40\"", "code = \"TN-M4-50\"")).unwrap();
+    std::fs::write(dir.path().join("generator.rhai"), "fn resolve(f) { loop {} }").unwrap();
+    let mut s = Session::default();
+    let r = run(&mut s, "generator.check", json!({"generator": path(&dir)}));
+    assert_eq!(r["passed"], false, "{r}");
+    assert_eq!(r["results"][1]["ok"], false, "{r}");
+}
+
+#[test]
+fn check_reports_an_example_matching_two_templates() {
+    let dir = nut_package(None);
+    let file = dir.path().join("generator.toml");
+    let mut manifest = std::fs::read_to_string(&file).unwrap();
+    manifest.push_str("\n[[template]]\npattern = \"tn-{size}-{length}[-{grade}]\"\n");
+    std::fs::write(&file, manifest).unwrap();
+    let mut s = Session::default();
+    let r = run(&mut s, "generator.check", json!({"generator": path(&dir)}));
+    assert_eq!(r["passed"], false, "{r}");
+    assert!(r["results"][0]["problems"].to_string().contains("multiple templates"), "{r}");
+}
+
+#[test]
+fn insertion_keeps_catalogue_provenance_in_component_metadata() {
+    let dir = nut_package(None);
+    let mut s = Session::default();
+    let r = run(&mut s, "generator.insert", json!({"generator": path(&dir), "code": "TN-M4-40"}));
+    let id = r["component"].as_u64().unwrap();
+    let c = s.doc.components.iter().find(|c| c.id == id).unwrap();
+    let saved = serde_json::to_value(&c.metadata).unwrap().to_string();
+    assert!(saved.contains("fixture table") && saved.contains("verified"), "{saved}");
+}

@@ -1,0 +1,74 @@
+{
+  "en": {
+    "cmd.component.set_link_parameters": "Set Link Parameters",
+    "cmd.generator.check": "Check Generator",
+    "cmd.generator.code": "Print Ordering Code",
+    "cmd.generator.insert": "Insert Part From Ordering Code",
+    "cmd.generator.list": "List Generators",
+    "cmd.generator.parse": "Read Ordering Code",
+    "cmd.generator.template": "Try Code Template"
+  },
+  "de": {
+    "cmd.component.set_link_parameters": "Verknüpfungsparameter setzen",
+    "cmd.generator.check": "Generator prüfen",
+    "cmd.generator.code": "Bestellcode ausgeben",
+    "cmd.generator.insert": "Teil aus Bestellcode einfügen",
+    "cmd.generator.list": "Generatoren auflisten",
+    "cmd.generator.parse": "Bestellcode lesen",
+    "cmd.generator.template": "Codevorlage ausprobieren"
+  },
+  "ja": {
+    "cmd.component.set_link_parameters": "リンクのパラメーターを設定",
+    "cmd.generator.check": "ジェネレーターを確認",
+    "cmd.generator.code": "注文コードを出力",
+    "cmd.generator.insert": "注文コードから部品を挿入",
+    "cmd.generator.list": "ジェネレーター一覧",
+    "cmd.generator.parse": "注文コードを読む",
+    "cmd.generator.template": "コードテンプレートを試す"
+  },
+  "ko": {
+    "cmd.component.set_link_parameters": "Set Link Parameters",
+    "cmd.generator.check": "생성기 검사",
+    "cmd.generator.code": "Print Ordering Code",
+    "cmd.generator.insert": "Insert Part From Ordering Code",
+    "cmd.generator.list": "생성기 목록",
+    "cmd.generator.parse": "주문 코드 읽기",
+    "cmd.generator.template": "Try Code Template"
+  },
+  "vi": {
+    "cmd.component.set_link_parameters": "Set Link Parameters",
+    "cmd.generator.check": "Kiểm tra bộ tạo",
+    "cmd.generator.code": "Print Ordering Code",
+    "cmd.generator.insert": "Insert Part From Ordering Code",
+    "cmd.generator.list": "Liệt kê bộ tạo",
+    "cmd.generator.parse": "Đọc mã đặt hàng",
+    "cmd.generator.template": "Try Code Template"
+  },
+  "zh": {
+    "cmd.component.set_link_parameters": "Set Link Parameters",
+    "cmd.generator.check": "检查生成器",
+    "cmd.generator.code": "Print Ordering Code",
+    "cmd.generator.insert": "Insert Part From Ordering Code",
+    "cmd.generator.list": "列出生成器",
+    "cmd.generator.parse": "读取订货代码",
+    "cmd.generator.template": "Try Code Template"
+  },
+  "ar": {
+    "cmd.component.set_link_parameters": "Set Link Parameters",
+    "cmd.generator.check": "فحص المولّد",
+    "cmd.generator.code": "Print Ordering Code",
+    "cmd.generator.insert": "Insert Part From Ordering Code",
+    "cmd.generator.list": "عرض المولّدات",
+    "cmd.generator.parse": "قراءة رمز الطلب",
+    "cmd.generator.template": "Try Code Template"
+  },
+  "he": {
+    "cmd.component.set_link_parameters": "Set Link Parameters",
+    "cmd.generator.check": "בדיקת מחולל",
+    "cmd.generator.code": "Print Ordering Code",
+    "cmd.generator.insert": "Insert Part From Ordering Code",
+    "cmd.generator.list": "רשימת מחוללים",
+    "cmd.generator.parse": "קריאת קוד הזמנה",
+    "cmd.generator.template": "Try Code Template"
+  }
+}

@@ -106,6 +106,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::FramePlate(_) => Some("frame.plate"),
         Kind::CapturePosition(_) => Some("component.capture_position"),
         Kind::Pulley(_) => Some("pulley.insert"),
+        Kind::Generator(_) => Some("generator.insert"),
         Kind::Plastic(k) => match k {
             crate::dialogs_plastic::Pl::SnapFit { .. } => Some("plastic.snap_fit"),
             crate::dialogs_plastic::Pl::Assign { .. } => Some("plastic.assign_rule"),
@@ -1779,6 +1780,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::EndCap(k) => enter |= crate::dialogs_end_cap::rows(app, ui, k, &d.inputs),
         Kind::Dogbone(k) => enter |= crate::dialogs_dogbone::rows(app, ui, k, &mut d.extra),
         Kind::Pulley(k) => enter |= crate::dialogs_pulley::rows(app, ui, k),
+        Kind::Generator(k) => enter |= crate::dialogs_generator::rows(app, ui, k),
         Kind::CellGrid(k) => enter |= crate::dialogs_cell_grid::rows(app, ui, k, &d.inputs),
         Kind::RotateMember(k) => enter |= crate::dialogs_rotate_member::rows(app, ui, k, &mut d.inputs),
         Kind::FrameTrim(k) => enter |= crate::dialogs_frame::trim_rows(ui, k),

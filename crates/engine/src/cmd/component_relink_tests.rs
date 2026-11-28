@@ -1949,9 +1949,11 @@ fn linked_configurations_reject_row_ids_recycled_after_source_undo() {
         assert_ne!(fresh_component, component, "a replacement row must not reuse the stale definition");
         let before = s.doc.clone();
         let undo = s.undo.len();
-        for (command, params) in
-            [("component.update_links", json!({"component": component})), ("component.relink", json!({"component": component, "path": file}))]
-        {
+        for (command, params) in [
+            ("component.update_links", json!({"component": component})),
+            ("component.relink", json!({"component": component, "path": file})),
+            ("component.relink", json!({"component": component, "path": file, "parameters": {"L": "35 mm"}})),
+        ] {
             let error = s.execute(command, &params).unwrap_err().to_string();
             assert!(error.contains("replaced"), "{error}");
             assert_eq!(s.doc, before);

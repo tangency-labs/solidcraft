@@ -76,8 +76,10 @@ and the preview follows each step. An expression such as `width / 2` is left as 
 
 Expressions are unit-aware: `2 * width + 5 mm`, `angle / 2`, `sqrt(area)`, `1 in + 3 mm`, using
 `+ - * / ^ %`, parentheses, `sin cos tan asin acos atan atan2 sinh cosh tanh asinh acosh atanh sqrt
-abs sign min max floor ceil round trunc mod exp ln log log10 pow hypot` (`log` is base 10) and unit
-conversion. A number and the unit after it are one value: `10 mm / 2 mm` is 5
+abs sign min max floor ceil round trunc mod exp ln log log10 pow hypot if lt le gt ge eq ne` (`log` is base 10;
+`if(condition, then, else)` takes `then` when the condition is not 0, and evaluates both branches; `lt`, `le`,
+`gt`, `ge`, `eq` and `ne` compare two values with the same units and give 1 or 0, so `if(gt(width, 30 mm), 2 mm, 1 mm)`
+is 2 mm when `width` is over 30 mm) and unit conversion. A number and the unit after it are one value: `10 mm / 2 mm` is 5
 and `90 deg / 1 rad` is π/2, and a fraction of numbers before a unit is one value too (`1/2 in`
 is half an inch; after a `/` only written without spaces: `1 in / 1/2 in` is 2, while
 `width / 10 / 2 mm` divides by 10 and then by 2 mm). A decimal comma works too: `2,5 mm` is

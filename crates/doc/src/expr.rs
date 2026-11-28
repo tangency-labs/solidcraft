@@ -205,6 +205,13 @@ pub const FUNCTIONS: &[(&str, &str)] = &[
     ("floor", "floor(x)"),
     ("ceil", "ceil(x)"),
     ("round", "round(x)"),
+    ("if", "if(condition, then, else): `then` when the condition is not 0 (both branches are evaluated)"),
+    ("lt", "lt(a, b): 1 when a < b, else 0 (same units)"),
+    ("le", "le(a, b): 1 when a <= b, else 0"),
+    ("gt", "gt(a, b): 1 when a > b, else 0"),
+    ("ge", "ge(a, b): 1 when a >= b, else 0"),
+    ("eq", "eq(a, b): 1 when a equals b (relative tolerance 1e-9), else 0"),
+    ("ne", "ne(a, b): 1 when a differs from b, else 0"),
     ("exp", "exp(x)"),
     ("sinh", "sinh(x)"),
     ("cosh", "cosh(x)"),
@@ -1341,6 +1348,32 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
             let (a, b) = two()?;
             modulo(a, b, d)?
         }
+        "if" => {
+            let [c, then, otherwise] = args else { return Err(DocError::Expr("`if` needs three values: if(condition, then, else)".into())) };
+            let condition = num(*c)?;
+            let (x, y) = same(*then, *otherwise)?;
+            if !x.same_dims(&y) {
+                return Err(DocError::Expr("`if` needs `then` and `else` with the same units".into()));
+            }
+            if condition != 0.0 { x } else { y }
+        }
+        "lt" | "le" | "gt" | "ge" | "eq" | "ne" => {
+            let (a, b) = two()?;
+            let (a, b) = same(a, b)?;
+            if !a.same_dims(&b) {
+                return Err(DocError::Expr(format!("`{f}` needs two values with the same units")));
+            }
+            let equal = (a.v - b.v).abs() <= 1e-9 * a.v.abs().max(b.v.abs()).max(1.0);
+            let yes = match f {
+                "lt" => a.v < b.v && !equal,
+                "le" => a.v < b.v || equal,
+                "gt" => a.v > b.v && !equal,
+                "ge" => a.v > b.v || equal,
+                "eq" => equal,
+                _ => !equal,
+            };
+            Value::num(if yes { 1.0 } else { 0.0 })
+        }
         "min" | "max" => {
             let Some(first) = args.first().copied() else { return Err(DocError::Expr(format!("`{f}` needs arguments"))) };
             let mut acc = first;
@@ -1642,6 +1675,19 @@ mod tests {
         for k in Kind::ALL {
             assert_eq!(Kind::ALL.iter().filter(|x| **x == k).count(), 1, "{k:?}");
             assert_eq!(Kind::of_dims(k.dims()), Some(k), "{k:?}");
+        }
+    }
+
+    #[test]
+    fn if_picks_a_branch_and_comparisons_give_one_or_zero() {
+        assert_eq!(ev("if(1, 5, 7)", Kind::Unitless).unwrap(), 5.0);
+        assert_eq!(ev("if(0, 5, 7)", Kind::Unitless).unwrap(), 7.0);
+        assert_eq!(ev("if(gt(width, 30 mm), 1 mm, 2 mm)", Kind::Length).unwrap(), 1.0);
+        assert_eq!(ev("if(lt(width, 30 mm), 1 mm, 2 mm)", Kind::Length).unwrap(), 2.0);
+        assert_eq!(ev("lt(1 cm, 11 mm) + ge(10 mm, 1 cm) + eq(0.1 + 0.2, 0.3) + ne(1, 2)", Kind::Unitless).unwrap(), 4.0);
+        assert_eq!(ev("le(2, 2) + gt(2, 2)", Kind::Unitless).unwrap(), 1.0);
+        for bad in ["if(1, 2)", "if(1 mm, 2, 3)", "lt(1 mm, 2 deg)", "lt(1)", "eq(1, 2, 3)"] {
+            assert!(ev(bad, Kind::Unitless).is_err(), "{bad}");
         }
     }
 

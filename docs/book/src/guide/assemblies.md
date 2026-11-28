@@ -604,7 +604,14 @@ To edit the source, right-click a linked component or occurrence in the Browser 
 the assembly last read them (`changed`). When a file can't be reached it also gives a
 `state` (`missing`, `unreadable` or `not_allowed`) and a `reason`. A linked component holds
 the part's bodies only: its timeline, parameters and sheet-metal data (flat pattern, bend
-table) stay in the part's own design.
+table) stay in the part's own design. What the link does carry are the values it asks the part
+to be built with: the selected configuration row and `parameters`, a map of the part's user
+parameter names to expressions (`component.insert_design {path, configuration, parameters}`).
+**Update Links** builds the part with them, so `component.set_link_parameters {component,
+parameters}` changes a rail's `length` and the part is rebuilt, within the limits the part's own
+configuration rules declare (a `parameter_range` or allowed-values rule on a parameter refuses a
+value outside it, naming the rule). The part's own file is never changed. Ordering-code
+generators (`generator.insert`) use exactly this.
 
 To edit a linked part where it sits, double-click it, in the Browser or on one of its faces in
 the view, or choose **Edit in Place** from its menu. Its design opens in a tab of its own with the

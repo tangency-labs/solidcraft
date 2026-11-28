@@ -22,6 +22,11 @@ pub struct ConfigRule {
     /// Unit context for feature-length expressions, fixed when authoring a rule.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub length_unit: Option<String>,
+    /// Also hold a range or allowed-values restriction on an ordinary parameter edit
+    /// (`parameters.change`), not only when a row is activated. Off by default, so a design saved
+    /// before it keeps today's behavior; a generator's design turns it on for its limits.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub enforce_on_edit: bool,
     pub condition: RuleCondition,
     pub effect: RuleEffect,
 }
@@ -82,6 +87,9 @@ pub fn validate_rules_json(document: &Value) -> Result<()> {
             if value.trim().is_empty() || value.chars().count() > limit {
                 return Err(invalid("rule id or name is empty or too long"));
             }
+        }
+        if rule.get("enforce_on_edit").is_some_and(|v| !v.is_boolean()) {
+            return Err(invalid("enforce_on_edit must be true or false"));
         }
         if let Some(unit) = rule.get("length_unit") {
             let unit =
@@ -295,6 +303,59 @@ impl Document {
         switched
     }
 
+    /// Whether the value a restriction (a range or an allowed list) is about satisfies it. Other
+    /// effects have nothing to hold.
+    fn restriction_holds(&self, values: &BTreeMap<String, expr::Value>, effect: &RuleEffect, length_unit: Option<&str>) -> Result<bool> {
+        Ok(match effect {
+            RuleEffect::ParameterRange { parameter, minimum, maximum } => {
+                let (value, min) = operands(self, values, parameter, minimum, length_unit)?;
+                let (_, max) = operands(self, values, parameter, maximum, length_unit)?;
+                min <= max && (value >= min || close(value, min)) && (value <= max || close(value, max))
+            }
+            RuleEffect::AllowParameterValues { parameter, expressions } => {
+                let mut valid = false;
+                for expression in expressions {
+                    let (a, b) = operands(self, values, parameter, expression, length_unit)?;
+                    valid |= close(a, b);
+                }
+                valid
+            }
+            _ => true,
+        })
+    }
+
+    /// After an ordinary parameter edit: the rules that ask for it (`enforce_on_edit`) and whose
+    /// condition holds must still hold. An error names the rule; the edit's command then undoes it.
+    pub fn check_edit_limits(&self) -> Result<()> {
+        if !self.configs.rules.iter().any(|r| r.enabled && r.enforce_on_edit) {
+            return Ok(());
+        }
+        let (values, _) = self.param_values();
+        for rule in self.configs.rules.iter().filter(|r| r.enabled && r.enforce_on_edit) {
+            if !matches!(rule.effect, RuleEffect::ParameterRange { .. } | RuleEffect::AllowParameterValues { .. }) {
+                continue;
+            }
+            let matched =
+                condition(self, &values, &rule.condition, rule.length_unit.as_deref()).map_err(|e| invalid(&format!("rule `{}`: {e}", rule.name)))?;
+            if matched && !self.restriction_holds(&values, &rule.effect, rule.length_unit.as_deref())? {
+                return Err(invalid(&format!("rule `{}` restricts the final value", rule.name)));
+            }
+        }
+        Ok(())
+    }
+
+    /// Build the design as a design link asks: set `values` (existing parameters, name to
+    /// expression), then apply the ordered rules and enforce every matched restriction, so a
+    /// value outside a declared range or allowed list is refused naming the rule (generators,
+    /// docs/formats/generator.md). Atomic: an error leaves `self` as it was.
+    pub fn set_parameters_within_limits(&mut self, values: &[(String, String)]) -> Result<Vec<RuleTrace>> {
+        let mut next = self.clone();
+        next.change_params_atomic(values)?;
+        let trace = next.evaluate_configuration_rules()?;
+        *self = next;
+        Ok(trace)
+    }
+
     /// Apply ordered drives, then enforce all matched restrictions on the final state.
     /// Running on a scratch document makes a failing rule fully atomic for callers.
     pub(super) fn evaluate_configuration_rules(&mut self) -> Result<Vec<RuleTrace>> {
@@ -315,13 +376,12 @@ impl Document {
             }
             // Targets must remain configured, including disabled rules, so dormant rules
             // cannot silently become invalid and surprise a subsequent activation.
-            let target = match &rule.effect {
-                RuleEffect::DriveParameter { parameter, .. }
-                | RuleEffect::ParameterRange { parameter, .. }
-                | RuleEffect::AllowParameterValues { parameter, .. } => Column::Param(parameter.clone()),
-                RuleEffect::DriveSuppression { feature, .. } => Column::Suppress(*feature),
-            };
-            if !self.configs.columns.contains(&target) {
+            // Only a drive of a parameter needs its column (it is restored from the row); a
+            // range, an allowed list or a suppression holds without one (generators' limits and
+            // optional features need no table).
+            if let RuleEffect::DriveParameter { parameter, .. } = &rule.effect
+                && !self.configs.columns.contains(&Column::Param(parameter.clone()))
+            {
                 return Err(invalid(&format!("rule `{}` target is not configured", rule.name)));
             }
             let matched = rule.enabled
@@ -352,23 +412,7 @@ impl Document {
             }
         }
         for (name, effect, length_unit) in restrictions {
-            let valid = match effect {
-                RuleEffect::ParameterRange { parameter, minimum, maximum } => {
-                    let (value, min) = operands(self, &values, &parameter, &minimum, length_unit.as_deref())?;
-                    let (_, max) = operands(self, &values, &parameter, &maximum, length_unit.as_deref())?;
-                    min <= max && (value >= min || close(value, min)) && (value <= max || close(value, max))
-                }
-                RuleEffect::AllowParameterValues { parameter, expressions } => {
-                    let mut valid = false;
-                    for expression in expressions {
-                        let (a, b) = operands(self, &values, &parameter, &expression, length_unit.as_deref())?;
-                        valid |= close(a, b);
-                    }
-                    valid
-                }
-                _ => true,
-            };
-            if !valid {
+            if !self.restriction_holds(&values, &effect, length_unit.as_deref())? {
                 return Err(invalid(&format!("rule `{name}` restricts the final value")));
             }
         }
@@ -538,8 +582,39 @@ mod tests {
         doc
     }
     fn rule(id: &str, condition: RuleCondition, effect: RuleEffect) -> ConfigRule {
-        ConfigRule { id: id.into(), name: id.into(), enabled: true, length_unit: None, condition, effect }
+        ConfigRule { id: id.into(), name: id.into(), enabled: true, length_unit: None, enforce_on_edit: false, condition, effect }
     }
+    #[test]
+    fn suppression_without_column_depends_only_on_new_row() {
+        let mut doc = design();
+        let feature = doc
+            .add_feature(
+                crate::FeatureKind::Box {
+                    corner: ["0".into(), "0".into(), "0".into()],
+                    length: "width".into(),
+                    width: "5 mm".into(),
+                    height: "5 mm".into(),
+                    operation: crate::Operation::NewBody,
+                    centred: false,
+                },
+                None,
+            )
+            .unwrap();
+        doc.configs.rows.push(ConfigRow { id: 2, name: "A".into(), cells: vec!["20 mm".into(), "5 mm".into()] });
+        doc.configs.rules.push(rule(
+            "optional",
+            RuleCondition::Parameter { parameter: "width".into(), operator: RuleOperator::Gt, expression: "15 mm".into() },
+            RuleEffect::DriveSuppression { feature, value: true },
+        ));
+        let mut direct = doc.clone();
+        direct.apply_configuration("Default").unwrap();
+        doc.apply_configuration("A").unwrap();
+        assert!(doc.feature(feature).unwrap().suppressed);
+        doc.apply_configuration("Default").unwrap();
+        assert!(!doc.feature(feature).unwrap().suppressed);
+        assert_eq!(doc, direct);
+    }
+
     #[test]
     fn ordered_rules_derive_values_without_overwriting_rows() {
         let mut doc = design();
@@ -584,6 +659,41 @@ mod tests {
         assert_eq!(doc, before);
         doc.configs.rules[0].effect = RuleEffect::ParameterRange { parameter: "width".into(), minimum: "1 deg".into(), maximum: "90 deg".into() };
         assert!(doc.apply_configuration("Default").is_err());
+    }
+    #[test]
+    fn link_values_are_set_within_the_declared_limits_or_refused_atomically() {
+        let mut doc = design();
+        doc.configs.rules = vec![rule(
+            "length-range",
+            RuleCondition::Always,
+            RuleEffect::ParameterRange { parameter: "width".into(), minimum: "5 mm".into(), maximum: "40 mm".into() },
+        )];
+        let trace = doc.set_parameters_within_limits(&[("width".into(), "30 mm".into())]).unwrap();
+        assert!(trace[0].matched);
+        assert_eq!(doc.param_values().0["width"].v, 30.0);
+        let before = doc.clone();
+        let e = doc.set_parameters_within_limits(&[("width".into(), "41 mm".into())]).unwrap_err().to_string();
+        assert!(e.contains("length-range"), "{e}");
+        assert_eq!(doc, before);
+        assert!(doc.set_parameters_within_limits(&[("nope".into(), "1 mm".into())]).is_err());
+    }
+    #[test]
+    fn a_rule_that_asks_for_it_holds_on_an_ordinary_edit() {
+        let mut doc = design();
+        let mut range = rule(
+            "r",
+            RuleCondition::Always,
+            RuleEffect::ParameterRange { parameter: "width".into(), minimum: "5 mm".into(), maximum: "40 mm".into() },
+        );
+        doc.configs.rules = vec![range.clone()];
+        doc.change_params_atomic(&[("width".into(), "90 mm".into())]).unwrap();
+        assert!(doc.check_edit_limits().is_ok(), "off by default: today's behavior");
+        range.enforce_on_edit = true;
+        doc.configs.rules = vec![range];
+        let e = doc.check_edit_limits().unwrap_err().to_string();
+        assert!(e.contains("restricts"), "{e}");
+        doc.change_params_atomic(&[("width".into(), "30 mm".into())]).unwrap();
+        assert!(doc.check_edit_limits().is_ok());
     }
     #[test]
     fn rule_references_follow_rename_and_prevent_delete() {

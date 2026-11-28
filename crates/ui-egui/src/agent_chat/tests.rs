@@ -4689,7 +4689,7 @@ fn an_agents_markdown_is_drawn_as_blocks() {
     assert!(h.widget("Gearbox").is_some(), "a cell of the table is drawn");
     assert!(h.widget("|---|---|").is_none(), "the line under the header is not shown");
     // A hostile reply draws too (no panic, bounded work).
-    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "*".repeat(50_000) + &"[".repeat(5_000) + &"`a".repeat(5_000) });
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "*".repeat(50_000) + "[".repeat(5_000).as_str() + "`a".repeat(5_000).as_str() });
     h.frames(3);
     // So does a table with 16 columns and as many rows as the input allows (#16256): it stays
     // preformatted text instead of becoming a couple of million labels.

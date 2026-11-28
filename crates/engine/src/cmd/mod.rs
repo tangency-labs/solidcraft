@@ -192,6 +192,9 @@ pub mod frame;
 mod frame_end_cap;
 mod frame_gusset;
 mod frame_rotate_member;
+mod generator;
+#[cfg(test)]
+mod generator_tests;
 mod hole_callout;
 pub(crate) mod inspect;
 mod interference;
@@ -730,6 +733,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(tab_layouts::COMMANDS.iter());
     v.extend(tab_views::COMMANDS.iter());
     v.extend(documents::COMMANDS.iter());
+    v.extend(generator::COMMANDS.iter());
     v.extend(view_pick::COMMANDS.iter());
     v.extend(view_dxf::COMMANDS.iter());
     v.extend(drawing::COMMANDS.iter());

@@ -249,3 +249,86 @@ fn configuration_face_indices_verifies_exact_planar_faces() {
     let indices = s.doc.configuration_face_indices(mb, &target).unwrap();
     assert!(!indices.is_empty());
 }
+
+/// A catalogue row can choose between alternative features (a cube or a rod, as a generator's
+/// part does for two profiles): the one it suppresses makes no body, the one it keeps takes the
+/// body's name, and a later feature (a pattern) finds that body by the name in every row.
+#[test]
+fn a_row_can_pick_between_alternative_features_and_a_later_feature_still_finds_the_body_by_name() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Base"}));
+    let cube_name = s.doc.features[0].name.clone();
+    run(&mut s, "timeline.suppress", json!({"feature": cube_name, "suppressed": true}));
+    run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 30, "body_name": "Base"}));
+    let rod_name = s.doc.features[1].name.clone();
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Base"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30}));
+    run(&mut s, "config.configure", json!({"features": [cube_name, rod_name]}));
+    let (cube_key, rod_key) = (format!("suppress:{cube_name}"), format!("suppress:{rod_name}"));
+    run(&mut s, "config.row", json!({"name": "Cube", "values": {cube_key.clone(): false, rod_key.clone(): true}}));
+    run(&mut s, "config.row", json!({"name": "Rod", "values": {cube_key: true, rod_key: false}}));
+    let volume = |s: &mut Session| run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+    for _ in 0..2 {
+        run(&mut s, "config.activate", json!({"row": "Cube"}));
+        assert!((volume(&mut s) - 2000.0).abs() < 1e-6, "{}", volume(&mut s));
+        run(&mut s, "config.activate", json!({"row": "Rod"}));
+        assert!((volume(&mut s) - 960.0).abs() < 1e-6, "{}", volume(&mut s));
+    }
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "no feature fails in either row");
+}
+
+/// Tables of a few hundred rows (a linear-bushing catalogue has 480) work through save, open and
+/// insertion; the table holds at most `MAX_ROWS` (2000) rows and says so when a row would pass it.
+#[test]
+fn a_catalogue_of_hundreds_of_rows_inserts_any_row_and_the_limit_is_stated() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-config-rows-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("bar.sc");
+    let mut part = Session::default();
+    run(&mut part, "parameters.add", json!({"name": "w", "expression": "10 mm"}));
+    run(&mut part, "solid.box", json!({"length": 10, "width": "w", "height": 5, "body_name": "Bar"}));
+    run(&mut part, "config.configure", json!({"params": ["w"]}));
+    for i in 0..480 {
+        part.doc_mut().add_configuration_row(format!("R{i}"), vec![format!("{} mm", 10 + i)]).unwrap();
+    }
+    run(&mut part, "file.save", json!({"path": file}));
+    let mut s = Session::default();
+    run(&mut s, "component.insert_design", json!({"path": file, "configuration": "R479"}));
+    let volume = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+    assert!((volume - 10.0 * 489.0 * 5.0).abs() < 1e-6, "{volume}");
+    let mut full = Session::default();
+    for i in 0..solidcraft_doc::config::MAX_ROWS {
+        full.doc_mut().add_configuration_row(format!("R{i}"), Vec::new()).unwrap();
+    }
+    assert!(full.doc_mut().add_configuration_row("one too many".into(), Vec::new()).is_err());
+}
+
+/// A rule names its feature by name, and a limit or a suppression needs no configured column.
+#[test]
+fn a_rule_names_a_feature_and_a_limit_needs_no_column() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "4 mm"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": "w", "height": 5, "body_name": "Bar"}));
+    let (id, name) = (s.doc.features[0].id, s.doc.features[0].name.clone());
+    run(&mut s, "config.configure", json!({"params": ["w"]}));
+    run(
+        &mut s,
+        "config.rule",
+        json!({"rule": {"id": "hide", "name": "Hide wide bars", "condition": {"type": "parameter", "parameter": "w", "operator": "gt", "expression": "5 mm"},
+            "effect": {"type": "drive_suppression", "feature": name, "value": true}}}),
+    );
+    run(
+        &mut s,
+        "config.rule",
+        json!({"rule": {"id": "range", "name": "Width range", "condition": {"type": "always"},
+            "effect": {"type": "parameter_range", "parameter": "w", "minimum": "2 mm", "maximum": "9 mm"}}}),
+    );
+    assert!(matches!(s.doc.configs.rules[0].effect, solidcraft_doc::config::RuleEffect::DriveSuppression { feature, value: true } if feature == id));
+    assert!(
+        s.execute(
+            "config.rule",
+            &json!({"rule": {"id": "x", "name": "x", "condition": {"type": "always"},
+        "effect": {"type": "drive_suppression", "feature": "No such feature", "value": true}}})
+        )
+        .is_err()
+    );
+}
