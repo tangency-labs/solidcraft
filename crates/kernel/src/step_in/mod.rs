@@ -1192,7 +1192,7 @@ impl Reader {
         self.convert_window(single, None)
     }
 
-    fn convert_window(&mut self, single: bool, queue: Option<&mut parallel::Queue>) -> bool {
+    fn convert_window(&mut self, single: bool, mut queue: Option<&mut parallel::Queue>) -> bool {
         if self.converted >= self.plan.len() {
             return false;
         }
@@ -1237,23 +1237,22 @@ impl Reader {
             sources.push((i, item, placement, Some(jobs.len())));
             jobs.push(parallel::Job { source, placement, check_mesh: !self.unmeshed_checked.contains(&item) });
         }
-        // Reading and orienting new parts is shared out between the workers.
-        let mut prepared: Vec<Option<_>> = match queue {
-            Some(queue) => jobs
-                .iter()
-                .map(|job| {
-                    queue.fill(self);
-                    Some(queue.take(&ex, job))
-                })
-                .collect(),
-            None => parallel::bodies(&ex, &jobs, self.workers).into_iter().map(Some).collect(),
-        };
+        // A persistent queue can supply each result just as it is published. Without one,
+        // prepare this window together so its independent parts still share the workers.
+        let mut prepared: Vec<Option<_>> =
+            if queue.is_none() { parallel::bodies(&ex, &jobs, self.workers).into_iter().map(Some).collect() } else { Vec::new() };
         for (i, item, placement, job) in sources {
             let made = match job {
-                Some(j) => match prepared.get_mut(j).and_then(Option::take) {
-                    Some(made) => made,
-                    None => continue,
-                },
+                Some(j) => {
+                    if let Some(queue) = queue.as_deref_mut() {
+                        let Some(job) = jobs.get(j) else { continue };
+                        queue.fill(self);
+                        queue.take(&ex, job)
+                    } else {
+                        let Some(made) = prepared.get_mut(j).and_then(Option::take) else { continue };
+                        made
+                    }
+                }
                 // A later instance of a part read in this window: as it would be in the next
                 // window, after its first instance.
                 None => {
