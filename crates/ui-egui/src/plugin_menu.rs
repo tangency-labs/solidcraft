@@ -975,15 +975,31 @@ pub(crate) fn command_icon<'a>(plugin: &'a Listed, entry: &solidcraft_engine::pl
         .map_or(crate::plugin_images::GENERIC, String::as_str)
 }
 
-/// A plugin command's title, in the menu, on its ribbon button and on its dialog: the entry's
-/// `menu` slot name when it declares one, else the plugin's name when the plugin has this one
-/// command, else the entry's own name.
+/// A plugin command's title: its schema title, its declared label or slot name, then the
+/// existing plugin or entry name fallback. The entry id still identifies the command.
 pub(crate) fn command_title(plugin: &Listed, entry: &solidcraft_engine::plugin::Entry) -> String {
+    schema_text(entry, "title")
+        .map(str::to_owned)
+        .or_else(|| slot_label_or_name(entry, "menu"))
+        .or_else(|| slot_label_or_name(entry, "ribbon"))
+        .unwrap_or_else(|| standalone_ribbon_title(plugin, entry))
+}
+
+// Standalone ribbon buttons retain their existing label and hover-name fallback.
+fn standalone_ribbon_title(plugin: &Listed, entry: &solidcraft_engine::plugin::Entry) -> String {
     match slot_name(entry, "menu") {
         Some(name) => name,
         None if plugin.entries.len() == 1 => plugin.name.clone(),
         None => entry.name.clone(),
     }
+}
+
+fn schema_text<'a>(entry: &'a solidcraft_engine::plugin::Entry, key: &str) -> Option<&'a str> {
+    entry.input_schema.get(key).and_then(Value::as_str).map(str::trim).filter(|text| !text.is_empty())
+}
+
+fn command_description<'a>(plugin: &'a Listed, name: &str) -> &'a str {
+    plugin.entries.iter().find(|entry| entry.name == name).and_then(|entry| schema_text(entry, "description")).unwrap_or(plugin.description.as_str())
 }
 
 /// The name of the entry's first slot of `kind` (`menu` or `ribbon`).
@@ -1080,7 +1096,7 @@ pub(crate) fn ribbon_buttons(app: &SolveApp) -> Vec<RibbonButton> {
             if (grouped || !entry_shows_in_model_group(entry)) && !individually_pinned(app, plugin, entry) {
                 continue;
             }
-            let title = command_title(plugin, entry);
+            let title = standalone_ribbon_title(plugin, entry);
             let name = if title == plugin.name { title.clone() } else { format!("{}: {title}", plugin.name) };
             buttons.push(RibbonButton {
                 id: format!("{RIBBON_PREFIX}{}:{}", plugin.id, entry.name),
@@ -3169,10 +3185,11 @@ fn body(
     let field_errors = dialog.form_guard.as_ref().map(|_| dialog.field_errors(app)).unwrap_or_default();
     let id = dialog.id;
     let plugin = &dialog.plugin;
-    let about = if plugin.description.is_empty() {
+    let description = command_description(plugin, &dialog.entry);
+    let about = if description.is_empty() {
         format!("{} {}", plugin.name, plugin.version)
     } else {
-        format!("{} {} · {}", plugin.name, plugin.version, plugin.description)
+        format!("{} {} · {}", plugin.name, plugin.version, description)
     };
     ui_kit::text(ui, &about, ui_kit::Text::Note("plugin_about"));
     let missing = missing_groups(app, plugin);

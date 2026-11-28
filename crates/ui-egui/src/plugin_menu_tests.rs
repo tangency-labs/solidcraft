@@ -2175,6 +2175,35 @@ fn grouped_gears() -> Listed {
 }
 
 #[test]
+fn schema_titles_and_descriptions_reach_grouped_menus_and_dialogs() {
+    let mut plugin = grouped_gears();
+    plugin.description = "Package description".into();
+    plugin.entries[0].input_schema = json!({"type":"object","title":"  Engrenage droit  ","description":"  Entry-specific help  "});
+    plugin.entries[1].slots = entry("bevel", "read", json!([{"kind":"ribbon","name":"Bevel Tool"}])).slots;
+    assert_eq!(command_title(&plugin, &plugin.entries[0]), "Engrenage droit");
+    assert_eq!(command_title(&plugin, &plugin.entries[1]), "Bevel Tool");
+    assert_eq!(command_title(&plugin, &plugin.entries[2]), "inspect");
+    assert_eq!(command_description(&plugin, "spur"), "Entry-specific help");
+    assert_eq!(command_description(&plugin, "bevel"), "Package description");
+    // A standalone button without a ribbon slot keeps its menu label and hover name.
+    plugin.entries[2].slots = entry("inspect", "read", json!([{"kind":"menu","name":"Inspect Tool"}])).slots;
+    plugin.entries[2].input_schema = json!({"type":"object","title":"Inspection"});
+    assert_eq!(command_title(&plugin, &plugin.entries[2]), "Inspection");
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.plugin_menu.listed = vec![plugin];
+    let buttons = ribbon_buttons(&app);
+    let standalone = buttons.iter().find(|b| b.id == "plugin_entry:gears:inspect").unwrap();
+    assert_eq!(standalone.label, "Inspect Tool");
+    assert_eq!(standalone.name, format!("{}: Inspect Tool", app.plugin_menu.listed[0].name));
+    let menu = ribbon_group_rows(&app, "plugin_group:gears:0");
+    let items: Vec<_> = menu.iter().filter(|i| !i.is_sep() && i.children.is_empty()).map(|i| (i.id.as_str(), i.label.as_str())).collect();
+    assert_eq!(items, [("entry:0:1", "Bevel Tool"), ("entry:0:0", "Engrenage droit")]);
+    open_entry(&mut app, 0, 0);
+    assert_eq!(app.plugin_menu.dialog().unwrap().label, "Engrenage droit");
+    assert_eq!(app.plugin_menu.dialog().unwrap().entry, "spur");
+}
+
+#[test]
 fn declared_ribbon_group_replaces_only_its_entries_and_lists_them_in_order() {
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
     app.plugin_menu.listed = vec![grouped_gears()];
@@ -2414,7 +2443,7 @@ fn each_plugin_command_has_its_own_menu_row_and_ribbon_button_and_a_disabled_plu
     // The ribbon button opens that one command's dialog, titled by it alone.
     assert!(choose_ribbon(&mut app, "plugin_entry:tools:tidy"));
     let dialog = app.plugin_menu.dialogs.pop().expect("its dialog");
-    assert_eq!((dialog.plugin.id.as_str(), dialog.entry.as_str(), dialog.label.as_str()), ("tools", "tidy", "tidy"));
+    assert_eq!((dialog.plugin.id.as_str(), dialog.entry.as_str(), dialog.label.as_str()), ("tools", "tidy", "Tidy up"));
     assert!(!choose_ribbon(&mut app, "sketch.line"), "a command's id is not a plugin's");
 
     // The ribbon group's label opens the same menu below it (a narrow ribbon trims buttons).

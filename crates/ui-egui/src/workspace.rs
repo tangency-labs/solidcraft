@@ -1683,6 +1683,7 @@ mod tests {
         h.app.home.open = false;
         let mut plugin = workspace_plugin();
         plugin.entries[0].slots.push(solidcraft_engine::plugin::UiSlot::Menu { name: "Pocket Milling".into(), label: None });
+        plugin.entries[0].input_schema = json!({"type":"object","title":"Usinage"});
         h.app.plugin_menu.listed = vec![plugin.clone()];
         h.app.plugin_menu.loaded = true;
         crate::plugin_workspaces::discovered(&mut h.app, &[plugin]);
@@ -1701,8 +1702,8 @@ mod tests {
         );
         output.textures_delta.clear();
         let shown: Vec<String> = crate::test_support::text_shapes(&output).map(|shape| shape.galley.text().to_owned()).collect();
-        assert!(shown.iter().any(|text| text.contains("Pocket")), "the button carries the entry's title, not its raw name: {shown:?}");
-        assert!(!shown.iter().any(|text| text == "pocket"), "{shown:?}");
+        assert!(shown.iter().any(|text| text.contains("Usinage")), "the schema title takes precedence over the slot name: {shown:?}");
+        assert!(!shown.iter().any(|text| text == "pocket" || text.contains("Pocket")), "{shown:?}");
         let point = crate::scenario::handle_at("button:plugin_entry:manufacture:pocket").unwrap();
         let frame = |h: &mut crate::scenario::Harness, events: Vec<egui::Event>| {
             let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0));
