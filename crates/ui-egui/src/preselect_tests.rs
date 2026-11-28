@@ -3117,6 +3117,259 @@ fn trim_dialog_shows_why_ok_is_disabled() {
     }
 }
 
+/// The script of the law extension tests: the square sheet 0…10 × 0…10 on XY (normal +z).
+fn law_sheet_script() -> Vec<(&'static str, serde_json::Value)> {
+    vec![
+        ("sketch.create", json!({"plane":"XY","name":"F"})),
+        ("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})),
+        ("sketch.finish", json!({})),
+        ("surface.patch", json!({"sketch":"F","body_name":"Sheet"})),
+    ]
+}
+
+/// A harness holding [`law_sheet_script`]'s sheet.
+fn law_sheet() -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    for (command, params) in law_sheet_script() {
+        h.app.run(command, params).unwrap();
+    }
+    h.frames(4);
+    h
+}
+
+/// The Extend window opened on the sheet's edge through `edge`.
+fn open_extend_on(h: &mut crate::scenario::Harness, edge: Vec3) {
+    h.app.session.selection = vec![crate::dialogs::edge_sel(&h.app.session, edge).expect("the sheet's edge")];
+    h.app.start("surface.extend");
+    h.frames(2);
+}
+
+/// Picks `option` in the window's `row` dropdown, as a person does.
+fn choose_in(h: &mut crate::scenario::Harness, row: &str, option: &str) {
+    h.step(&json!({"click": {"handle": format!("dialog:{row}")}})).unwrap();
+    h.step(&json!({"click": {"handle": format!("dialog:{row}:{option}")}})).unwrap();
+    h.frames(2);
+}
+
+/// The open Extend window's own values: (distance, to object, type index, angle).
+fn extend_values(h: &crate::scenario::Harness) -> (String, bool, usize, String) {
+    match &h.app.dialog {
+        Some(Dialog { kind: Kind::Surface(crate::dialogs_surface::Surf::Extend { distance, to_object, mode, angle }), .. }) => {
+            (distance.clone(), *to_object, *mode, angle.clone())
+        }
+        other => panic!("the Extend window is open: {:?}", other.as_ref().map(|d| &d.kind)),
+    }
+}
+
+/// Sets the open Extend window's distance and angle, as typing them in their boxes does.
+fn type_extend(h: &mut crate::scenario::Harness, distance: &str, angle: &str) {
+    if let Some(Dialog { kind: Kind::Surface(crate::dialogs_surface::Surf::Extend { distance: d, angle: a, .. }), .. }) = &mut h.app.dialog {
+        *d = distance.into();
+        *a = angle.into();
+    }
+    h.frames(2);
+}
+
+/// The last feature, an extension: its saved form.
+fn last_extend(h: &crate::scenario::Harness) -> serde_json::Value {
+    let kind = &h.app.session.doc.features.last().expect("a feature").kind;
+    assert!(matches!(kind, solidcraft_engine::doc::FeatureKind::SurfaceExtend { .. }), "{kind:?}");
+    serde_json::to_value(kind).unwrap()
+}
+
+/// The sheet's area and bounding box.
+struct SheetMeasure {
+    area: f64,
+    bbox: SheetBox,
+}
+
+#[derive(Debug)]
+struct SheetBox {
+    min: Vec3,
+    max: Vec3,
+}
+
+fn sheet_measure(h: &crate::scenario::Harness) -> SheetMeasure {
+    let m = solidcraft_engine::kernel::measure(&h.app.session.world_state().unwrap().body("Sheet").unwrap().body).unwrap();
+    let (lo, hi) = (m.bbox.min, m.bbox.max);
+    SheetMeasure { area: m.area, bbox: SheetBox { min: Vec3::new(lo.x, lo.y, lo.z), max: Vec3::new(hi.x, hi.y, hi.z) } }
+}
+
+/// Extend's Type offers Law with its Angle (#22415). A new window starts Natural with no Angle
+/// row; Law shows the Angle (0° by default) and sends `mode: law` with the angle, which builds
+/// exactly the feature `surface.extend` builds from the same values: 5 mm at 30° off the sheet's
+/// edge at x = 10, a strip 10 × 5, so 100 + 50 = 150 mm², its far edge at x = 10 + 5 cos 30° =
+/// 14.330127, z = 5 sin 30° = 2.5. Editing it reopens Law at 30°; -30° turns the strip down to
+/// z = -2.5; Natural drops the angle (the plane continued to x = 15, flat). Tangent sends its mode
+/// and no angle, as before. A law extension's History row has its own icon.
+#[test]
+fn extend_dialog_builds_a_law_extension_at_an_angle_and_reopens_it() {
+    let mut h = law_sheet();
+    open_extend_on(&mut h, Vec3::new(10.0, 5.0, 0.0));
+    assert_eq!(extend_values(&h), ("10 mm".into(), false, 0, "0 deg".into()), "a new Extend starts Natural");
+    assert!(crate::scenario::rect_of("dialog:row:Angle").is_none(), "no Angle row but for Law");
+    let sent = |h: &crate::scenario::Harness| apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+    let (id, natural) = sent(&h);
+    assert_eq!(id, "surface.extend");
+    assert!(natural.get("mode").is_none() && natural.get("angle").is_none(), "{natural}");
+
+    choose_in(&mut h, "Type", "Tangent (G1)");
+    let (_, tangent) = sent(&h);
+    assert_eq!(tangent["mode"], "tangent");
+    assert!(tangent.get("angle").is_none(), "only a law extension takes an angle: {tangent}");
+
+    choose_in(&mut h, "Type", "ui.extend_law");
+    assert_eq!(extend_values(&h).2, crate::dialogs_surface::EXTEND_LAW);
+    assert!(crate::scenario::rect_of("dialog:row:Angle").is_some(), "Law shows its Angle");
+    let (_, law) = sent(&h);
+    assert_eq!((&law["mode"], &law["angle"]), (&json!("law"), &json!("0 deg")), "{law}");
+    type_extend(&mut h, "5 mm", "30 deg");
+    let (_, law) = sent(&h);
+    assert_eq!((&law["distance"], &law["mode"], &law["angle"]), (&json!("5 mm"), &json!("law"), &json!("30 deg")), "{law}");
+    assert!(law.get("up_to").is_none(), "{law}");
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    let m = sheet_measure(&h);
+    let far_x = 10.0 + 5.0 * 30f64.to_radians().cos();
+    assert!((m.area - 150.0).abs() < 1e-9, "{}", m.area);
+    assert!((m.bbox.max.x - far_x).abs() < 1e-9 && (m.bbox.max.z - 2.5).abs() < 1e-9 && m.bbox.min.z.abs() < 1e-9, "{:?}", m.bbox);
+
+    // The command given the same values by hand saves the same feature.
+    let saved = last_extend(&h);
+    let mut s = Session::default();
+    for (command, params) in law_sheet_script() {
+        s.execute(command, &params).unwrap();
+    }
+    s.execute("surface.extend", &json!({"body":"Sheet","edges":[[10,5,0]],"distance":"5 mm","mode":"law","angle":"30 deg"})).unwrap();
+    let by_command = serde_json::to_value(&s.doc.features.last().unwrap().kind).unwrap();
+    assert_eq!(saved, by_command);
+    assert_eq!((&saved["mode"], &saved["angle"]), (&json!("law"), &json!("30 deg")));
+
+    // Its History row has the law extension's own drawing, a real one.
+    let kind = h.app.session.doc.features.last().unwrap().kind.clone();
+    assert_eq!(crate::timeline::icon_of(&kind), "surface_extend_law");
+    assert!(!crate::icon_svg::resolve("surface_extend_law").placeholder);
+
+    // Editing it reopens Law at 30°, with nothing of it kept out of sight.
+    let name = h.app.session.doc.features.last().unwrap().name.clone();
+    let edit = |h: &mut crate::scenario::Harness| {
+        h.step(&json!({"call":"ui.editFeature","params":{"feature": name}})).unwrap();
+        h.frames(4);
+    };
+    edit(&mut h);
+    assert_eq!(extend_values(&h), ("5 mm".into(), false, crate::dialogs_surface::EXTEND_LAW, "30 deg".into()));
+    let extra = &h.app.dialog.as_ref().unwrap().extra;
+    assert!(!extra.contains_key("mode") && !extra.contains_key("angle"), "{extra:?}");
+    type_extend(&mut h, "5 mm", "-30 deg");
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert_eq!(last_extend(&h)["angle"], "-30 deg");
+    let m = sheet_measure(&h);
+    assert!((m.area - 150.0).abs() < 1e-9 && (m.bbox.min.z + 2.5).abs() < 1e-9 && m.bbox.max.z.abs() < 1e-9, "{} {:?}", m.area, m.bbox);
+
+    // Natural drops the angle: the plane goes on flat to x = 15.
+    edit(&mut h);
+    choose_in(&mut h, "Type", "ui.extend_natural");
+    assert!(crate::scenario::rect_of("dialog:row:Angle").is_none());
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    let saved = last_extend(&h);
+    assert!(saved.get("mode").is_none() && saved.get("angle").is_none(), "{saved}");
+    let m = sheet_measure(&h);
+    assert!((m.area - 150.0).abs() < 1e-9 && (m.bbox.max.x - 15.0).abs() < 1e-9 && m.bbox.max.z.abs() < 1e-9, "{} {:?}", m.area, m.bbox);
+    assert_eq!(crate::timeline::icon_of(&h.app.session.doc.features.last().unwrap().kind), "surface_extend");
+}
+
+/// Law up to an object (#22415): To Object with a box's bottom face at z = 2 (its plane extended)
+/// at 30° stops the strip where it reaches z = 2, 4 long: 100 + 10 × 4 = 140 mm²; editing it shows
+/// Law, 30° and To Object with the face.
+#[test]
+fn extend_dialog_takes_a_law_extension_up_to_a_face() {
+    let mut h = law_sheet();
+    h.app.run("solid.box", json!({"corner":[30,-5,2],"length":5,"width":20,"height":10,"body_name":"Block"})).unwrap();
+    h.frames(2);
+    open_extend_on(&mut h, Vec3::new(10.0, 5.0, 0.0));
+    choose_in(&mut h, "Type", "ui.extend_law");
+    type_extend(&mut h, "10 mm", "30 deg");
+    choose_in(&mut h, "Extent Type", "To Object");
+    let pick = crate::dialogs::face_sel_on(&h.app.session, Some("Block"), Vec3::new(32.5, 5.0, 2.0)).expect("the box's bottom face");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        let active = d.active;
+        d.inputs[active].items = vec![pick];
+    }
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    let saved = last_extend(&h);
+    assert_eq!((&saved["mode"], &saved["angle"]), (&json!("law"), &json!("30 deg")), "{saved}");
+    let m = sheet_measure(&h);
+    assert!((m.area - 140.0).abs() < 1e-9 && (m.bbox.max.z - 2.0).abs() < 1e-9, "{} {:?}", m.area, m.bbox);
+    let name = h.app.session.doc.features.last().unwrap().name.clone();
+    h.step(&json!({"call":"ui.editFeature","params":{"feature": name}})).unwrap();
+    h.frames(4);
+    let (_, to_object, mode, angle) = extend_values(&h);
+    assert_eq!((to_object, mode, angle.as_str()), (true, crate::dialogs_surface::EXTEND_LAW, "30 deg"));
+    let picked = h.app.dialog.as_ref().unwrap().inputs.iter().find(|i| i.label == "To Object").map(|i| i.items.len());
+    assert_eq!(picked, Some(1), "with the face picked");
+}
+
+/// What a law extension can't build is refused with the command's reason, shown in the window,
+/// and the design stays as it was: an angle of 90° (the strip would stand square to the surface),
+/// and a law extension up to a whole body (the command takes a body for Natural only).
+#[test]
+fn extend_dialog_shows_why_a_law_extension_is_refused_and_leaves_the_design() {
+    // The reason the window shows: its own refusal of OK, else its preview's (the window draws the
+    // preview's error under the form), once the preview has run.
+    let reason = |h: &mut crate::scenario::Harness| -> Option<String> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        loop {
+            h.frames(2);
+            let d = h.app.dialog.as_ref().expect("the window stays open");
+            if let Some(e) = d.error.clone().or_else(|| h.app.preview.error.clone()) {
+                return Some(e);
+            }
+            if std::time::Instant::now() > deadline {
+                return None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    };
+    let mut h = law_sheet();
+    h.app.run("solid.box", json!({"corner":[30,-5,-5],"length":5,"width":20,"height":10,"body_name":"Block"})).unwrap();
+    h.frames(2);
+    let before = h.app.session.doc.to_json();
+    let count = h.app.session.doc.features.len();
+    open_extend_on(&mut h, Vec3::new(10.0, 5.0, 0.0));
+    choose_in(&mut h, "Type", "ui.extend_law");
+    type_extend(&mut h, "5 mm", "90 deg");
+    h.step(&json!({"widget":"OK"})).unwrap();
+    let error = reason(&mut h);
+    assert!(error.as_deref().is_some_and(|e| e.contains("90")), "the reason shows: {error:?}");
+    assert_eq!(h.app.session.doc.features.len(), count);
+    assert_eq!(h.app.session.doc.to_json(), before);
+
+    // 30° builds: the reason goes once the preview has run again.
+    type_extend(&mut h, "5 mm", "30 deg");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while (h.app.preview.busy || h.app.preview.error.is_some()) && std::time::Instant::now() < deadline {
+        h.frames(2);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(h.app.preview.error.is_none(), "{:?}", h.app.preview.error);
+    choose_in(&mut h, "Extent Type", "To Object");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        let active = d.active;
+        d.inputs[active].items = vec![Sel::Body { name: "Block".into() }];
+    }
+    h.step(&json!({"widget":"OK"})).unwrap();
+    let error = reason(&mut h);
+    assert!(error.as_deref().is_some_and(|e| !e.is_empty()), "the reason shows: {error:?}");
+    assert_eq!(h.app.session.doc.features.len(), count);
+    assert_eq!(h.app.session.doc.to_json(), before);
+}
+
 #[test]
 fn trim_dialog_takes_curves_several_keep_points_and_another_surface() {
     // Two 20 × 10 sheets crossing at x = 0 / z = 0 and a sketch line x = 3 on XY.

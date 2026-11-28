@@ -15,6 +15,7 @@ surface_stitch = { master = "stitch", accent = "surface" }
 surface_unstitch = { master = "unstitch", accent = "surface" }
 surface_thicken = { master = "thicken", accent = "surface" }
 surface_extend = { master = "extend", accent = "surface" }
+surface_extend_law = { master = "extend_law", accent = "surface" }
 surface_trim = { master = "trim", accent = "surface" }
 surface_untrim = { master = "untrim", accent = "surface" }
 surface_offset = { master = "offset_surface", accent = "surface" }

@@ -706,6 +706,8 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     geometry.app.run("sketch.line", json!({"points":[[20,0],[30,0]]})).unwrap();
     geometry.app.run("sketch.finish", json!({})).unwrap();
     geometry.app.run("surface.extrude", json!({"sketch":"Wall profile","curves":["l1"],"distance":10,"body_name":"Audit surface"})).unwrap();
+    // A law extension's History row has a drawing of its own (#22415).
+    geometry.app.run("surface.extend", json!({"body":"Audit surface","edges":[[25,0,10]],"distance":5,"mode":"law","angle":"30 deg"})).unwrap();
     let mesh = geometry.dir.join("audit.obj");
     std::fs::write(&mesh, "o Audit mesh\nv 40 0 0\nv 50 0 0\nv 40 10 0\nv 40 0 10\nf 1 3 2\nf 1 2 4\nf 1 4 3\nf 2 3 4\n").unwrap();
     geometry.app.run("file.insert_mesh", json!({"path":mesh})).unwrap();
