@@ -992,6 +992,8 @@ pub struct SolveApp {
     /// after a few seconds (an export that left bodies out).
     pub status_sticky_at: Option<f64>,
     pub quit_requested: bool,
+    /// How long quitting has waited for queued view memories (`view_memory::quit_may_proceed`).
+    quit_wait: std::cell::Cell<view_memory::QuitWait>,
     /// Autosave into the recovery folder (the desktop app turns it on).
     pub autosave: Option<recovery_ui::Autosaves>,
     /// Lock files next to the open designs (the desktop app turns them on; #5467).
@@ -1354,6 +1356,7 @@ impl SolveApp {
             status_save_sc: false,
             status_sticky_at: None,
             quit_requested: false,
+            quit_wait: std::cell::Cell::new(view_memory::QuitWait::default()),
             autosave: None,
             locks: None,
             lock_prompts: Vec::new(),
@@ -5285,9 +5288,10 @@ impl SolveApp {
         }
     }
 
-    /// Whether the host can close after queued view preferences have reached disk.
+    /// Whether the host can close: queued view preferences have reached disk, or quitting has
+    /// waited `view_memory::QUIT_WAIT` (10 s) for them (another process may hold their file).
     pub fn ready_to_quit(&self) -> bool {
-        self.quit_requested && !crate::view_memory::pending()
+        self.quit_requested && crate::view_memory::quit_may_proceed(&self.quit_wait)
     }
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
