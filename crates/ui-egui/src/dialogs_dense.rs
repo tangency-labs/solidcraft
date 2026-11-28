@@ -1317,6 +1317,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 set_to_object(&mut d.inputs, &mut d.active, ty == 1);
             });
             if ty == 0 {
+                d.extra.remove("to");
                 // One Side, Two Sides (a second angle), Symmetric (the angle split).
                 let cur = if d.extra.contains_key("angle2") {
                     1

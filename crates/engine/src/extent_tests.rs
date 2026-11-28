@@ -161,6 +161,88 @@ fn revolve_to_a_cylinder_follows_it() {
     panic!("neither post was reached");
 }
 
+fn revolve_stop_profile(s: &mut Session) {
+    run(s, "sketch.create", json!({"plane": "XZ", "name": "R"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [8, 4]}));
+    run(s, "sketch.finish", json!({}));
+}
+
+fn revolve_stop_params(to: Value) -> Value {
+    json!({"sketch": "R", "axis": "Z", "operation": "new", "to": to, "body_name": "B"})
+}
+
+#[test]
+fn revolve_to_a_plane_or_planar_face_ends_on_its_support() {
+    use solidcraft_geom::PlaneGeom;
+
+    for to in [json!("Stop"), json!({"face": [21, 2, -2]})] {
+        let mut s = Session::default();
+        if to.is_string() {
+            run(&mut s, "construct.plane.offset", json!({"base": "XZ", "offset": 2, "name": "Stop"}));
+        } else {
+            // The pick is on a face beyond the swept radii, on the same plane as Stop.
+            run(&mut s, "solid.box", json!({"corner": [20, 2, -4], "length": 2, "width": 2, "height": 4, "body_name": "Fence"}));
+        }
+        revolve_stop_profile(&mut s);
+        run(&mut s, "solid.revolve", revolve_stop_params(to.clone()));
+
+        // The profile starts at +X. Turning toward +Y about Z first reaches y = 2
+        // at theta = asin(2/r) for each radius r. Integrate r asin(2/r) from 5 to 8
+        // and multiply by the profile height of 4.
+        let primitive = |r: f64| 2.0 * (r * r * (2.0 / r).asin() + 2.0 * (r * r - 4.0).sqrt());
+        let want = primitive(8.0) - primitive(5.0);
+        let check_swept_body = |session: &Session, stage: &str| {
+            let state = session.model.state();
+            let swept = &state.body("B").unwrap_or_else(|| panic!("To {to} {stage}: missing B")).body;
+            assert!(
+                (0..swept.face_count())
+                    .any(|i| swept.planar_face(i).is_some_and(|p| p.normal().y.abs() > 1.0 - EXACT && (p.origin.y - 2.0).abs() < EXACT)),
+                "To {to} {stage}: the end face must lie in y = 2"
+            );
+            let volume = solidcraft_kernel::measure(swept).unwrap().volume;
+            assert!((volume - want).abs() < want * EXACT, "To {to} {stage}: got {volume}, expected {want}");
+        };
+
+        check_swept_body(&s, "after creation");
+        let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        check_swept_body(&Session::new(doc), "after reopening");
+
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.model.state().body("B").is_none(), "To {to}: undo kept B");
+        run(&mut s, "edit.redo", json!({}));
+        check_swept_body(&s, "after redo");
+    }
+}
+
+#[test]
+fn invalid_revolve_stop_planes_leave_the_design_unchanged() {
+    let mut s = Session::default();
+    run(&mut s, "construct.plane.offset", json!({"base": "XZ", "offset": 9, "name": "BeyondReach"}));
+    revolve_stop_profile(&mut s);
+    let before = s.doc.to_json();
+    let error = s.execute("solid.revolve", &revolve_stop_params(json!("BeyondReach"))).expect_err("the plane is outside every swept radius");
+    assert!(error.to_string().contains("BeyondReach"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+
+    for to in ["UnknownPlane", "XZ"] {
+        assert!(s.execute("solid.revolve", &revolve_stop_params(json!(to))).is_err(), "To {to} must be refused");
+        assert_eq!(s.doc.to_json(), before, "To {to} changed the design");
+    }
+    assert!(s.execute("construct.plane.offset", &json!({"base": "XZ", "offset": "NaN", "name": "Invalid"})).is_err());
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn revolve_to_a_point_still_ends_at_its_angle() {
+    let mut s = Session::default();
+    revolve_stop_profile(&mut s);
+    run(&mut s, "solid.revolve", revolve_stop_params(json!([5, 5, 0])));
+    let volume = body(&mut s, "B")["volume_mm3"].as_f64().unwrap();
+    // A 45-degree turn sweeps one eighth of the full annulus.
+    let want = PI * (8.0 * 8.0 - 5.0 * 5.0) * 4.0 / 8.0;
+    assert!((volume - want).abs() < want * EXACT, "got {volume}, expected {want}");
+}
+
 /// To Object picks the face that is at the picked point, not the first body with any face
 /// near it. Here the pick is on a post (r 2.75) only 2 mm above a plate: the ridge must end
 /// on the post. Before, the plate (within 5 % of its size of the pick) was taken as the

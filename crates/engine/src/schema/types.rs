@@ -1800,6 +1800,35 @@ impl JsonSchema for PlaneOrFace {
     }
 }
 
+/// A solid revolve's point, construction plane or planar face target.
+#[derive(Clone, Debug)]
+pub struct RevolveToParam;
+
+impl<'de> Deserialize<'de> for RevolveToParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        if params::vec3(&v).is_some() {
+            Ok(Self)
+        } else if params::revolve_to_plane_form(&v) {
+            PlaneOrFace::deserialize(v).map(|_| Self).map_err(D::Error::custom)
+        } else {
+            RevolveToPoint::deserialize(v).map(|_| Self).map_err(D::Error::custom)
+        }
+    }
+}
+
+impl JsonSchema for RevolveToParam {
+    fn schema_name() -> Cow<'static, str> {
+        "RevolveTo".into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<RevolveToPoint>();
+        let plane_or_face = generator.subschema_for::<PlaneOrFace>();
+        json_schema!({"anyOf": [point, plane_or_face]})
+    }
+}
+
 /// What `construct::model_axis_param` finds wrong with an edge or face axis before it looks
 /// anything up in the design: a reference that isn't a picked or saved face or edge.
 fn model_axis_problem(v: &Value) -> Option<String> {

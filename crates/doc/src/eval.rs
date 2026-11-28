@@ -5560,7 +5560,7 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         FeatureKind::Extrude { extent, .. } | FeatureKind::SurfaceExtrude { extent, .. } => {
             usize::from(extent.to.is_some()) + usize::from(extent.from.is_some()) + usize::from(extent.to2.is_some())
         }
-        FeatureKind::Revolve { to, .. } => usize::from(to.is_some()),
+        FeatureKind::Revolve { to, .. } => usize::from(matches!(to, Some(crate::RevolveTo::Point(_)))),
         _ => 0,
     };
     // A component origin datum is found again wherever its component is placed now (#7313): the
@@ -5715,6 +5715,21 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             match st {
                 Some(st) => copied |= copy_frames_digest(doc, f, features, st, &mut reads, &mut h),
                 None => reads.all |= replayed_sources(doc, features).iter().any(|g| component_in(doc, f.component, g.component).is_some()),
+            }
+        }
+        FeatureKind::Revolve { to: Some(crate::RevolveTo::Plane(plane)), .. } => {
+            if let Some(anchor) = crate::face_anchor::plane_face_anchor(plane) {
+                // An anchored face can change shape or be moved within its source component.
+                reads.placed_body(st, &anchor.target.body);
+                reads.paths.push(anchor.path.clone());
+                reads.paths.push(anchor.author_path.clone());
+            } else if let PlaneRef::Construction { feature, placement: None } = plane
+                && let Some(source) = doc.feature(feature.0)
+            {
+                reads.components.insert(source.component);
+            }
+            if drawn_tools_change_bodies(&f.kind) {
+                reads.drawn_targets(st, f);
             }
         }
         // Joins, cuts and intersects meet their targets where those are placed (#3383).
@@ -13646,6 +13661,26 @@ fn feature_tools_with_constructor(
                     sketch_line_world(&sketch_in_feature_frame(doc, solved, f.component)?, curve)
                 },
             )?;
+            if let Some(crate::RevolveTo::Plane(target)) = to {
+                let name = match target {
+                    PlaneRef::Construction { feature, .. } => doc.feature(feature.0).map(|f| f.name.clone()).unwrap_or_else(|| feature.to_string()),
+                    PlaneRef::Origin { name } => name.clone(),
+                    PlaneRef::Face { name: Some(name), .. } => name.clone(),
+                    _ => "To Object".to_string(),
+                };
+                let resolve = || {
+                    if let Some(anchor) = crate::face_anchor::plane_face_anchor(target) {
+                        let framed = crate::state_in_face_anchor_frame(doc, st, anchor, f.component)?;
+                        doc.resolve_attached_plane(vals, target, f.component, st, &framed)
+                    } else {
+                        let target = construction_planes_in_frame(doc, st, f.component, target)?;
+                        doc.resolve_plane_in(vals, &target, 0, f.component, Some(st))
+                    }
+                };
+                let plane = resolve().map_err(|e| DocError::Invalid(format!("revolve to plane `{name}`: {e}")))?;
+                return revolve_to_plane(&ss, &regions, (o, d), &plane).map_err(|e| DocError::Invalid(format!("revolve to plane `{name}`: {e}")));
+            }
+            let to = to.as_ref().and_then(crate::RevolveTo::point);
             // To Object is in this feature's component frame: the model as seen from there.
             let tst = if to.is_some() { state_in_frame(doc, st, f.component)? } else { std::borrow::Cow::Borrowed(st) };
             let angles = if to.is_some() {
@@ -18731,6 +18766,87 @@ fn half_space_traced(input: &Traced, plane: &Plane, positive: bool, cap: &str) -
     let caps = if positive { [cap, None] } else { [None, cap] };
     let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, cap_synonyms: [None, None], thin: None }.tool(tool, None);
     Ok(Some(Traced::step(part, &[input, &tool])))
+}
+
+/// Sweep to the first extremum of signed plane distance, then retain the sketch side. Every
+/// point of a one-sided region shares a starting radial ray, so its signed distance along the
+/// orbit differs only by an axial constant and a positive radial scale. At the extremum the
+/// entire region has had one chance to cross the target; nothing has crossed back.
+fn revolve_to_plane(ss: &SolvedSketch, regions: &[Region2], (origin, axis): (Vec2, Vec2), target: &Plane) -> Result<Vec<Traced>> {
+    use kernel::history::{Change, FaceOrigin};
+
+    let pivot = ss.plane.to_world(origin);
+    let normal = target.normal();
+    let axis_world = ss.plane.dir_to_world(axis).normalized().ok_or_else(|| DocError::Invalid("the revolve axis has no direction".into()))?;
+    if normal.dot(axis_world).abs() <= 1e-9 && target.height(pivot).abs() <= 1e-8 {
+        return Err(DocError::Invalid("the plane contains the revolve axis".into()));
+    }
+    let misses = || DocError::Invalid("the plane is out of reach for the revolved profile".into());
+    let mut out = Vec::new();
+    for region in regions {
+        // A witness on the actual boundary chooses a side. The Boolean's unchanged start
+        // cap below then verifies the *whole* profile was on the chosen side. A nonzero
+        // projection of a profile segment of degree at most nine cannot vanish at ten
+        // distinct parameters (circle arcs meet a line at most twice).
+        let degree = solidcore_record::MAX_BEZIER_DEGREE;
+        let points = || region.outer.segs.iter().flat_map(|seg| (0..=degree).map(|i| ss.plane.to_world(seg.point_at(i as f64 / degree as f64))));
+        let tangent = ss.plane.normal();
+        let radial = tangent.cross(axis_world);
+        let side = points()
+            .map(|p| (p - pivot).dot(radial))
+            .find(|distance| distance.abs() > 1e-8)
+            .ok_or_else(|| DocError::Invalid("the profile lies on the revolve axis".into()))?;
+        let radial = radial * side.signum();
+        let start = points()
+            .map(|p| target.height(p))
+            .find(|height| height.abs() > 1e-8)
+            .ok_or_else(|| DocError::Invalid("the starting profile must lie to one side of the plane".into()))?;
+        let toward = normal * -start.signum();
+        let (a, b) = (toward.dot(radial), toward.dot(tangent));
+        if a.hypot(b) <= 1e-9 {
+            return Err(misses());
+        }
+        let sweep = b.atan2(a).rem_euclid(std::f64::consts::TAU);
+        if !(1e-6..std::f64::consts::TAU - 1e-9).contains(&sweep) {
+            return Err(misses());
+        }
+        let body = kernel::revolve(&ss.plane, std::slice::from_ref(region), origin, axis, sweep)?.pop().ok_or_else(misses)?;
+        let tool = crate::lineage::ProfileRoles::swept(Some(ss), Some(region)).tool(body, None);
+        let trimmed = half_space_traced(&tool, target, start > 0.0, "end")?.ok_or_else(misses)?;
+        if !kernel::has_cap_at(&trimmed.body, target, 0.0, tool.body.size()) {
+            return Err(misses());
+        }
+        // Inspect the source cap identities. At exactly 180 degrees the start and far caps
+        // share a support plane, so comparing the planes cannot tell the two apart.
+        let source = tool.body.history().ok_or_else(misses)?;
+        let history = trimmed.body.history().ok_or_else(misses)?;
+        let mut kept_start = false;
+        for face in &history.faces {
+            for from in &face.origins {
+                if let FaceOrigin::Face { operand: 0, face: index } = *from
+                    && let Some(original) = source.faces.get(index)
+                {
+                    if original.origins.contains(&FaceOrigin::Cap { end: true }) {
+                        return Err(misses());
+                    }
+                    if original.origins.contains(&FaceOrigin::Cap { end: false }) {
+                        if face.change != Change::Kept {
+                            return Err(DocError::Invalid("the plane crosses the starting profile".into()));
+                        }
+                        kept_start = true;
+                    }
+                }
+            }
+        }
+        if !kept_start {
+            return Err(DocError::Invalid("the plane crosses the starting profile".into()));
+        }
+        out.push(trimmed);
+    }
+    if out.is_empty() {
+        return Err(DocError::Invalid("no profile selected".into()));
+    }
+    Ok(out)
 }
 
 /// Tools run from `start` to `far` along `plane`'s normal, cut back to `face_plane` (a plane at a

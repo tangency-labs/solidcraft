@@ -14,7 +14,7 @@ use solidcraft_engine::Sel;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::{
-    AxisRef, Direction, DomeShape, FeatureKind, FilletStyle, HoleKind, Operation, PatternDistance, PatternKind, PlaneRef, ProfileSel, ThinSide,
+    AxisRef, Direction, DomeShape, FeatureKind, FilletStyle, HoleKind, Operation, PatternDistance, PatternKind, PlaneRef, ProfileSel, RevolveTo, ThinSide,
 };
 use solidcraft_engine::geom::Aabb3;
 
@@ -4220,6 +4220,9 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::pref
 
 /// Saved planes/vectors/axes are real inputs even when they have no selection chip.
 fn stored_input_reference_key(d: &Dialog, index: usize) -> Option<&'static str> {
+    if matches!(d.kind, Kind::Revolve { .. }) && d.inputs.get(index).is_some_and(|input| input.label == TO_OBJECT) {
+        return Some("to");
+    }
     if matches!(d.kind, Kind::Primitive { cmd: "solid.coil", .. }) && index == 1 {
         return Some("axis");
     }
@@ -4370,6 +4373,8 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                             solidcraft_ui_text::tr("ui.viewport_status_section_plane").into()
                         } else if stored_reference.is_some() && matches!(d.kind, Kind::OffsetPlane { .. }) {
                             solidcraft_ui_text::tr("sketch_panel.plane_fixed").into()
+                        } else if stored_reference.is_some() && matches!(d.kind, Kind::Revolve { .. }) {
+                            solidcraft_ui_text::tr("ui.plane").into()
                         } else if custom_axis || stored_reference.is_some() {
                             solidcraft_ui_text::tr("dialog.custom_axis").into()
                         } else if !inp.multi {
@@ -7708,7 +7713,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
             }
             if to_object_on(&d.inputs) {
-                p["to"] = to_object_point(&d.inputs).ok_or("select the object to turn to")?;
+                p["to"] = to_object_point(&d.inputs).or_else(|| d.extra.get("to").cloned()).ok_or("select the object to turn to")?;
             }
             ("solid.revolve", p)
         }
@@ -10068,11 +10073,18 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if *symmetric {
                 d.extra.insert("direction".into(), json!("symmetric"));
             }
-            if let Some(point) = to {
-                set_to_object(&mut d.inputs, &mut d.active, true);
-                if let Some(input) = d.inputs.iter_mut().find(|i| i.label == TO_OBJECT) {
-                    input.items = vec![Sel::Vertex { body: String::new(), point: solidcraft_engine::doc::apply_point(&frame, point.0) }];
+            match to {
+                Some(RevolveTo::Point(point)) => {
+                    set_to_object(&mut d.inputs, &mut d.active, true);
+                    if let Some(input) = d.inputs.iter_mut().find(|i| i.label == TO_OBJECT) {
+                        input.items = vec![Sel::Vertex { body: String::new(), point: solidcraft_engine::doc::apply_point(&frame, point.0) }];
+                    }
                 }
+                Some(RevolveTo::Plane(plane)) => {
+                    set_to_object(&mut d.inputs, &mut d.active, true);
+                    d.extra.insert("to".into(), serde_json::to_value(plane).ok()?);
+                }
+                None => {}
             }
             let items = st.sketch(sketch.0).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
             if let Some(inp) = d.inputs.get_mut(0) {

@@ -210,6 +210,10 @@ an axis each use their own sweep direction. Designs saved before format 11 keep 
 angular placement when opened, edited or copied; creating another revolve uses the new behavior.
 To Object follows that same direction for each selected profile, including curved target faces.
 Pick a target away from the axis so its angular position is defined.
+In a `solid.revolve` command, pass a construction plane name as `"to": "Stop"`, or select
+a planar face with `"to": {"face": [21, 2, -2]}`. The revolve stops at
+the first intersection with the supporting plane, leaving a flat end. Each part of the
+profile must reach the plane along its sweep. To give a point target, use `"to": [x, y, z]`.
 
 For **Emboss** on a picked face, select the face (planar, a cylinder wall outside or a bore, or
 another curved face) and a sketch profile. **Deboss** cuts into the face (outwards from a bore, which an Emboss raises towards the axis; a Deboss that would break through the outer wall is refused). On a
