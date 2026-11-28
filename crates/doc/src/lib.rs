@@ -105,6 +105,7 @@ pub use thread_catalog::tapped_thread_sizes;
 pub use thread_catalog::untabulated_taper_tap;
 mod walk;
 pub mod weld;
+pub mod wood_grain;
 pub use profile_refs::WHOLE_PROFILE_TOO_MANY_CURVES;
 pub use profile_refs::profile_fallback_notes;
 pub use profile_refs::profile_selection_indices;

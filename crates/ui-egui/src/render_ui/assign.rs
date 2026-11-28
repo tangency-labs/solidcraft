@@ -380,6 +380,7 @@ pub(crate) fn preview_scene(scene: &mut ProductScene, preview: Option<&Preview>)
         color,
         opacity: preview.look["opacity"].as_f64().unwrap_or(1.0),
         pbr: preview.look.get("pbr").filter(|p| !p.is_null()).map(|p| serde_json::from_value(p.clone())).transpose().map_err(|e| e.to_string())?,
+        grain: None,
     };
     let surface = look.opaque_surface().map_err(|e| e.to_string())?;
     for mesh in &mut scene.meshes {

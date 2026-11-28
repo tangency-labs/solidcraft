@@ -27,7 +27,7 @@
 
 use std::collections::HashMap;
 
-use crate::gpu::{MAX_MOTIONS, MAX_PALETTE, Material, PaletteIndex, UNMOVED_SLOT};
+use crate::gpu::{MAX_MOTIONS, MAX_PALETTE, Material, Palette, PaletteIndex, UNMOVED_SLOT};
 
 /// The stable slots of one body: its own colour, its face range, its edges and its instances.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,6 +70,10 @@ pub(crate) struct PaletteArena {
     /// The motion slot each entry names (none past its end), and how many slots bodies have taken.
     motions: Vec<u32>,
     motion_slots: u32,
+    /// The procedural materials of each body, by name ([`Self::set_procedures`]): the slots each
+    /// one draws and its record (`Palette::add_procedure`). The model and highlight scenes both
+    /// draw them ([`Self::apply_procedures`]).
+    procedures: HashMap<String, Vec<(Vec<PaletteIndex>, Vec<[f32; 4]>)>>,
     /// Bumped when the arena is reset (a different design); cached blocks must rebuild then.
     generation: u64,
 }
@@ -285,6 +289,39 @@ impl PaletteArena {
         self.materials.clone()
     }
 
+    /// The procedural materials body `name` draws its slots with: for each, the slots and the
+    /// material's record. None: the body is plain again.
+    pub fn set_procedures(&mut self, name: &str, records: Vec<(Vec<PaletteIndex>, Vec<[f32; 4]>)>) {
+        if records.is_empty() {
+            self.procedures.remove(name);
+        } else {
+            self.procedures.insert(name.to_string(), records);
+        }
+    }
+
+    /// Keep the procedural materials of the bodies in `names` only.
+    pub fn keep_procedures(&mut self, names: &std::collections::HashSet<&str>) {
+        if !self.procedures.is_empty() {
+            self.procedures.retain(|name, _| names.contains(name.as_str()));
+        }
+    }
+
+    /// Add every body's procedural materials to `palette` (built from this arena's entries and
+    /// materials): their records after its entries, and their slots drawn with them. In the
+    /// bodies' name order, so the same design gives the same palette. A record the palette has
+    /// no room for leaves its slots plain.
+    pub fn apply_procedures(&self, palette: &mut Palette) {
+        let mut names: Vec<&String> = self.procedures.keys().collect();
+        names.sort();
+        for (slots, texels) in names.into_iter().filter_map(|name| self.procedures.get(name)).flatten() {
+            if let Some(record) = palette.add_procedure(texels) {
+                for slot in slots {
+                    palette.set_procedure(*slot, Some(record));
+                }
+            }
+        }
+    }
+
     /// Drop every body when the scene belongs to a different design (no body name survives).
     /// A design that removed every body and then adds one keeps its slots (the empty set does
     /// not reset the arena).
@@ -304,6 +341,7 @@ impl PaletteArena {
             self.bodies.clear();
             self.shared.clear();
             self.unmoved.clear();
+            self.procedures.clear();
             self.generation = self.generation.wrapping_add(1);
         }
     }

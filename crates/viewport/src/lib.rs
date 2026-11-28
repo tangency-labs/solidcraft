@@ -22,6 +22,7 @@ mod scene;
 pub mod surface;
 pub mod vec;
 mod view_spec;
+pub mod wood;
 
 pub use analysis::AnalysisMode;
 pub use analysis::SceneAnalysis;

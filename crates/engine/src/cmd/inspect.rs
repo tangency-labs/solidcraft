@@ -1245,8 +1245,11 @@ pub(super) fn appearance_look(cmd: &str, p: &Value) -> Result<Option<solidcraft_
             l.name = name.clone();
         }
         attach_pbr(cmd, p, l)?;
+        attach_grain(cmd, p, l)?;
     } else if p.get("pbr").is_some_and(|v| !v.is_null()) {
         return Err(bad(cmd, "`pbr` requires a color or appearance"));
+    } else if p.get("grain").is_some_and(|v| !v.is_null()) {
+        return Err(bad(cmd, "`grain` requires a color or appearance"));
     }
     Ok(look)
 }
@@ -1262,7 +1265,30 @@ pub(super) fn look_json(l: &solidcraft_doc::appearance::Look) -> Value {
     if let Some(pbr) = l.pbr {
         value["pbr"] = json!(pbr);
     }
+    if let Some(grain) = &l.grain {
+        value["grain"] = json!(grain);
+    }
     value
+}
+
+/// `grain` on a look: `null` removes it, `true` gives the look its species' defaults, an object
+/// sets the fields it names (over the look's own grain, else the species it names).
+pub(super) fn attach_grain(cmd: &str, params: &Value, look: &mut solidcraft_doc::appearance::Look) -> Result<()> {
+    use solidcraft_doc::wood_grain::Grain;
+    let Some(value) = params.get("grain") else { return Ok(()) };
+    if value.is_null() {
+        look.grain = None;
+        return Ok(());
+    }
+    let species = value.get("species").and_then(Value::as_str);
+    let mut grain = match (look.grain.clone(), species) {
+        (Some(g), None) => *g,
+        (_, Some(species)) => Grain::species(species).ok_or_else(|| bad(cmd, format!("unknown wood species `{species}`")))?,
+        (None, None) => return Err(bad(cmd, "`grain` on a look that is not a wood needs `species`")),
+    };
+    grain.apply_json(value).map_err(|e| bad(cmd, e))?;
+    look.grain = Some(Box::new(grain));
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1305,7 +1331,8 @@ fn appearance_library(_s: &mut Session, _p: &Value) -> Result<Value> {
     let mut list: Vec<LibraryAppearance> = solidcraft_doc::appearance::LIBRARY
         .iter()
         .map(|(n, c, o)| {
-            let look = LookReply { name: n.to_string(), color: format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]), opacity: *o, pbr: None };
+            let look =
+                LookReply { name: n.to_string(), color: format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]), opacity: *o, pbr: None, grain: None };
             LibraryAppearance::Plain(PlainAppearance { look, category: category(n) })
         })
         .collect();
@@ -1323,6 +1350,7 @@ fn appearance_library(_s: &mut Session, _p: &Value) -> Result<Value> {
             color: format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]),
             opacity: 1.0,
             pbr: preset.opaque_look().ok().and_then(|look| look.pbr).map(PbrReply::from),
+            grain: preset.opaque_look().ok().and_then(|look| look.grain).and_then(|g| serde_json::to_value(g).ok()),
             available: preset.is_opaque(),
             requirements: json!(preset.requirements),
             provenance: json!(preset.provenance),

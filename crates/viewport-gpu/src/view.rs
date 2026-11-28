@@ -103,6 +103,9 @@ pub struct Palette {
     /// Per entry, the slot of the motion its body is drawn moved by ([`Motions`]); entries past
     /// its end have none ([`UNMOVED_SLOT`]).
     motions: Vec<u32>,
+    /// Per entry of a procedural record ([`Palette::add_procedure`]), the raw bits of its texel's
+    /// second word; `None` for every other entry (empty: none has any).
+    raw: Vec<Option<u32>>,
     /// PBR materials by palette index ([`Material`]); entries past its end, or with no
     /// material, are not PBR. Only the product preview has any.
     materials: Vec<Material>,
@@ -117,6 +120,10 @@ pub struct Material {
     pub roughness: f32,
     pub ior: f32,
     pub pbr: bool,
+    /// The first palette entry of the entry's procedural material record
+    /// ([`Palette::add_procedure`]), 0: none. Such an entry is drawn by its procedure and takes
+    /// no PBR finish.
+    pub procedure: u32,
     /// Lit on both sides: where the eye sees the face's back, it is lit as its front (an open
     /// sheet's back would otherwise be black). Off for solids, which never show their back.
     pub two_sided: bool,
@@ -139,6 +146,7 @@ impl Material {
             roughness: s.roughness() as f32,
             ior: s.dielectric_ior() as f32,
             pbr: true,
+            procedure: 0,
             two_sided: false,
             turn: None,
         }
@@ -148,9 +156,12 @@ impl Material {
     /// axis's point (w 1 when there is one) and direction.
     fn texels(&self) -> [[f32; 4]; MATERIAL_TEXEL_ROWS as usize] {
         let [at, along] = self.turn.unwrap_or_default();
+        let two_sided = if self.two_sided { 1.0 } else { 0.0 };
+        // A procedural record starts below entry 2^16, which an `f32` holds exactly.
+        let (flag, first) = if self.procedure != 0 { (2.0, self.procedure as f32) } else { (if self.pbr { 1.0 } else { 0.0 }, self.metallic) };
         [
-            [self.base[0], self.base[1], self.base[2], if self.pbr { 1.0 } else { 0.0 }],
-            [self.metallic, self.roughness, self.ior, if self.two_sided { 1.0 } else { 0.0 }],
+            [self.base[0], self.base[1], self.base[2], flag],
+            [first, self.roughness, self.ior, two_sided],
             [at[0], at[1], at[2], if self.turn.is_some() { 1.0 } else { 0.0 }],
             [along[0], along[1], along[2], 0.0],
         ]
@@ -160,7 +171,15 @@ impl Material {
 impl Palette {
     /// A palette whose entries are all stable (the model scene's body/face slots).
     pub fn with_stable(entries: Vec<[u8; 4]>) -> Palette {
-        Palette { stable_len: entries.len(), entries, lookup: Default::default(), hatches: Vec::new(), motions: Vec::new(), materials: Vec::new() }
+        Palette {
+            stable_len: entries.len(),
+            entries,
+            lookup: Default::default(),
+            hatches: Vec::new(),
+            motions: Vec::new(),
+            raw: Vec::new(),
+            materials: Vec::new(),
+        }
     }
 
     /// This palette with each entry's motion slot by index (entries past `motions` have none).
@@ -311,10 +330,64 @@ impl Palette {
         self.hatches.get(i.0 as usize).and_then(|h| h.checked_sub(1)).map(solidcraft_viewport::hatch::Hatch)
     }
 
+    /// Add a procedural material's record: `texels` (`vec4`s of `f32`, the first one the
+    /// procedure's id and the rest its settings) as palette entries of their own, two to a `vec4`,
+    /// after the others and never interned. Returns the record's first entry, for
+    /// [`Palette::set_procedure`]; `None` when the palette is full or the record would start at
+    /// entry 2^16 or later (the shader carries the record's index in 16 bits).
+    pub fn add_procedure(&mut self, texels: &[[f32; 4]]) -> Option<PaletteIndex> {
+        let words: Vec<u32> = texels.iter().flatten().map(|v| v.to_bits()).collect();
+        if self.entries.len() + words.len() / 2 >= MAX_PALETTE {
+            return None;
+        }
+        let first = u32::try_from(self.entries.len()).ok().filter(|i| *i > 0 && *i < 1 << 16)?;
+        self.raw.resize(self.entries.len(), None);
+        for pair in words.chunks(2) {
+            let (a, b) = (pair.first().copied().unwrap_or(0), pair.get(1).copied().unwrap_or(0));
+            self.entries.push(a.to_le_bytes());
+            self.raw.push(Some(b));
+        }
+        Some(PaletteIndex(first))
+    }
+
+    /// Draw entry `i` (a body's or a face's colour) with the procedural material whose record
+    /// is at `record` ([`Palette::add_procedure`]), or plain again with `None`. The entry's
+    /// material names the record ([`Material::procedure`]).
+    pub fn set_procedure(&mut self, i: PaletteIndex, record: Option<PaletteIndex>) -> bool {
+        let at = i.0 as usize;
+        if at >= self.entries.len() {
+            return false;
+        }
+        if self.materials.len() <= at {
+            if record.is_none() {
+                return true;
+            }
+            self.materials.resize(at + 1, Material::default());
+        }
+        match self.materials.get_mut(at) {
+            Some(m) => {
+                m.procedure = record.map_or(0, |r| r.0);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// A body's wood as a procedural record ([`Palette::add_procedure`]).
+    pub fn add_wood(&mut self, shade: &solidcraft_viewport::wood::WoodShade) -> Option<PaletteIndex> {
+        let mut texels = vec![[solidcraft_viewport::wood::PROCEDURE, 0.0, 0.0, 0.0]];
+        texels.extend(shade.texels());
+        self.add_procedure(&texels)
+    }
+
     /// Entry `i` as the shader's `Rg32Uint` texel: the rgba bytes packed little-endian, then
-    /// 1 + its hatch (0: the cap's own) in the low byte with its motion slot above it.
+    /// 1 + its hatch (0: the cap's own) in the low byte with its motion slot above it. An entry
+    /// of a procedural record holds the record's raw bits in both words.
     fn texel(&self, i: usize) -> [u32; 2] {
         let colour = self.entries.get(i).map_or(0, |[r, g, b, a]| u32::from_le_bytes([*r, *g, *b, *a]));
+        if let Some(Some(raw)) = self.raw.get(i) {
+            return [colour, *raw];
+        }
         let motion = self.motions.get(i).copied().unwrap_or(UNMOVED_SLOT);
         [colour, u32::from(self.hatches.get(i).copied().unwrap_or(0)) | (motion << 8)]
     }
@@ -3709,7 +3782,7 @@ fn access_texture(device: &wgpu::Device, queue: Option<&wgpu::Queue>, bgl: &wgpu
     })
 }
 
-pub const SHADER: &str = include_str!("../shaders/viewport.wgsl");
+pub const SHADER: &str = concat!(include_str!("../shaders/viewport.wgsl"), "\n", include_str!("../shaders/wood.wgsl"));
 
 /// The layout of group 0 (the uniform, a palette and its materials, the studio, the motions)
 /// with the studio and the motion table every group-0 bind group carries.
@@ -3944,10 +4017,11 @@ impl Renderer {
                     ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
                     count: None,
                 },
-                // The palette: a texture (not a storage buffer), so WebGL2 can draw it.
+                // The palette: a texture (not a storage buffer), so WebGL2 can draw it. The
+                // fragments read wood records from it too.
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Uint,
                         view_dimension: wgpu::TextureViewDimension::D2,
@@ -7447,11 +7521,18 @@ mod tests {
             fragment = false;
             rest = &rest[end + 1..];
         }
+        // Where `body` calls `name`: a whole word, so `sky_lit(` is no call of `lit`.
+        let calls_of = |body: &str, name: &str| -> Vec<usize> {
+            body.match_indices(&format!("{name}("))
+                .map(|(i, _)| i)
+                .filter(|&i| !body[..i].ends_with(|c: char| c.is_alphanumeric() || c == '_'))
+                .collect()
+        };
         // Helpers that take derivatives (directly or through another helper).
         let mut uses: Vec<String> = Vec::new();
         for _ in 0..8 {
             for (n, body, _) in &fns {
-                if !uses.contains(n) && (derivs.iter().any(|d| body.contains(d)) || uses.iter().any(|u| body.contains(&format!("{u}(")))) {
+                if !uses.contains(n) && (derivs.iter().any(|d| body.contains(d)) || uses.iter().any(|u| !calls_of(body, u).is_empty())) {
                     uses.push(n.clone());
                 }
             }
@@ -7459,9 +7540,8 @@ mod tests {
         for (n, body, frag) in &fns {
             let calls: Vec<usize> = derivs
                 .iter()
-                .map(|d| d.to_string())
-                .chain(uses.iter().map(|u| format!("{u}(")))
-                .flat_map(|c| body.match_indices(&c).map(|(i, _)| i).collect::<Vec<_>>())
+                .flat_map(|d| body.match_indices(d).map(|(i, _)| i).collect::<Vec<_>>())
+                .chain(uses.iter().flat_map(|u| calls_of(body, u)))
                 .collect();
             if calls.is_empty() {
                 continue;
@@ -7770,7 +7850,8 @@ mod glass_tests {
             let mut b = BlockBuilder::default();
             // In z = 0, its normal away from the eye at +Z.
             b.triangle([[-20.0, -20.0, 0.0], [20.0, -20.0, 0.0], [0.0, 20.0, 0.0]], [[0.0, 0.0, -1.0]; 3], PaletteIndex(0), TriClass::Pbr);
-            let material = Material { base: [0.6, 0.6, 0.6], metallic: 0.0, roughness: 0.6, ior: 1.5, pbr: true, two_sided, turn: None };
+            let material =
+                Material { base: [0.6, 0.6, 0.6], metallic: 0.0, roughness: 0.6, ior: 1.5, pbr: true, procedure: 0, two_sided, turn: None };
             GpuScene {
                 palette: Arc::new(Palette::with_stable(vec![[150, 150, 150, 255]]).with_materials(vec![material])),
                 blocks: vec![SceneBlock { key: 3, bytes: b.freeze() }],
@@ -7818,8 +7899,16 @@ mod glass_tests {
         let mut b = BlockBuilder::default();
         b.triangle([[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], [[0.0, 0.0, 1.0]; 3], PaletteIndex(0), TriClass::Pbr);
         let bytes = b.freeze();
-        let material =
-            |roughness: f32| Material { base: [0.5, 0.3, 0.2], metallic: 1.0, roughness, ior: 1.5, pbr: true, two_sided: false, turn: None };
+        let material = |roughness: f32| Material {
+            base: [0.5, 0.3, 0.2],
+            metallic: 1.0,
+            roughness,
+            ior: 1.5,
+            pbr: true,
+            procedure: 0,
+            two_sided: false,
+            turn: None,
+        };
         let scene = |m: Material| GpuScene {
             palette: Arc::new(Palette::with_stable(vec![[180, 120, 70, 255]]).with_materials(vec![m])),
             blocks: vec![SceneBlock { key: 3, bytes: bytes.clone() }],

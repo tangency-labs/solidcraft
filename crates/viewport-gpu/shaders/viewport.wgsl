@@ -155,12 +155,20 @@ fn material_at(i: u32) -> vec2<u32> {
     return vec2<u32>(i & 2047u, (i >> 11u) * 4u);
 }
 
-/// Palette entry `i`'s hatch word (`hatch`, under 256) with the entry's PBR finish packed above
-/// it: metallic in bits 8-15, roughness in 16-23, bit 24 set when the entry has one. An entry
-/// past the material texture has none (a load out of range is not defined).
+/// Palette entry `i`'s hatch word (`hatch`, under 256) with the entry's material packed above
+/// it. A PBR finish: metallic in bits 8-15, roughness in 16-23, bit 24 set. A procedural
+/// material (the material's flag is 2): its record's first palette entry in bits 8-23, bit 25
+/// set; such an entry is drawn by its procedure (`procedural`) and takes no finish. An entry
+/// past the material texture has neither (a load out of range is not defined).
 fn finish_h(i: u32, hatch: u32) -> u32 {
     let at = material_at(i);
-    if (at.y + 3u >= textureDimensions(pbr_materials).y || textureLoad(pbr_materials, at, 0).w < 0.5) { return hatch; }
+    if (at.y + 3u >= textureDimensions(pbr_materials).y) { return hatch; }
+    let flag = textureLoad(pbr_materials, at, 0).w;
+    if (flag < 0.5) { return hatch; }
+    if (flag > 1.5) {
+        let record = u32(textureLoad(pbr_materials, at + vec2<u32>(0u, 1u), 0).x) & 65535u;
+        return hatch | (record << 8u) | (1u << 25u);
+    }
     let p = clamp(textureLoad(pbr_materials, at + vec2<u32>(0u, 1u), 0).xy, vec2<f32>(0.0), vec2<f32>(1.0));
     let q = vec2<u32>(round(p * 255.0));
     return hatch | (q.x << 8u) | (q.y << 16u) | (1u << 24u);
@@ -516,9 +524,10 @@ fn cap_depth(wp: vec3<f32>, z: f32) -> f32 {
 /// The cut face in its body's colour ("from component" colouring), tinted toward the cap colour
 /// so it reads as a cut, hatched at the angle of the plane it lies on; by part, toward the body's
 /// own hatch colour, a turned part's stripes a quarter turn round. With the hatch off (`u.cap.a`
-/// 0), plain in the body's own colour.
-fn cap_color(i: TOut) -> vec4<f32> {
-    if (u.cap.a < 0.5) { return out_color(vec4<f32>(i.c.rgb, 1.0)); }
+/// 0), plain in the body's own colour. `wood` is the fragment's colour with its wood grain
+/// (`procedural`), which the caller takes before any branch (derivatives).
+fn cap_color(i: TOut, wood: vec4<f32>) -> vec4<f32> {
+    if (u.cap.a < 0.5) { return out_color(vec4<f32>(wood.rgb, 1.0)); }
     var tint = u.cap.rgb;
     var s = u.plane_hatch[min(kept_span(i.wp).k, 5u)].xy;
     if ((i.h & 255u) > 0u) {
@@ -526,7 +535,7 @@ fn cap_color(i: TOut) -> vec4<f32> {
         tint = u.hatch[min(k >> 1u, 2u)].rgb;
         if ((k & 1u) == 1u) { s = vec2<f32>(-s.y, s.x); }
     }
-    let base = mix(i.c.rgb, tint, 0.35);
+    let base = mix(wood.rgb, tint, 0.35);
     let h = fract(dot(i.pos.xy, s));
     return out_color(vec4<f32>(select(base, base * 0.6, h < 0.22), 1.0));
 }
@@ -552,15 +561,17 @@ fn fs_section_count_flat(i: FOut) -> @location(0) vec4<f32> {
 /// wall.
 @fragment
 fn fs_section_fill(i: TOut) -> @location(0) vec4<f32> {
+    let w = procedural(i);
     if (!past_entry(kept_span(i.wp))) { discard; }
-    return cap_color(i);
+    return cap_color(i, w);
 }
 
 @fragment
 fn fs_section_fill_flat(i: FOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     let t = flat_fragment(i, front);
+    let w = procedural(t);
     if (!past_entry(kept_span(t.wp))) { discard; }
-    return cap_color(t);
+    return cap_color(t, w);
 }
 
 fn solid(i: TOut, front: bool) -> vec4<f32> {
@@ -569,8 +580,9 @@ fn solid(i: TOut, front: bool) -> vec4<f32> {
     let k = curvature(i);
     let ndv = dot(normalize(i.n), normalize(u.back.xyz));
     let fw = fwidth(ndv);
+    let w = procedural(i);
     if (clipped(i.wp)) { discard; }
-    if (!front && sectioned()) { return cap_color(i); }
+    if (!front && sectioned()) { return cap_color(i, w); }
     // Under surface analysis a selected face shows the selection tint (the one-body highlight's
     // own pass draws it over the analysis); with every shown body selected, every face does.
     if (u.ana.x > 0.5 && length(i.n) > 0.5 && u.sel.w < 0.5) {
@@ -870,30 +882,39 @@ fn fs_tri(i: TOut) -> @location(0) vec4<f32> {
     return shade(i);
 }
 
-fn hover_color(i: TOut) -> vec4<f32> {
+/// A hovered body or face in a lifted colour; `wood` is its colour with its wood grain
+/// (`procedural`), taken by the caller before any branch (derivatives).
+fn hover_color(i: TOut, wood: vec4<f32>) -> vec4<f32> {
     if (clipped(i.wp)) { discard; }
-    // An opaque body keeps its finish under the hover; a faded or see-through one stays plain.
-    return lit_color(i, 1.0, vec4<f32>(i.c.rgb + u.tint.rgb, i.c.a), i.c.a > 0.99);
+    // An opaque body keeps its finish under the hover; a faded, see-through or wooden one
+    // stays plain (a wooden body keeps its grain).
+    return lit_color(i, 1.0, vec4<f32>(wood.rgb + u.tint.rgb, i.c.a), i.c.a > 0.99 && procedure_slot(i.h) == 0u);
 }
 
 /// A hovered body or face, lit over the model in a lifted colour.
 @fragment
 fn fs_hl_hover(i: TOut) -> @location(0) vec4<f32> {
-    return hover_color(i);
+    let w = procedural(i);
+    return hover_color(i, w);
 }
 
 @fragment
 fn fs_hl_hover_flat(i: FOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     let t = flat_fragment(i, front);
-    return hover_color(t);
+    let w = procedural(t);
+    return hover_color(t, w);
 }
 
 /// A whole selected body, lit over the model from its own plan triangles in the selection colour.
 @fragment
 fn fs_hl_selected(i: TOut) -> @location(0) vec4<f32> {
+    let w = procedural(i);
     if (clipped(i.wp)) { discard; }
-    // The selection colour stays flat and plain, so it reads the same on every finish.
-    return lit_color(i, 1.0, vec4<f32>(u.sel.rgb, i.c.a), false);
+    // The selection colour stays flat and plain, so it reads the same on every finish; a
+    // wooden body keeps its grain under it.
+    var base = u.sel.rgb;
+    if (procedure_slot(i.h) != 0u) { base = mix(w.rgb, u.sel.rgb, 0.4); }
+    return lit_color(i, 1.0, vec4<f32>(base, i.c.a), false);
 }
 
 /// Reference planes: shaded like `fs_tri`, but never cut by the section plane.
@@ -939,7 +960,42 @@ fn product_light_sample(k: u32, p: vec3<f32>) -> mat2x3<f32> {
 
 /// An opaque face, with its material finish where the viewport shows them.
 fn lit(i: TOut, visibility: f32) -> vec4<f32> {
-    return lit_color(i, visibility, i.c, true);
+    // A wooden face keeps its grain under the plain lighting: the finish is for plain colours.
+    return lit_color(i, visibility, procedural(i), procedure_slot(i.h) == 0u);
+}
+
+/// The `k`th `vec4` of the procedural record at palette entry `slot`
+/// (`Palette::add_procedure`): two palette texels of `f32` bits. The first holds the
+/// procedure's id, the rest its settings.
+fn procedure_texel(slot: u32, k: u32) -> vec4<f32> {
+    let a = palette_entry(slot + 2u * k);
+    let b = palette_entry(slot + 2u * k + 1u);
+    return vec4<f32>(bitcast<f32>(a.x), bitcast<f32>(a.y), bitcast<f32>(b.x), bitcast<f32>(b.y));
+}
+
+/// The procedural record a fragment's `h` names (`finish_h`), 0: none.
+fn procedure_slot(h: u32) -> u32 {
+    return select(0u, (h >> 8u) & 65535u, ((h >> 25u) & 1u) != 0u);
+}
+
+/// The fragment's colour: its entry's own, or its procedural material's at this point. The one
+/// place a procedural material enters the viewport: a new one adds its id here and its code
+/// in a file of its own.
+fn procedural(i: TOut) -> vec4<f32> {
+    let slot = procedure_slot(i.h);
+    // The pixel's steps on the surface, mm (taken before the branch: derivatives need uniform
+    // control flow).
+    let dx = dpdx(i.wp);
+    let dy = dpdy(i.wp);
+    if (slot == 0u) { return i.c; }
+    let id = u32(procedure_texel(slot, 0u).x);
+    if (id == 1u) { return vec4<f32>(wood_color(slot, i.wp, dx, dy), i.c.a); }
+    return i.c;
+}
+
+/// A wood record's `k`th setting (`solidcraft_viewport::wood::TEXELS`), after the record's id.
+fn wood_texel(slot: u32, k: u32) -> vec4<f32> {
+    return procedure_texel(slot, k + 1u);
 }
 
 /// sRGB to linear light, exact, with the straight segment near black.
@@ -1159,7 +1215,7 @@ fn brushing(p: vec3<f32>, n: vec3<f32>, metallic: f32, roughness: f32, turn_at: 
 /// light and, by Lagarde's approximation, the specular (Filament). Khronos PBR Neutral, then
 /// encoded as `lit_color` does.
 fn finished(i: TOut, n: vec3<f32>, visibility: f32, base: vec4<f32>) -> vec4<f32> {
-    let pbr = (i.h >> 24u) != 0u;
+    let pbr = ((i.h >> 24u) & 1u) != 0u;
     let metallic = select(0.0, f32((i.h >> 8u) & 255u) / 255.0, pbr);
     let satin = select(0.5, f32((i.h >> 16u) & 255u) / 255.0, pbr);
     let brush = brushing(i.wp, n, metallic, satin, i.turn_at, i.turn_along);

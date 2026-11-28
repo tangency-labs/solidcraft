@@ -35,6 +35,10 @@ pub struct SceneMesh {
     pub closed: bool,
     /// The hatch of its cut face when the scene hatches by part ([`Scene::part_hatch`]).
     pub hatch: Hatch,
+    /// Procedural wood grain over the body's colour (faces without colours of their own).
+    pub wood: Option<crate::wood::WoodShade>,
+    /// Faces with wood of their own: (B-rep face index, wood).
+    pub face_woods: Vec<(u32, crate::wood::WoodShade)>,
     /// A value at each of the mesh's positions, in order (a measured curvature, say), that
     /// [`crate::AnalysisMode::Values`] colours the body by; `None` for a body without.
     pub values: Option<Arc<Vec<f32>>>,
@@ -43,7 +47,31 @@ pub struct SceneMesh {
 impl SceneMesh {
     /// A solid body in `color`, with no face of its own look.
     pub fn solid(mesh: Arc<Mesh>, color: Rgb) -> SceneMesh {
-        SceneMesh { mesh, color, face_colors: Vec::new(), opacity: 1.0, closed: true, hatch: Hatch(0), values: None }
+        SceneMesh {
+            mesh,
+            color,
+            face_colors: Vec::new(),
+            opacity: 1.0,
+            closed: true,
+            hatch: Hatch(0),
+            wood: None,
+            face_woods: Vec::new(),
+            values: None,
+        }
+    }
+
+    /// The wood on triangle face `face`, if any: the face's own, else the body's (unless the
+    /// face has a plain colour of its own).
+    pub fn wood_at(&self, face: Option<u32>) -> Option<&crate::wood::WoodShade> {
+        if let Some(f) = face {
+            if let Some((_, w)) = self.face_woods.iter().find(|(i, _)| *i == f) {
+                return Some(w);
+            }
+            if self.face_colors.iter().any(|(i, _)| *i == f) {
+                return None;
+            }
+        }
+        self.wood.as_ref()
     }
 
     /// An open sheet in `color` (not [`SceneMesh::closed`]).

@@ -202,7 +202,17 @@ fn scene(s: &Session, size: [usize; 2], exported: Option<&[String]>) -> Option<(
                 scene.lines.push(SceneLine { points: edge.clone(), color: crate::view::colors::EDGE, alpha: 1.0, width: EDGE_WIDTH, on_top: false });
             }
         }
-        scene.meshes.push(SceneMesh { mesh, color, face_colors, opacity, closed: body.is_closed(), hatch: Default::default(), values: None });
+        scene.meshes.push(SceneMesh {
+            mesh,
+            color,
+            face_colors,
+            opacity,
+            closed: body.is_closed(),
+            hatch: Default::default(),
+            wood: None,
+            face_woods: Vec::new(),
+            values: None,
+        });
     }
     if scene.meshes.is_empty() && exported.is_none() {
         scene.lines = sketch_lines(s)?;

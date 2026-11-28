@@ -2424,6 +2424,46 @@ fn push_block(
 }
 
 /// Write a body's colour into the stable arena and into the scene palette being built from it.
+/// Procedural wood grain on a body's palette entries: its body and instance entries and the
+/// faces without looks of their own take its own look's grain; a face whose own look has grain
+/// takes that. The arena keeps the records by body, for the model scene and the highlight
+/// scene alike; a body without grain has none.
+fn body_wood(
+    doc: &solidcraft_engine::doc::Document,
+    b: &solidcraft_engine::doc::ModelBody,
+    arena: &mut crate::scene_palette::PaletteArena,
+    slots: &crate::scene_palette::BodySlots,
+    face_looks: &std::collections::HashMap<usize, solidcraft_engine::doc::appearance::Look>,
+) {
+    let record = |shade: &solidcraft_viewport::wood::WoodShade| {
+        let mut texels = vec![[solidcraft_viewport::wood::PROCEDURE, 0.0, 0.0, 0.0]];
+        texels.extend(shade.texels());
+        texels
+    };
+    let mut records: Vec<(Vec<crate::gpu::PaletteIndex>, Vec<[f32; 4]>)> = Vec::new();
+    if let Some(shade) = doc.model_body_wood(b) {
+        let mut drawn = vec![slots.body, slots.instance];
+        drawn.extend((0..b.body.face_count()).filter(|f| !face_looks.contains_key(f)).map(|f| slots.face(f)));
+        records.push((drawn, record(&shade)));
+    }
+    // Faces in one look share its record.
+    let mut made: Vec<(&solidcraft_engine::doc::appearance::Look, usize)> = Vec::new();
+    for (f, look) in face_looks.iter().filter(|(_, l)| l.grain.is_some()) {
+        let at = match made.iter().find(|(l, _)| *l == look) {
+            Some((_, at)) => Some(*at),
+            None => doc.look_wood(b, look).map(|shade| {
+                records.push((Vec::new(), record(&shade)));
+                made.push((look, records.len() - 1));
+                records.len() - 1
+            }),
+        };
+        if let Some((drawn, _)) = at.and_then(|at| records.get_mut(at)) {
+            drawn.push(slots.face(*f));
+        }
+    }
+    arena.set_procedures(&b.name, records);
+}
+
 fn set_palette_color(
     arena: &mut crate::scene_palette::PaletteArena,
     palette: &mut std::sync::Arc<crate::gpu::Palette>,
@@ -3273,6 +3313,8 @@ fn body_scene(
                 // A copy drawn finer than the others (zoomed in on) is drawn from its own plan, in
                 // its face slots: shared, they would name no motion, and a joint drag would leave it.
                 .filter(|_| repeated_copy(app, b) && refined(app, b).is_none())
+                // A body with wood grain has a grain frame of its own, so slots of its own.
+                .filter(|_| !wooden(&s.doc, b) && !s.doc.face_colors(b).into_iter().any(|(_, look)| look.grain.is_some()))
                 .map(|definition| (definition, look_key(&s.doc, b, &appearance.faces, colored)));
             let slots = match copy {
                 Some((definition, look)) => {
@@ -3416,6 +3458,11 @@ fn body_scene(
                 made
             }
         };
+        if !faded && s.colored_components.is_none() {
+            body_wood(&s.doc, b, &mut arena, &slots, face_looks);
+        } else {
+            arena.set_procedures(&b.name, Vec::new());
+        }
         let closed = b.is_closed();
         let class = plan_class(app, &face_classes);
         // The plan is built only for a body with a class.
@@ -3552,6 +3599,9 @@ fn body_scene(
         let palette = std::sync::Arc::make_mut(&mut sc.palette);
         *palette = std::mem::take(palette).with_materials(materials);
     }
+    // The procedural materials of the bodies shown, after the finishes they take the place of.
+    arena.keep_procedures(&shown_names.iter().copied().collect());
+    arena.apply_procedures(std::sync::Arc::make_mut(&mut sc.palette));
     (sc, made, published)
 }
 
@@ -3564,6 +3614,7 @@ fn finish(color: Color32, pbr: Option<solidcraft_engine::doc::pbr_appearance::Pb
         roughness: p.roughness() as f32,
         ior: p.dielectric_ior() as f32,
         pbr: true,
+        procedure: 0,
         two_sided: false,
         turn: None,
     })
@@ -7509,6 +7560,12 @@ impl<'a> BodiesByName<'a> {
     }
 }
 
+/// Does `b`'s own look have wood grain? Its hovered faces are then outlined rather than filled,
+/// so the grain stays visible under the pointer.
+fn wooden(doc: &solidcraft_engine::doc::Document, b: &solidcraft_engine::doc::ModelBody) -> bool {
+    doc.model_body_look(b).is_some_and(|look| look.grain.is_some())
+}
+
 /// How a whole body is lit: hovered or selected, and in which colour (where the model's own
 /// colour is not kept: placements, and faded or see-through bodies).
 #[derive(Clone, Copy)]
@@ -7646,9 +7703,11 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     // The key first: it reads the arena (`scene_key`), which is held below.
     let key = highlight_geometry_key(app);
     let body_slots = app.viewport.palette.lock().unwrap_or_else(|e| e.into_inner());
-    let mut sc = GpuScene::with_palette(
-        crate::gpu::Palette::with_stable(body_slots.entries()).with_materials(body_slots.materials()).with_motions(body_slots.motions()),
-    );
+    let mut palette =
+        crate::gpu::Palette::with_stable(body_slots.entries()).with_materials(body_slots.materials()).with_motions(body_slots.motions());
+    // A body lit from the model's own triangles keeps its procedural material under the light.
+    body_slots.apply_procedures(&mut palette);
+    let mut sc = GpuScene::with_palette(palette);
     let st = interaction_state(app);
     let s = &app.session;
     let active_bodies = active_body_names(app);
@@ -8037,6 +8096,13 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 {
                     if moved && has_pickable_outline(&shown(b)) {
                         moved_body_outline(&mut feedback, &shown(b), &solidcraft_engine::doc::IDENTITY, app.preferences.show_selected_hidden_edges);
+                    } else if matches!(app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Appearance(_))) {
+                        // The Appearance dialog's picked bodies show the look they wear, not the
+                        // selection colour: they are outlined.
+                        let m = shown(b);
+                        for (_, e) in m.edges.iter().enumerate().filter(|(ei, _)| m.edge_pickable(*ei)) {
+                            edge_lines(&mut feedback, e, selected_edge, 2.0, &[]);
+                        }
                     } else if let Some(m) = outlines.then(|| shown(b)).filter(|mesh| has_pickable_outline(mesh)) {
                         for (_, e) in m.edges.iter().enumerate().filter(|(ei, _)| m.edge_pickable(*ei)) {
                             edge_lines(&mut feedback, e, selected_edge, 2.0, &[]);
@@ -8258,7 +8324,11 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                     let f = f as usize;
                     hovered_faces.contains(&f) && selected_faces.is_none_or(|s| !s.contains(&f))
                 };
-                mesh_tris(&mut feedback, &lit, hover_col, true, keeps);
+                // A wooden body keeps its grain under the pointer: its faces are outlined, not
+                // filled with one flat colour.
+                if !wooden(&s.doc, b) {
+                    mesh_tris(&mut feedback, &lit, hover_col, true, keeps);
+                }
             }
         }
         // A whole body's edges: the model's own lines, drawn again (see `highlight_edges`).
@@ -8325,7 +8395,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 // An imported mesh has one display face. Tint its existing instance using the
                 // face's palette slot so hovering can reuse its triangles.
                 let own = highlight_opaque(app, b, &active_bodies).then(|| body_slots.slots(&b.name)).flatten();
-                let draw_fill = !(outlines && has_pickable_outline(&m));
+                let draw_fill = !(outlines && has_pickable_outline(&m)) && !wooden(&s.doc, b);
                 let reused = draw_fill
                     && *index == 0
                     && !selected

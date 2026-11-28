@@ -544,12 +544,17 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
 /// of its own, carrying its hatch.
 pub fn scene_geometry(scene: &Scene) -> GpuScene {
     let by_part = scene.part_hatch.is_some() && !scene.clip.is_empty();
+    // Wooden bodies need entries of their own too: each carries its own grain frame.
+    let wooded = scene.meshes.iter().any(|m| m.wood.is_some() || !m.face_woods.is_empty());
+    let own_entries = by_part || wooded;
     // Per body, its colours' stable entries (by part), and the stable palette they make.
     let mut own: Vec<HashMap<[u8; 4], PaletteIndex>> = Vec::new();
     let mut stable: Vec<[u8; 4]> = Vec::new();
     let mut hatches: Vec<(PaletteIndex, Hatch)> = Vec::new();
     let c4 = |m: &SceneMesh, c: Rgb| [c.0, c.1, c.2, (m.alpha() * 255.0).round().clamp(0.0, 255.0) as u8];
-    if by_part {
+    // Per body, its wooden faces' entries: (face or `None` for the body's own wood, entry).
+    let mut wood_entries: Vec<Vec<(Option<u32>, PaletteIndex)>> = Vec::new();
+    if own_entries {
         for m in &scene.meshes {
             let mut map = HashMap::new();
             for c in std::iter::once(m.color).chain(m.face_colors.iter().map(|(_, c)| *c)) {
@@ -560,21 +565,49 @@ pub fn scene_geometry(scene: &Scene) -> GpuScene {
                     i
                 });
             }
+            // A wooden face takes an entry of its own (its colour may match a plain face's).
+            let mut woods = Vec::new();
+            for f in m.wood.iter().map(|_| None).chain(m.face_woods.iter().map(|(f, _)| Some(*f))) {
+                let c = f.and_then(|f| m.face_colors.iter().find(|(i, _)| *i == f).map(|(_, c)| *c)).unwrap_or(m.color);
+                let i = PaletteIndex(u32::try_from(stable.len()).unwrap_or(0));
+                stable.push(c4(m, c));
+                hatches.push((i, m.hatch));
+                woods.push((f, i));
+            }
             own.push(map);
+            wood_entries.push(woods);
         }
     }
     let mut palette = Palette::with_stable(stable);
-    for (i, h) in hatches {
-        palette.set_hatch(i, h);
+    if by_part {
+        for (i, h) in hatches {
+            palette.set_hatch(i, h);
+        }
+    }
+    for (m, woods) in scene.meshes.iter().zip(&wood_entries) {
+        for (f, entry) in woods {
+            let shade = match f {
+                None => m.wood.as_ref(),
+                Some(f) => m.face_woods.iter().find(|(i, _)| i == f).map(|(_, w)| w),
+            };
+            let record = shade.and_then(|w| palette.add_wood(w));
+            palette.set_procedure(*entry, record);
+        }
     }
     let mut sc = GpuScene::with_palette(palette);
     for (mi, m) in scene.meshes.iter().enumerate() {
         let faces: HashMap<u32, Rgb> = m.face_colors.iter().copied().collect();
         let mesh = &m.mesh;
         for (ti, t) in mesh.triangles.iter().enumerate() {
-            let rgba = c4(m, mesh.tri_face.get(ti).and_then(|f| faces.get(f)).copied().unwrap_or(m.color));
-            let col = match own.get(mi).and_then(|o| o.get(&rgba)) {
-                Some(i) => *i,
+            let face = mesh.tri_face.get(ti).copied();
+            let rgba = c4(m, face.and_then(|f| faces.get(&f)).copied().unwrap_or(m.color));
+            // The wooden face's (or body's) own entry, if it has wood.
+            let wood = m.wood_at(face).and_then(|_| {
+                let key = face.filter(|f| m.face_woods.iter().any(|(i, _)| i == f));
+                wood_entries.get(mi).and_then(|w| w.iter().find(|(f, _)| *f == key)).map(|(_, i)| *i)
+            });
+            let col = match wood.or_else(|| own.get(mi).and_then(|o| o.get(&rgba)).copied()) {
+                Some(i) => i,
                 None => sc.color(rgba),
             };
             let [Some(a), Some(b), Some(c)] = t.map(|k| mesh.positions.get(k as usize).copied()) else { continue };
@@ -766,6 +799,8 @@ mod tests {
             opacity,
             closed: true,
             hatch: Default::default(),
+            wood: None,
+            face_woods: Vec::new(),
             values: None,
         };
         let geometry = |opacity: f32| scene_geometry(&Scene { meshes: vec![mesh(opacity)], ..Default::default() });
@@ -1208,6 +1243,8 @@ mod tests {
             opacity: 0.5,
             closed: true,
             hatch: Default::default(),
+            wood: None,
+            face_woods: Vec::new(),
             values: None,
         };
         let sc = scene_geometry(&Scene { meshes: vec![mesh], ..Default::default() });

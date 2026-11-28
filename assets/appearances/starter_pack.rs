@@ -1,7 +1,7 @@
 //! Original starter visual data, MIT OR Apache-2.0. No external material library.
 use crate::appearance_pack::{Category, GlassBoundary, GlassRecipe, OpaqueRecipe, TextureAxis, TextureRecipe, VisualPreset};
 
-const WOOD: &str = "Uniform opaque preview only; grain resources/mapping are not applied";
+const WOOD: &str = "Procedural 3D grain (rings, figure, streaks, pores) in the shaded view; rendered pictures and exports that carry one colour per body keep this average colour";
 const SOLAR: &str = "Uniform opaque preview only; no cell grid, busbars, electricity or efficiency claim";
 const REGOLITH: &str = "Uniform opaque preview only; no granular displacement or measured lunar optical data";
 const OPAQUE: &str = "Illustrative opaque isotropic PBR; no measured alloy, polymer or engineering properties";

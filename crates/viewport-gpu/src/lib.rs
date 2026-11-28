@@ -765,3 +765,6 @@ fn pack(plans: &[&TessPlan]) -> Result<PackedPlans> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+mod wood_tests;
