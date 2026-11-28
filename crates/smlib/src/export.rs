@@ -639,6 +639,14 @@ fn trims(flat: View, n_edgeuses: usize) -> Res<Vec<Option<b::Curve2>>> {
         if o < 2 || n < o {
             return Err(invalid("UV trim order"));
         }
+        if n > knot_removal::MAX_POINTS {
+            // Longer than the record holds: the trim is left to be computed from its edge on the
+            // face's surface (as an analytic face's is), which the export then checks against it.
+            cv += n;
+            kn += n + o;
+            out.push(None);
+            continue;
+        }
         let pts = cvs.get(2 * cv..2 * (cv + n)).ok_or_else(|| invalid("UV trim points"))?;
         let k = knots.get(kn..kn + n + o).ok_or_else(|| invalid("UV trim knots"))?.to_vec();
         let w = match weights {
@@ -887,6 +895,9 @@ struct Edge {
     reversed: bool,
     /// How SMLib's UV trims of this edge map onto the record's parameter.
     trim_map: TrimMap,
+    /// How far the curve was moved to bring it within the record's size limit, proved by
+    /// [`knot_removal`]: added to the edge's tolerance.
+    grown: f64,
 }
 
 /// The schema 4 B-rep of SMLib's flat arrays: mapped, renumbered canonically and validated.
@@ -967,7 +978,12 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
         let start = index(idx(at(flat.i(EDGE_VERTICES), 2 * e, "edge vertices")?, n_vertices, "edge vertex")?)?;
         let end = index(idx(at(flat.i(EDGE_VERTICES), 2 * e + 1, "edge vertices")?, n_vertices, "edge vertex")?)?;
         let reversed = a > z;
+        // A trace with more control points than the record holds is reduced by knot removal, to
+        // within half the edge's tolerance, which its tolerance then grows by.
+        let reach = tolerances.edges.as_ref().and_then(|t| t.get(e)).copied().unwrap_or(tolerance);
+        let knot_removal::Reduced { curve, bound: grown } = knot_removal::within_cap(curve, reach / 2.0)?;
         edges.push(Edge {
+            grown,
             curve,
             nurbs,
             interval: if reversed { [z, a] } else { [a, z] },
@@ -1516,7 +1532,7 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerance
             curve: edge.curve.clone(),
             interval: edge.interval,
             vertices,
-            tolerance: tolerances.edge(source),
+            tolerance: tolerances.edge(source) + edge.grown,
             uses,
         });
     }
@@ -2073,6 +2089,8 @@ fn shift(c: &mut b::Curve2, d: usize, by: f64) {
         }),
     }
 }
+
+mod knot_removal;
 
 #[cfg(test)]
 mod tests;
