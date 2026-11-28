@@ -2245,3 +2245,30 @@ fn feature_body_fades_out_only_where_content_runs_on() {
     assert_eq!(fades(40, 200.0), (true, true), "scrolled part way, it fades out at both ends");
     assert_eq!(fades(40, 10_000.0), (true, false), "at the end, it fades out below the header only");
 }
+
+/// One frame with a docked dialog keyed "k" shown or not; returns its offset that frame.
+fn dock_frame(ctx: &egui::Context, shown: bool) -> egui::Vec2 {
+    let mut offset = egui::Vec2::ZERO;
+    let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+        offset = crate::frame::dock_offset(ui.ctx(), "k");
+        if shown {
+            crate::frame::note_dock_shown(ui.ctx(), "k");
+        }
+    });
+    out.textures_delta.clear();
+    offset
+}
+
+/// A dialog dragged off its dock stays there while open; the next one opens docked.
+#[test]
+fn a_dragged_dialog_stays_while_open_and_the_next_opens_docked() {
+    let ctx = egui::Context::default();
+    let to = egui::vec2(-240.0, 130.0);
+    assert_eq!(dock_frame(&ctx, true), egui::Vec2::ZERO);
+    crate::frame::set_dock_offset(&ctx, "k", to);
+    assert_eq!(dock_frame(&ctx, true), to, "kept while open");
+    assert_eq!(dock_frame(&ctx, true), to);
+    dock_frame(&ctx, false);
+    assert_eq!(dock_frame(&ctx, true), egui::Vec2::ZERO, "the next dialog opens docked");
+    assert_eq!(dock_frame(&ctx, true), egui::Vec2::ZERO, "and stays docked");
+}

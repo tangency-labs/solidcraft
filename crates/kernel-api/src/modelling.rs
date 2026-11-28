@@ -2,9 +2,10 @@
 //! ([`Modelling`]), with their inputs.
 
 use serde::{Deserialize, Serialize};
-use solidcore_record::{Plane, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 use crate::Backend;
+use crate::sweep::{Helix, PathSpan, PointPath, RailFit, SweepOptions};
 
 /// Which boolean: the names are saved in designs, so they never change.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -178,6 +179,74 @@ pub struct Taper {
     pub corner: DraftCorner,
 }
 
+/// What splits a body's faces, with `F` the kernel's body.
+pub enum SplitTool<'a, F> {
+    /// A plane (unbounded).
+    Plane(Plane),
+    /// The surface of another body's face (`face` in that body's face order), extended. Split
+    /// Body by a face of a surface body joined tangentially to others cuts with their smooth
+    /// sheet as it is, or with the whole sheet where that does not cut through.
+    Face {
+        /// The body the face is on.
+        body: &'a F,
+        /// The face, in that body's face order.
+        face: usize,
+    },
+    /// Sketch curves (chains of segments in `plane`) swept along `along` (none: the plane's
+    /// normal); each curve splits on its own, an open one extended past its ends.
+    Curves {
+        /// The sketch plane.
+        plane: Plane,
+        /// The chains of segments.
+        curves: Vec<Vec<Seg2>>,
+        /// The direction they are swept along.
+        along: Option<Vec3>,
+    },
+}
+
+impl<F> Clone for SplitTool<'_, F> {
+    fn clone(&self) -> Self {
+        match self {
+            SplitTool::Plane(p) => SplitTool::Plane(*p),
+            SplitTool::Face { body, face } => SplitTool::Face { body, face: *face },
+            SplitTool::Curves { plane, curves, along } => SplitTool::Curves { plane: *plane, curves: curves.clone(), along: *along },
+        }
+    }
+}
+
+impl<F: std::fmt::Debug> std::fmt::Debug for SplitTool<'_, F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SplitTool::Plane(p) => f.debug_tuple("Plane").field(p).finish(),
+            SplitTool::Face { body, face } => f.debug_struct("Face").field("body", body).field("face", face).finish(),
+            SplitTool::Curves { plane, curves, along } => {
+                f.debug_struct("Curves").field("plane", plane).field("curves", curves).field("along", along).finish()
+            }
+        }
+    }
+}
+
+/// What a trim keeps.
+#[derive(Clone, Copy, Debug)]
+pub enum TrimKeep<'a> {
+    /// Every piece on the side of the tool this point is on. A tool of several sketch curves
+    /// has no one side: the region the point picks is kept.
+    Side(Vec3),
+    /// The regions the points pick (a region: the pieces that hang together once the tool has
+    /// cut the body, each picked by the piece nearest a point).
+    Regions(&'a [Vec3]),
+}
+
+impl TrimKeep<'_> {
+    /// The points that pick what is kept.
+    pub fn points(&self) -> &[Vec3] {
+        match self {
+            TrimKeep::Side(p) => std::slice::from_ref(p),
+            TrimKeep::Regions(at) => at,
+        }
+    }
+}
+
 /// The body-making operations of one kernel ([`crate::OpKind`]'s primitives, `Extrude` to
 /// `OffsetFaces`).
 ///
@@ -243,4 +312,34 @@ pub trait Modelling: Backend {
     fn thicken(&self, sheet: &Self::Form, thickness: f64, symmetric: bool) -> Result<Self::Form, Self::Error>;
     /// The faces nearest `at` moved `distance` along their normals.
     fn offset_faces(&self, body: &Self::Form, at: &[Vec3], distance: f64) -> Result<Self::Form, Self::Error>;
+    /// The faces nearest `faces` tilted by `angle` about their line on the `neutral` plane, so
+    /// that they lean in (positive angle) going along `pull`.
+    fn draft(&self, body: &Self::Form, faces: &[Vec3], neutral: &Plane, pull: Vec3, angle: f64) -> Result<Self::Form, Self::Error>;
+    /// The faces `faces` (in the body's face order) split where `tool` meets them, the solid
+    /// unchanged, with the body face each face of the result came from.
+    fn split_faces(&self, body: &Self::Form, faces: &[usize], tool: &SplitTool<'_, Self::Form>) -> Result<(Self::Form, Vec<usize>), Self::Error>;
+    /// The body split into the closed parts on either side of `tool`, those on its back first.
+    fn split_body(&self, body: &Self::Form, tool: &SplitTool<'_, Self::Form>) -> Result<Vec<Self::Form>, Self::Error>;
+    /// The body split by `sheet`'s faces `faces` exactly as they are, never extended, `face`
+    /// giving the sides; refused unless they cut it into closed solids.
+    fn split_body_by_faces(&self, body: &Self::Form, sheet: &Self::Form, face: usize, faces: &[usize]) -> Result<Vec<Self::Form>, Self::Error>;
+    /// The body split by every face of the surface body `sheet` exactly as it is, where that
+    /// cuts it into closed solids (`None` where it doesn't), `face` giving the sides.
+    fn split_body_by_sheet_where_it_cuts(&self, body: &Self::Form, sheet: &Self::Form, face: usize) -> Result<Option<Vec<Self::Form>>, Self::Error>;
+    /// A surface body cut where `tool` meets it, keeping what `keep` says.
+    fn trim_keep(&self, body: &Self::Form, tool: &SplitTool<'_, Self::Form>, keep: TrimKeep<'_>) -> Result<Self::Form, Self::Error>;
+    /// A planar region on `plane` swept along `path` (segments end to end), as `options` say.
+    fn sweep(&self, plane: &Plane, region: &Region2, path: &[PathSpan], options: &SweepOptions) -> Result<Self::Form, Self::Error>;
+    /// A planar region swept along a path through 3D sketch curves, as `options` say.
+    fn sweep_points(&self, plane: &Plane, region: &Region2, path: &PointPath, options: &SweepOptions) -> Result<Self::Form, Self::Error>;
+    /// A planar region's outer loop swept along a helix.
+    fn sweep_helix(&self, plane: &Plane, region: &Region2, helix: &Helix<'_>) -> Result<Self::Form, Self::Error>;
+    /// A solid through closed planar sections in order, following 0 to 16 guide `rails`
+    /// (polylines from the first section to the last), `fit` saying how they reshape the
+    /// sections between.
+    fn loft(&self, sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: RailFit) -> Result<Self::Form, Self::Error>;
+    /// A loft through regions with matching hole counts: the hole walls share the end caps.
+    fn loft_regions(&self, sections: &[(Plane, Region2)]) -> Result<Self::Form, Self::Error>;
+    /// A solid from a planar loop to an apex off its plane, following 0 to 2 guide `rails`.
+    fn loft_to_point(&self, plane: &Plane, section: &Loop2, apex: Vec3, rails: &[Vec<Vec3>], fit: RailFit) -> Result<Self::Form, Self::Error>;
 }

@@ -85,6 +85,8 @@ pub(crate) use imp::{
     loft_to_point, loft_to_point_with_rails, path_curve, project_onto_face, rail_curves, railed_skin, revolve, screw, screw_radial, skin_sections,
     sphere, sweep, sweep_controlled, torus,
 };
+#[cfg(feature = "backend-occt")]
+pub(crate) use imp::{extrusion_curves, name_extrusion, name_revolution, revolution_curves};
 
 /// `parts` joined in order in a balanced tree: each part with its neighbour, then each pair with
 /// the next pair, and so on, a part left over at the end of a level carried up as it is. Every
@@ -752,7 +754,7 @@ mod imp {
         draft: Option<Draft>,
     ) -> Result<Body> {
         let base = plane.offset(from);
-        let n = plane.x.cross(plane.y).normalized().ok_or_else(|| KernelError::Invalid("profile plane".into()))?;
+        let n = profile_normal(plane)?;
         let dir = n * sign.signum();
         // Only extrusions take runs of pieces as one curve (`crate::build`).
         let pieces = &broken_at_seams(&base, pieces)?;
@@ -797,10 +799,52 @@ mod imp {
         let rule = draft.map_or(DraftCorner::default(), |d| corner(d.corner));
         let brep = Brep::extrude(&c, p(dir), distance, lean, rule, true).map_err(|e| failed("extrude", e))?;
         let body = body_of(brep, "extrude")?;
-        let roles = roles(&body, &base, Some(&top), &edges, &[], false)?;
-        let sources = (draft.is_none() && sign > 0.0).then(|| extrude_sources(&roles, pieces, region, plane, &base, &top));
+        named_extrusion(body, plane, pieces, region, &base, &top, &edges, draft.is_none() && sign > 0.0)
+    }
+
+    /// A straight extrusion's faces given their roles, construction sources (`sources`) and
+    /// history, from the profile `pieces` as swept (broken at their seams).
+    #[allow(clippy::too_many_arguments)]
+    fn named_extrusion(
+        body: Body,
+        plane: &Plane,
+        pieces: &[Piece],
+        region: Option<&Region2>,
+        base: &Plane,
+        top: &Plane,
+        edges: &[Seed],
+        sources: bool,
+    ) -> Result<Body> {
+        let roles = roles(&body, base, Some(top), edges, &[], false)?;
+        let sources = sources.then(|| extrude_sources(&roles, pieces, region, plane, base, top));
         let body = body.with_face_sources(sources.map(std::sync::Arc::new));
         with_history(body, &roles, pieces)
+    }
+
+    /// The curves another kernel extrudes for [`extrude`] without a draft along the normal
+    /// (`sign` 1): the profile `pieces` moved `from` along `plane`'s normal and broken at their
+    /// seams, each run of one curve as one curve, loop after loop, and the unit direction.
+    #[cfg(feature = "backend-occt")]
+    pub(crate) fn extrusion_curves(plane: &Plane, pieces: &[Piece], from: f64) -> Result<(Vec<Curve>, [f64; 3])> {
+        let base = plane.offset(from);
+        let n = profile_normal(plane)?;
+        Ok((curves(&base, &broken_at_seams(&base, pieces)?)?, p(n)))
+    }
+
+    /// The unit normal of a profile's plane.
+    fn profile_normal(plane: &Plane) -> Result<Vec3> {
+        plane.x.cross(plane.y).normalized().ok_or_else(|| KernelError::Invalid("profile plane".into()))
+    }
+
+    /// `body`, another kernel's extrusion of [`extrusion_curves`] by `distance`, with the roles,
+    /// construction sources and history [`extrude`] gives its own.
+    #[cfg(feature = "backend-occt")]
+    pub(crate) fn name_extrusion(body: Body, plane: &Plane, pieces: &[Piece], region: Option<&Region2>, from: f64, distance: f64) -> Result<Body> {
+        let base = plane.offset(from);
+        let pieces = &broken_at_seams(&base, pieces)?;
+        let top = plane.offset(from + distance);
+        let edges = seeds(&base, pieces, |q| q);
+        named_extrusion(body, plane, pieces, region, &base, &top, &edges, true)
     }
 
     /// The solid `pieces` (one closed loop) on `plane` sweep, moved `from` along its normal and
@@ -808,7 +852,7 @@ mod imp {
     /// its roles.
     fn drafted_loop(plane: &Plane, pieces: &[Piece], from: f64, distance: f64, sign: f64, d: Draft) -> Result<Brep> {
         let base = plane.offset(from);
-        let n = plane.x.cross(plane.y).normalized().ok_or_else(|| KernelError::Invalid("profile plane".into()))?;
+        let n = profile_normal(plane)?;
         let dir = n * sign.signum();
         if d.foot > 0.0 {
             if !(d.foot < distance) {
@@ -940,13 +984,31 @@ mod imp {
     /// The profile `pieces` on `plane` turned `angle` radians (signed, right-handed about `axis`)
     /// about the axis through `origin` (both in the plane). Segments on the axis sweep nothing.
     pub(crate) fn revolve(plane: &Plane, pieces: &[Piece], origin: Vec3, axis: Vec3, angle: f64, join_arcs: bool) -> Result<Body> {
+        let (c, o, k, turn) = revolution_curves(plane, pieces, origin, axis, angle)?;
+        let revolve = if join_arcs { Brep::revolve_joining_arcs } else { Brep::revolve };
+        let brep = revolve(&c, o, k, turn, true).map_err(|e| failed("revolve", e))?;
+        let body = body_of(brep, "revolve")?;
+        name_revolution(body, plane, pieces, origin, Vec3::new(k[0], k[1], k[2]), turn)
+    }
+
+    /// The curves another kernel turns for [`revolve`] (arcs not joined), with the axis through
+    /// `origin` along the unit axis and the angle (0 < angle <= 2π) it turns them by.
+    pub(crate) fn revolution_curves(
+        plane: &Plane,
+        pieces: &[Piece],
+        origin: Vec3,
+        axis: Vec3,
+        angle: f64,
+    ) -> Result<(Vec<Curve>, [f64; 3], [f64; 3], f64)> {
         let k = axis.normalized().ok_or_else(|| KernelError::Invalid("revolve axis".into()))?;
         let (k, turn) = if angle < 0.0 { (-k, -angle) } else { (k, angle) };
         let turn = turn.min(std::f64::consts::TAU);
-        let c = curves(plane, pieces)?;
-        let revolve = if join_arcs { Brep::revolve_joining_arcs } else { Brep::revolve };
-        let brep = revolve(&c, p(origin), p(k), turn, true).map_err(|e| failed("revolve", e))?;
-        let body = body_of(brep, "revolve")?;
+        Ok((curves(plane, pieces)?, p(origin), p(k), turn))
+    }
+
+    /// `body`, a revolution of `pieces` by `turn` about the unit axis `k` through `origin`, with
+    /// the roles and history [`revolve`] gives its own.
+    pub(crate) fn name_revolution(body: Body, plane: &Plane, pieces: &[Piece], origin: Vec3, k: Vec3, turn: f64) -> Result<Body> {
         let size = body.size().max(1e-9);
         let off_axis = |q: Vec3| {
             let w = q - origin;
@@ -1010,7 +1072,9 @@ mod imp {
                 .flat_map(|s| (0..=CROSSING_SAMPLES).map(move |i| seg_at(s, i as f64 / CROSSING_SAMPLES as f64).map(|(_, t)| t)))
                 .collect::<Option<Vec<Vec3>>>()
                 .ok_or_else(bad)?;
-            crate::sweep_path::crossing_check(plane, &tangents)?;
+            crate::sweep_path::crossing_check(plane, &tangents, false)?;
+        } else {
+            turning_check(plane, pieces, path)?;
         }
         let runs = smooth_runs(path)?;
         if runs.len() > 1 {
@@ -1031,6 +1095,48 @@ mod imp {
             _ => roles(&body, plane, Some(&placed(plane, &last)), &seeds(plane, pieces, |q| q), &inside, false)?,
         };
         with_history(body, &roles, pieces)
+    }
+
+    /// [`crate::sweep_path::crossing_check`] with `turning` of the profile on `plane`, already where the
+    /// sweep starts, against the path's direction there. It applies only to a profile the path
+    /// starts in (the start point lies inside the profile or on its outline): that profile lies
+    /// along the path. One that sits off the path, though its plane holds the direction, still
+    /// sweeps a volume and is left to the sweep.
+    fn turning_check(plane: &Plane, pieces: &[Piece], path: &[crate::PathSeg]) -> Result<()> {
+        let (t0, _) =
+            path.first().and_then(crate::PathSeg::tangents).ok_or_else(|| KernelError::Invalid("a path segment has no direction".into()))?;
+        let Some(start) = path.first().map(crate::PathSeg::start) else { return Ok(()) };
+        if path_starts_in(plane, pieces, start) {
+            crate::sweep_path::crossing_check(plane, &[t0], true)?;
+        }
+        Ok(())
+    }
+
+    /// Whether `start`, a point of `plane` (to the sweep's tolerance), lies inside the profile
+    /// `pieces` by the even-odd rule on their outlines sampled at 64 points a piece, or within a
+    /// millionth of the profile's size of one of those points.
+    fn path_starts_in(plane: &Plane, pieces: &[Piece], start: Vec3) -> bool {
+        const SAMPLES: usize = 64;
+        let p = plane.to_local(start);
+        let outline: Vec<Vec<Vec2>> = pieces.iter().map(|x| (0..=SAMPLES).map(|i| x.seg.point_at(i as f64 / SAMPLES as f64)).collect()).collect();
+        let (mut lo, mut hi) = (Vec2::new(f64::MAX, f64::MAX), Vec2::new(f64::MIN, f64::MIN));
+        for q in outline.iter().flatten() {
+            (lo, hi) = (Vec2::new(lo.x.min(q.x), lo.y.min(q.y)), Vec2::new(hi.x.max(q.x), hi.y.max(q.y)));
+        }
+        let near = 1e-6 * (hi - lo).len();
+        if outline.iter().flatten().any(|q| (*q - p).len() <= near) {
+            return true;
+        }
+        let mut crossings = 0;
+        for chain in &outline {
+            for w in chain.windows(2) {
+                let (a, b) = (w[0], w[1]);
+                if (a.y > p.y) != (b.y > p.y) && p.x < a.x + (p.y - a.y) * (b.x - a.x) / (b.y - a.y) {
+                    crossings += 1;
+                }
+            }
+        }
+        crossings % 2 == 1
     }
 
     /// The sweep of the profile on `plane` along `path`, with the rigid motions SMLib reports
@@ -1904,7 +2010,11 @@ mod imp {
         let pieces = pieces(region.loops());
         // A profile drawn away from the path's start is carried there as it is: it is the start
         // section, and the twist and the scale run from there.
-        let plane = &at_path_start(plane, &pieces, path, ctl.orientation == crate::SweepOrientation::Parallel)?;
+        let parallel = ctl.orientation == crate::SweepOrientation::Parallel;
+        let plane = &at_path_start(plane, &pieces, path, parallel)?;
+        if !parallel {
+            turning_check(plane, &pieces, path)?;
+        }
         let runs = smooth_runs(path)?;
         if runs.len() > 1 {
             return cornered_controlled(plane, region, path, &runs, ctl);

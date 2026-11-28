@@ -49,16 +49,18 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Midplane => Some("construct.plane.midplane"),
         Kind::MeshConvert { .. } => Some("mesh.convert"),
         Kind::MeshReduce { .. } => Some("mesh.reduce"),
+        Kind::MeshSectionStack { .. } => Some("mesh.section_stack"),
         Kind::Construct { command, .. } => Some(command),
         Kind::ConstructAuto { command, .. } => Some(command),
         Kind::PathPlane { .. } => Some("construct.plane.along_path"),
         Kind::Split { .. } => Some("solid.split_body"),
-        Kind::DeleteFaces => Some("face.delete"),
+        Kind::DeleteFaces { .. } => Some("face.delete"),
         Kind::Move { .. } => Some("solid.move"),
         Kind::Thread { .. } => Some("solid.thread"),
         Kind::ReplaceFace => Some("solid.replace_face"),
         Kind::BoundaryFill { .. } => Some("solid.boundary_fill"),
         Kind::Align { .. } => Some("solid.align"),
+        Kind::ScanAlign(_) => Some("scan.align"),
         Kind::Remove => Some("solid.remove"),
         Kind::PathPattern { .. } => Some("solid.pattern.path"),
         Kind::Combine { .. } => Some("solid.combine"),
@@ -115,7 +117,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_assembly::Asm::NewComponent { .. } => Some("component.create"),
             crate::dialogs_assembly::Asm::Joint(f) => Some(if f.as_built { "joint.as_built" } else { "joint.create" }),
             crate::dialogs_assembly::Asm::JointOrigin { .. } => Some("joint.origin"),
-            crate::dialogs_assembly::Asm::RigidGroup => Some("joint.rigid_group"),
+            crate::dialogs_assembly::Asm::RigidGroup { .. } => Some("joint.rigid_group"),
             crate::dialogs_assembly::Asm::MotionLink { .. } => Some("joint.motion_link"),
             crate::dialogs_assembly::Asm::Coupling(f) => Some(f.command),
             crate::dialogs_assembly::Asm::Cam(_) => Some("joint.cam"),
@@ -1270,6 +1272,10 @@ fn degrees(text: &str) -> Option<f64> {
 }
 
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
+    if matches!(d.kind, Kind::ScanAlign(_)) {
+        crate::dialogs_scan_align::fields(ui, app, d);
+        return false;
+    }
     let mut enter = false;
     let through_point = offset_through_point(d).is_some();
     if crate::dialogs_move::several_destinations(d) {
@@ -1368,9 +1374,19 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 enter |= expr_row(ui, "Distance", offset);
             }
         }
-        Kind::AnglePlane { angle, direction_only } => {
+        Kind::AnglePlane { angle, direction_only, through_axis } => {
             enter |= expr_row(ui, "Angle", angle);
-            ui_kit::options(ui, "plane_angle_options", &mut [("Use axis direction only", direction_only)]);
+            let was = (*through_axis, *direction_only);
+            // One column: both labels are long and would be cut short side by side.
+            ui_kit::section(ui, "plane_angle_options", "Options", true, |ui| {
+                ui_kit::checkbox_grid(ui, &mut [("Through the axis", through_axis), ("Use axis direction only", direction_only)], 1)
+            });
+            // The two exclude each other (#6180): the one just turned on wins.
+            if *through_axis && !was.0 {
+                *direction_only = false;
+            } else if *direction_only && !was.1 {
+                *through_axis = false;
+            }
             const PIVOT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS;
             set_object_accepting(&mut d.inputs, &mut d.active, "Pivot", PIVOT, *direction_only);
         }
@@ -1416,10 +1432,19 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 form_row(ui, "Triangle count", |ui| enter |= field(ui, count));
             }
         }
+        Kind::MeshSectionStack { from, to, spacing, extrude } => {
+            form_row(ui, "Spacing", |ui| enter |= field(ui, spacing));
+            form_row(ui, "From", |ui| enter |= field(ui, from));
+            form_row(ui, "To", |ui| enter |= field(ui, to));
+            ui_kit::options(ui, "section_stack_options", &mut [("Extrude slabs", extrude)]);
+        }
         Kind::Construct { t: Some(t), .. } => {
             form_row(ui, "Position (0 to 1)", |ui| enter |= field(ui, t));
         }
         Kind::ReplaceFace | Kind::Remove | Kind::Midplane | Kind::ChatContext | Kind::PluginPick { .. } | Kind::Construct { t: None, .. } => {}
+        Kind::DeleteFaces { heal } => {
+            ui_kit::options(ui, "delete_face_options", &mut [("ui.delete_face_heal", heal)]);
+        }
         Kind::Rib { thickness, depth, flip, normal, extend, .. } => {
             form_row(ui, "Direction", |ui| {
                 let mut i = usize::from(*normal);
@@ -1624,7 +1649,8 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             }
         }
         Kind::Primitive { cmd, fields, operation, at, .. } => {
-            let from_sketch = *cmd == "solid.coil" && d.inputs.first().is_some_and(|i| i.accept & selection::PROFILES != 0 && !i.items.is_empty());
+            let from_sketch =
+                *cmd == "solid.coil" && d.inputs.first().is_some_and(|i| i.items.iter().any(|item| matches!(item, Sel::Profile { .. })));
             if matches!(*cmd, "solid.cylinder" | "solid.sphere") {
                 round_size_row(ui, fields);
             }
@@ -1650,7 +1676,11 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             }
             if *cmd == "solid.coil" {
                 let picked_axis = d.inputs.get(1).is_some_and(|input| !input.items.is_empty());
-                enter |= coil_rows(ui, &mut d.extra, at.and_then(|(_, normal)| normal), picked_axis, unresolved_axis, from_sketch);
+                let placed_axis = d.inputs.first().and_then(|input| input.items.first()).and_then(|sel| match sel {
+                    Sel::Plane { name } => crate::dialogs::plane_by_name(&app.session, name).map(|plane| plane.normal()),
+                    _ => None,
+                });
+                enter |= coil_rows(ui, &mut d.extra, placed_axis.or(at.and_then(|(_, normal)| normal)), picked_axis, unresolved_axis, from_sketch);
             }
             if at.is_none() {
                 enter |= crate::primitive_placement::rows(ui, &app.session, cmd, &mut d.extra);

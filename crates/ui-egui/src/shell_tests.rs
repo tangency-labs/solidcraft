@@ -1067,7 +1067,34 @@ fn universal_host_scenarios_drive_real_shared_actions_and_leave_the_fixture_disa
         for (index, step) in steps.as_array().unwrap().iter().enumerate() {
             let action_before =
                 (step["params"]["command"] == "panel.action").then(|| crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap());
-            h.step(step).unwrap_or_else(|reason| panic!("{name}: step {index}: {reason}"));
+            // The shared-actions scenario moves specimen-0 through all four zones. Its
+            // action labels are shared by other panels: select the actual fixture controls
+            // by instance rather than the first accessible widget with the same label.
+            use crate::panel_runtime::{HostControlTarget, HostPointerTarget, HostSharedAction};
+            use solidcraft_engine::panels::{InstanceId, Zone};
+            let instance = InstanceId::new("specimen-0").unwrap();
+            let widget = step["widget"].as_str();
+            let zone = match widget {
+                Some("Floating") => Some(Zone::Floating),
+                Some("Right") => Some(Zone::Right),
+                Some("Bottom") => Some(Zone::Bottom),
+                Some("Left") => Some(Zone::Left),
+                _ => None,
+            };
+            if name == "shared actions" && widget == Some("Panel actions") {
+                panel_host_semantic_click(&mut h, HostControlTarget::Pointer(HostPointerTarget::Menu { instance }));
+            } else if name == "shared actions"
+                && let Some(zone) = zone
+            {
+                panel_host_semantic_click(&mut h, HostControlTarget::Shared { instance: instance.clone(), action: HostSharedAction::Move(zone) });
+                assert_eq!(
+                    h.app.panel_runtime().unwrap().layout().layout().containing(&instance).unwrap().location.zone(),
+                    zone,
+                    "{name}: step {index}: the move must land the fixture in the selected zone"
+                );
+            } else {
+                h.step(step).unwrap_or_else(|reason| panic!("{name}: step {index}: {reason}"));
+            }
             if let Some(action_before) = action_before {
                 let after = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
                 let applies = |value: &serde_json::Value| {

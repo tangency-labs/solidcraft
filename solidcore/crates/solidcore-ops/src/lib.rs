@@ -104,6 +104,7 @@ pub mod provenance;
 pub mod query;
 pub mod record_check;
 pub mod round_face;
+pub mod scan_align;
 pub mod section_corners;
 pub mod session;
 pub mod shaft_spline;
@@ -232,7 +233,7 @@ pub fn reduce_mesh(
     corner_normals: Option<&[[f64; 3]]>,
     target_triangles: usize,
 ) -> Result<ReducedMesh> {
-    solidcore::mesh_reduce::reduce_mesh_with_cancel(
+    solidcore::mesh_reduce::reduce_mesh_normalized_outward_with_cancel(
         positions,
         indices,
         corner_normals,

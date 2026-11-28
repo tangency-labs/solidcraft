@@ -11,12 +11,12 @@ use std::io::Read as _;
 
 use serde_json::Value;
 use solidcore::topology::vertex::corner;
-use solidcore_ops::boolean::{boolean, imprint, union_all, union_copies};
+use solidcore_ops::boolean::{boolean, imprint, union_all, union_all_with, union_copies};
 use solidcore_ops::prism::extrude_planar_regions;
 use solidcore_ops::sweep::{extrude, join_arcs, revolve, zone_tolerance, Curve, DraftCorner, Join};
 use solidcore_ops::{
-    blend, make_box, make_cone, make_sphere, session, Blend, Body, BooleanOp, CheckLevel, Corners,
-    Error, PointClass,
+    blend, make_box, make_cone, make_sphere, session, Blend, Body, BooleanOp, CheckLevel, Contract,
+    Corners, Error, PointClass,
 };
 use solidcore_record::brep::{Brep as Record, Surface};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
@@ -888,6 +888,57 @@ fn two_large_cylinders_touching_along_a_line_union() {
                 .unwrap()
                 .is_none(),
             "{k}"
+        );
+    }
+}
+
+/// Two equal holes of radius 0.9 crossing at right angles in a 25 x 20.9 x 4.5 block, one
+/// along z, the other along y with its axis `d` off the first's along x
+/// (tangency-labs/solidcraft#18475). At d = 0 the walls cross in two ellipses; for nonzero d
+/// they cross in one loop. For negative `d`, its crossings of the y cylinder's +x seam are
+/// 2√(2 · 0.9 |d| − d²) apart, and the seam cuts the loop into two arcs with the same two
+/// ends whose midpoints are 2√(2 · 0.9 |d| − d²) apart on the first hole's far side. The second
+/// cut was refused for d = −1e-5 and −2e-5, where those two arcs were taken for one edge. Each
+/// cut is one valid solid of the block less both holes plus what they share, 16/3 · 0.9³ (the
+/// miss changes that by under 3e-5).
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's operand geometry, not ops computing it
+fn a_hole_whose_axis_misses_an_equal_crossing_holes_by_a_hair_cuts() {
+    all_fixes();
+    let r = 0.9;
+    let want = 25.0 * 20.9 * 4.5 - PI * r * r * (4.5 + 20.9) + 16.0 / 3.0 * r * r * r;
+    for d in [0.0, -1e-7, -1e-6, -5e-6, -1e-5, -2e-5, 1e-5, -1e-4, 1e-3] {
+        let block = make_box([0.0, -10.45, 0.0], [25.0, 20.9, 4.5]).unwrap();
+        let along_z = solidcore_ops::make_cylinder([12.5, 0.0, -1.0], r, 6.5).unwrap();
+        let first = boolean(block, along_z, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        let rim = [Curve::Arc {
+            center: [12.5 + d, -11.45, 2.25],
+            axis: [0.0, 1.0, 0.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: r,
+            start: 0.0,
+            end: TAU,
+        }];
+        let along_y = extrude(
+            &rim,
+            [0.0, 1.0, 0.0],
+            22.9,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap();
+        let cut = boolean(first, along_y, BooleanOp::Subtract);
+        let cut = cut.unwrap_or_else(|e| panic!("{d}: {e:?}")).unwrap();
+        let report = cut.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "{d}: {}", report.text);
+        assert_eq!(cut.solid_count().unwrap(), 1, "{d}");
+        assert!(
+            near(volume(&cut), want),
+            "{d}: {}, closed form {want}",
+            volume(&cut)
         );
     }
 }
@@ -5102,6 +5153,83 @@ fn curved_pockets_touching_along_a_vertical_spline_edge_cut_after_round_trip() {
     assert!(near(got, want), "volume {got} vs closed form {want}");
 }
 
+#[test]
+fn union_all_mixed_touching_and_apart_preserves_volume_solids_and_validity() {
+    let mut bodies = vec![
+        make_box([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap(),
+        make_box([5.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap(),
+    ];
+    for i in 0..20_u32 {
+        let x = 50.0 + f64::from(i) * 20.0;
+        bodies.push(make_box([x, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap());
+    }
+    let u = union_all_with(bodies, Contract::Proved).unwrap();
+    let report = u.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(u.solid_count().unwrap(), 21);
+    assert_eq!(u.counts().unwrap(), [126, 252, 168]);
+    let want = 1500.0 + 20.0 * 1000.0;
+    let got = volume(&u);
+    assert!(near(got, want), "volume {got} vs {want}");
+}
+
+#[test]
+fn union_all_shuffled_chain_and_hub_spokes_preserve_volume_and_validity() {
+    // Shuffled overlapping box chain
+    let n = 16_u32;
+    let order: [u32; 16] = [0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15];
+    let chain: Vec<Body> = order
+        .iter()
+        .map(|&i| make_box([f64::from(i) * 5.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap())
+        .collect();
+    let u = union_all_with(chain, Contract::Proved).unwrap();
+    let report = u.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(u.solid_count().unwrap(), 1);
+    assert_eq!(u.counts().unwrap(), [6, 12, 8]);
+    let want = (10.0 + f64::from(n - 1) * 5.0) * 100.0;
+    assert!(near(volume(&u), want), "chain {} vs {want}", volume(&u));
+
+    // Hub (plate) + 16 mutually disjoint spokes (bosses)
+    let mut hub_spokes = vec![make_box([0.0, 0.0, 0.0], [100.0, 100.0, 5.0]).unwrap()];
+    for r in 0..4_u32 {
+        for c in 0..4_u32 {
+            hub_spokes.push(
+                make_box(
+                    [10.0 + f64::from(c) * 20.0, 10.0 + f64::from(r) * 20.0, 5.0],
+                    [6.0, 6.0, 8.0],
+                )
+                .unwrap(),
+            );
+        }
+    }
+    let u = union_all_with(hub_spokes, Contract::Proved).unwrap();
+    let report = u.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(u.solid_count().unwrap(), 1);
+    assert_eq!(u.counts().unwrap(), [86, 204, 136]);
+    let want = 100.0 * 100.0 * 5.0 + 16.0 * (6.0 * 6.0 * 8.0);
+    assert!(near(volume(&u), want), "hub {} vs {want}", volume(&u));
+
+    // Nested cube inside a hollow box's cavity: overlapping AABBs must NOT take disjoint path.
+    let outer = make_box([0.0, 0.0, 0.0], [20.0, 20.0, 20.0]).unwrap();
+    let cavity = make_box([5.0, 5.0, 5.0], [10.0, 10.0, 10.0]).unwrap();
+    let hollow = boolean(outer, cavity, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let inner = make_box([7.0, 7.0, 7.0], [6.0, 6.0, 6.0]).unwrap();
+    let nested = union_all_with(vec![hollow, inner], Contract::Proved).unwrap();
+    let report = nested.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(nested.counts().unwrap(), [18, 36, 24]);
+    let want = (8000.0 - 1000.0) + 216.0;
+    assert!(
+        near(volume(&nested), want),
+        "nested {} vs {want}",
+        volume(&nested)
+    );
+}
+
 /// acid-10's near miss: a 50 mm block, joined (or not) by a Ø20 cylinder along x lying 2e-5
 /// deep in its top face, then joined by an r 15 ball centred 14.99998 from its +x face, so
 /// that the ball dips 2e-5 into it, twice the zone tolerance. They meet in a circle of radius
@@ -5167,6 +5295,55 @@ fn a_ball_dipped_twice_the_tolerance_into_a_block_face_joins_it() {
                 "cylinder {with_cylinder}: {p:?}"
             );
         }
+    }
+}
+
+/// The same ball on the block SolidCraft's Box builds: a 50 mm square swept 50 along +z, its
+/// four sides lines, rather than `make_box`'s block (solidcraft#20878, a 0.50 nightly built
+/// before the parting step above). The ball, r 15 centred at x = 64.99998, dips d = 2e-5 into
+/// the +x face, twice the zone tolerance, so the union is one solid: the block and the ball
+/// less the cap the ball dips in, 125000 + 4500 π − π d² (3R − d) / 3 = 139137.166941.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn a_ball_dipped_twice_the_tolerance_into_a_swept_block_face_joins_it() {
+    all_fixes();
+    let (d, rb): (f64, f64) = (2e-5, 15.0);
+    let corners = [
+        [0.0, 0.0, 0.0],
+        [50.0, 0.0, 0.0],
+        [50.0, 50.0, 0.0],
+        [0.0, 50.0, 0.0],
+    ];
+    let square: Vec<Curve> = (0..4)
+        .map(|i| Curve::Line {
+            start: corners[i],
+            end: corners[(i + 1) % 4],
+        })
+        .collect();
+    let block = extrude(
+        &square,
+        [0.0, 0.0, 1.0],
+        50.0,
+        0.0,
+        DraftCorner::default(),
+        true,
+    )
+    .unwrap();
+    let ball = make_sphere([64.999_98, 25.0, 25.0], rb).unwrap();
+    let u = boolean(block, ball, BooleanOp::Union).unwrap().unwrap();
+    let report = u.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(u.solid_count().unwrap(), 1);
+    assert!(u.is_manifold_solid().unwrap());
+    let want = 125_000.0 + 4.0 / 3.0 * PI * rb.powi(3) - PI * d * d * (3.0 * rb - d) / 3.0;
+    assert!(near(volume(&u), want), "{} vs {want}", volume(&u));
+    // In the ball beyond the block face, at its middle and where the ball dips in.
+    for p in [
+        [79.0, 25.0, 25.0],
+        [50.000_005, 25.0, 25.0],
+        [49.999_99, 25.0, 25.0],
+    ] {
+        assert_eq!(u.classify_point(p).unwrap(), PointClass::Inside, "{p:?}");
     }
 }
 
@@ -5505,6 +5682,48 @@ fn a_fitted_loft_insert_with_a_knife_on_the_floor_gets_through_imprint_and_relat
             );
         }
     }
+}
+
+#[test]
+fn make_other_faces_handles_many_disjoint_touching_and_nested_solids() {
+    all_fixes();
+    // Primary: 12 apart unit cubes plus one small cube inside what will become a cavity of `other`.
+    let mut primary_parts = Vec::new();
+    for i in 0..12 {
+        primary_parts.push(make_box([f64::from(i) * 3.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap());
+    }
+    // Small primary cube centered at (100, 5, 5) — will lie strictly inside `other`'s outer hollow box.
+    primary_parts.push(make_box([99.5, 4.5, 4.5], [1.0, 1.0, 1.0]).unwrap());
+    let primary = union_all(primary_parts).unwrap();
+
+    // Other: 12 apart unit cubes (disjoint from primary), 4 boxes overlapping primary cubes 0..4,
+    // and a hollow box [95..105, 0..10, 0..10] with cavity [97..103, 2..8, 2..8] enclosing primary's
+    // small cube at (100, 5, 5).
+    let mut other_parts = Vec::new();
+    for i in 0..12 {
+        other_parts.push(make_box([f64::from(i) * 3.0, 5.0, 0.0], [1.0, 1.0, 1.0]).unwrap());
+    }
+    for i in 0..4 {
+        other_parts.push(make_box([f64::from(i) * 3.0 + 0.5, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap());
+    }
+    let outer = make_box([95.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
+    let inner = make_box([97.0, 2.0, 2.0], [6.0, 6.0, 6.0]).unwrap();
+    let hollow = boolean(outer, inner, BooleanOp::Subtract).unwrap().unwrap();
+    other_parts.push(hollow);
+    let other = union_all(other_parts).unwrap();
+
+    let joined = boolean(primary, other, BooleanOp::Union).unwrap().unwrap();
+    let report = joined.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    // Expected volume:
+    // - 8 untouched primary cubes: 8.0
+    // - 4 overlapped pairs (each 1.5 x 1 x 1): 6.0
+    // - 12 disjoint other cubes: 12.0
+    // - hollow shell (10^3 - 6^3 = 784) + enclosed small primary cube (1.0): 785.0
+    let expected = 8.0 + 6.0 + 12.0 + 784.0 + 1.0;
+    let got = volume(&joined);
+    assert!(near(got, expected), "got {got}, expected {expected}");
+    assert_eq!(joined.solid_count().unwrap(), 8 + 4 + 12 + 2);
 }
 
 /// Build a closed faceted UV sphere (`nlat` bands × `2*nlat` longitudes, so `2*nlat^2` planar

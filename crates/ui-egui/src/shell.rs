@@ -146,11 +146,16 @@ pub(crate) fn workspace_content(app: &SolveApp, content: Rect) -> Rect {
     content
 }
 
-/// Keep bottom readouts above the current shared-host bottom panels.
+/// Keep bottom readouts above the current shared-host bottom panels and the status bar.
 pub(crate) fn bottom_readout_rect(app: &SolveApp, mut viewport: Rect) -> Rect {
     use solidcraft_engine::panels::Zone;
-    let Some(frame) = app.universal_panel_frame() else { return viewport };
     let gap = Tokens::get().space_8;
+    // The status bar is window chrome along the bottom edge, so a readout pinned to the view's
+    // bottom ends up behind it (#22911); it ends above the bar like above a bottom panel.
+    if let Some(bar) = app.shell.status_bar.filter(|_| crate::status_bar::shown(app)) {
+        viewport.max.y = within(bar.top() - gap, viewport.top(), viewport.bottom());
+    }
+    let Some(frame) = app.universal_panel_frame() else { return viewport };
     for section in &frame.layout.sections {
         let bounds = crate::panel_runtime::egui_rect(section.outer);
         let is_bottom_history = section.zone == Zone::Floating && section.instance.0 == "history" && bounds.center().y >= viewport.center().y;
