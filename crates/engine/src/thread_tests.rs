@@ -2439,3 +2439,15 @@ fn a_thread_goes_on_a_body_of_its_own_component() {
     let on: Vec<String> = s.model.state().threads.iter().map(|t| t.body.clone()).collect();
     assert_eq!(on, [body_of(&s, "Stud B")]);
 }
+
+/// Issue #20445: A modelled internal M83x3 thread in an 80 mm hole failed in the boolean
+/// with "no radial edge use classifies the face's edge use". 80 mm is the standard tap drill
+/// for M83x3 (83 - 3 = 80 mm).
+#[test]
+fn modelled_m83x3_thread_in_standard_80mm_tap_drill_hole_builds() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 60, "height": 40, "base": [0, 0, 0]}));
+    run(&mut s, "solid.cylinder", json!({"radius": 40, "height": 40, "base": [0, 0, 0], "operation": "cut"}));
+    let res = s.execute("solid.thread", &json!({"face": [40, 0, 20], "designation": "M83x3", "modeled": true, "ease_out": "standard"}));
+    assert!(res.is_ok(), "M83x3 in 80mm hole failed: {:?}", res.err());
+}
