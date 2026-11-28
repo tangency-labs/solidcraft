@@ -983,7 +983,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             look2,
             distance2,
         );
-        dragged2 = *distance2 != before;
+        dragged2 = *distance2 != before || ui.ctx().is_being_dragged(egui::Id::unique("sc_manipulator2"));
     }
     if let Some(tip) = tip2 {
         handles.push(arrow_grab(bs, tip));
@@ -1335,9 +1335,11 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             }
         }
     }
+    // Drag ownership also matters within a snap interval, where the text stays identical.
+    let dragged1 = two_distances && ui.ctx().is_being_dragged(arrow_id);
     // A primary drag may have replaced a previously active Distance 2. Select the primary
     // text now, rather than focusing the old secondary text until the following frame.
-    if two_distances && *value != before {
+    if two_distances && (dragged1 || *value != before) {
         on_second = false;
         second = None;
         label = "Distance 1";
@@ -1367,7 +1369,8 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     let shows_all = names_all && *value == before;
     // Distance 2's arrow changed its value before the canvas copy was taken. Either arrow
     // must give this field the keyboard, or the previously focused form row takes it back.
-    let changed = dragged2
+    let changed = dragged1
+        || dragged2
         || *value != before
         || match (&second, &second_before) {
             (Some(now), Some(was)) => now != was,
@@ -1385,7 +1388,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     value_box_noted(ui, label, shown, box_at, select_all, hint, note.as_deref(), BoxPlace { dialog: None, ..place });
     // The box's distance, or the arrow's, is the one being edited now.
     let box_has_keyboard = ui.ctx().memory(|m| m.has_focus(egui::Id::unique("sc_canvas_value")));
-    let editing_now = if two_distances && *value != before {
+    let editing_now = if two_distances && (dragged1 || *value != before) {
         Some(0)
     } else if two_distances && box_has_keyboard {
         Some(usize::from(on_second))
