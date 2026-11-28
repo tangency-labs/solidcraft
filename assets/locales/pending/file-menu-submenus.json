@@ -1,0 +1,34 @@
+{
+  "en": {
+    "ui.file_menu.export": "Export",
+    "ui.file_menu.insert": "Insert"
+  },
+  "en-GB": {
+    "ui.file_menu.export": "Export",
+    "ui.file_menu.insert": "Insert"
+  },
+  "de": {
+    "ui.file_menu.export": "Exportieren",
+    "ui.file_menu.insert": "Einfügen"
+  },
+  "ar": {
+    "ui.file_menu.export": "تصدير",
+    "ui.file_menu.insert": "إدراج"
+  },
+  "he": {
+    "ui.file_menu.export": "ייצוא",
+    "ui.file_menu.insert": "הוספה"
+  },
+  "ja": {
+    "ui.file_menu.export": "エクスポート",
+    "ui.file_menu.insert": "挿入"
+  },
+  "vi": {
+    "ui.file_menu.export": "Xuất",
+    "ui.file_menu.insert": "Chèn"
+  },
+  "zh": {
+    "ui.file_menu.export": "导出",
+    "ui.file_menu.insert": "插入"
+  }
+}
