@@ -1549,7 +1549,17 @@ fn seam_stations<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     let (s0, s1) = if up { (lo, hi) } else { (hi, lo) };
     for (id, s, slot) in [(id_first, s0, 0), (id_last, s1, n - 1)] {
         let p = v.intersector().point(id)?.clone();
-        let guesses = [p.uv_pos(SrfIndex::First), p.uv_pos(SrfIndex::Second)];
+        let mut guesses = [p.uv_pos(SrfIndex::First), p.uv_pos(SrfIndex::Second)];
+        // the given point's uv tangents run along increasing s; the trace along it up the
+        // edge, against it down
+        let along = if up { 1.0 } else { -1.0 };
+        let arriving = slot != 0;
+        for (srf, guess) in [SrfIndex::First, SrfIndex::Second]
+            .into_iter()
+            .zip(guesses.iter_mut())
+        {
+            *guess = seam_side(v, k, srf, *guess, p.uv_deriv(srf) * along, arriving)?;
+        }
         let mut q = v.station_point(k, s, guesses)?.ok_or_else(|| {
             SolidError::blend_solver(OP_DLI, SolverFailure::StationNotSolved { s })
         })?;
@@ -1561,6 +1571,58 @@ fn seam_stations<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         }
     }
     Ok(())
+}
+
+/// A seam station's foot `uv` on trace surface `srf` on the side of the surface's own seam
+/// its trace comes from: where the surface closes on itself in a parameter (its base's, an
+/// offset surface closing where its base does) and the foot is on the seam (either end of
+/// the base's natural range there), the end the foot's motion `tangent` (along the trace)
+/// leaves from at the first station and arrives at at the last (`arriving`). Elsewhere `uv`
+/// as it is. The one foot of a closed edge's seam lies on both ends of a closed support's
+/// range, and the trace round the period must start on one and end on the other, or the
+/// last span's middle is solved on the support continued past the first end.
+///
+/// # Errors
+///
+/// Those of the surface's domain and closure.
+fn seam_side<'s, V: IntersectorVirtuals<'s> + ?Sized>(
+    v: &V,
+    k: &Kernel,
+    srf: SrfIndex,
+    uv: Point2,
+    tangent: Point2,
+    arriving: bool,
+) -> Result<Point2> {
+    use crate::nurbs::b_spline_surface::SurfParamType;
+    let mut own = v.intersector().surface(srf);
+    while let SurfaceKind::OffsetSurface(o) = own.kind() {
+        own = o.base_surface();
+    }
+    let dom = own.natural_uv_domain_with_nurb(k)?;
+    let mut out = uv;
+    for (param, lo, hi, t) in [
+        (SurfParamType::U, dom.min().x, dom.max().x, tangent.x),
+        (SurfParamType::V, dom.min().y, dom.max().y, tangent.y),
+    ] {
+        let x = if param == SurfParamType::U {
+            out.x
+        } else {
+            out.y
+        };
+        let room = 1e-9 * (hi - lo).abs();
+        let on_seam = (x - lo).abs() <= room || (x - hi).abs() <= room;
+        if !on_seam || t == 0.0 || !own.is_closed(k, &dom, param, None, false)?.0 {
+            continue;
+        }
+        // departing up the range: from its low end; arriving up it: at its high end
+        let end = if (t > 0.0) == arriving { hi } else { lo };
+        if param == SurfParamType::U {
+            out.x = end;
+        } else {
+            out.y = end;
+        }
+    }
+    Ok(out)
 }
 
 /// The stations of the extension from the end station `end`, outwards (`outward` `1` after

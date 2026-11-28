@@ -1520,6 +1520,18 @@ mod tests {
     /// a wall of radius `r` about the z axis over `wall_z` (v = 0 to 1), from -90 to 180
     /// degrees (u = 1/3 + s/3 on the middle quarter, [`quarter`]'s s).
     fn plate_and_wall(w: f64, plate_z: f64, r: f64, wall_z: [f64; 2]) -> [Surface; 2] {
+        plate_and_wall_turning(w, plate_z, r, wall_z, false)
+    }
+
+    /// [`plate_and_wall`], the wall three quarters of a turn from -90 degrees, or the whole
+    /// turn from -90 degrees (`whole`: closed in u, its seam at -90 degrees).
+    fn plate_and_wall_turning(
+        w: f64,
+        plate_z: f64,
+        r: f64,
+        wall_z: [f64; 2],
+        whole: bool,
+    ) -> [Surface; 2] {
         let plate = Surface::from(
             BSplineSurface::create_canonical(&CanonicalSurfaceData {
                 u_degree: 1,
@@ -1551,9 +1563,12 @@ mod tests {
             (0.0, r),
             (-r, r),
             (-r, 0.0),
+            (-r, -r),
+            (0.0, -r),
         ]
         .into_iter()
-        .zip([1.0, h, 1.0, h, 1.0, h, 1.0])
+        .zip([1.0, h, 1.0, h, 1.0, h, 1.0, h, 1.0])
+        .take(if whole { 9 } else { 7 })
         {
             for z in wall_z {
                 cps.push(Point3::new(p.0, p.1, z));
@@ -1566,9 +1581,17 @@ mod tests {
                 v_degree: 1,
                 control_points: &cps,
                 form: BSplineSurfaceForm::Unspecified,
-                u_multiplicities: &[3, 2, 2, 3],
+                u_multiplicities: if whole {
+                    &[3, 2, 2, 2, 3]
+                } else {
+                    &[3, 2, 2, 3]
+                },
                 v_multiplicities: &[2, 2],
-                u_knots: &[0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0],
+                u_knots: if whole {
+                    &[0.0, 0.25, 0.5, 0.75, 1.0]
+                } else {
+                    &[0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0]
+                },
                 v_knots: &[0.0, 1.0],
                 knot_type: KnotType::Unspecified,
                 weights: Some(&ws),
@@ -1882,7 +1905,18 @@ mod tests {
     /// [`rim`] on the edge `edge` (an arc of the rim's circle), the solver's 3D tolerance
     /// `tol`.
     fn rim_on(k: &Kernel, d: [f64; 2], edge: BSplineCurve, tol: f64) -> SetbackFs {
-        let [plate, wall] = plate_and_wall(RIM_W, RIM_Z, RIM_R, [0.0, RIM_Z]);
+        rim_on_wall(k, d, edge, tol, false)
+    }
+
+    /// [`rim_on`], on the whole turn's wall where `whole`.
+    fn rim_on_wall(
+        k: &Kernel,
+        d: [f64; 2],
+        edge: BSplineCurve,
+        tol: f64,
+        whole: bool,
+    ) -> SetbackFs {
+        let [plate, wall] = plate_and_wall_turning(RIM_W, RIM_Z, RIM_R, [0.0, RIM_Z], whole);
         let mut curve_based = CurveBasedFs::new(tol, 0.1, 0.01);
         curve_based.original = Some(Curve::from(edge));
         let np = plate
@@ -2340,8 +2374,13 @@ mod tests {
     }
 
     fn half_rim_on(d: [f64; 2], edge: BSplineCurve) -> HalfRim {
+        rim_trace_on(d, edge, false)
+    }
+
+    /// [`half_rim_on`], on the whole turn's wall where `whole`.
+    fn rim_trace_on(d: [f64; 2], edge: BSplineCurve, whole: bool) -> HalfRim {
         let k = Kernel::default();
-        let mut fs = rim_on(&k, d, edge, TRACE_TOL);
+        let mut fs = rim_on_wall(&k, d, edge, TRACE_TOL, whole);
         let mut pseudo = FilletBrep::new();
         let rails = [
             add_rail(&k, &mut pseudo, 0.0),
@@ -2981,5 +3020,91 @@ mod tests {
             Some(&IntersectFailure::PointOutsideDomain { surface: 0 }),
             "{err:?}"
         );
+    }
+
+    /// The rim's whole circle as the edge (from -90 degrees, the wall's seam), counterclockwise
+    /// or, `reversed`, clockwise: a closed leader, its one vertex at the seam.
+    fn whole_rim(d: [f64; 2], reversed: bool) -> (HalfRim, BSplineCurve) {
+        let mut edge = arc(RIM_R, RIM_Z, -90.0, 4);
+        if reversed {
+            let ivl = edge.natural_interval();
+            edge.reverse_parameterization(&ivl).unwrap();
+        }
+        (rim_trace_on(d, edge.copy(), true), edge)
+    }
+
+    /// The station of `h` at s, from guesses at the closed-form feet (its angle on `h`'s own
+    /// edge), not yet processed.
+    fn given_on(h: &mut HalfRim, edge: &BSplineCurve, s: f64, d: [f64; 2]) -> TsectPnt {
+        let feet = feet_at_angle(angle_at(edge, s), d);
+        let guesses = [plate_uv(feet[0]), whole_wall_uv(h, feet[1])];
+        let mut p =
+            h.fs.station_point(&h.k, s, guesses, &h.domains)
+                .unwrap()
+                .expect("a station");
+        p.curve_parameter = -1.0;
+        p
+    }
+
+    /// The whole wall's parameters of a point on it (u a quarter per 90 degrees from -90).
+    fn whole_wall_uv(h: &HalfRim, p: Point3) -> Point2 {
+        let wall = h.fs.curve_based.solver.rail(1).unwrap();
+        let a = (p.y.atan2(p.x).to_degrees() + 90.0).rem_euclid(360.0) / 360.0;
+        offset_local_point_solve(&h.k, wall, &h.domains[1], p, Point2::new(a, 0.9))
+            .unwrap()
+            .expect("on the wall")
+            .0
+    }
+
+    /// A closed leader (#13710): the rim's whole circle as the edge, both given points at its
+    /// seam (-90 degrees, where the solver finds s = 0 for both). The stations run one period,
+    /// s from 0 up to 1 (the edge's own direction, no point between to say otherwise), each
+    /// at the closed-form feet, the last given point re-solved at s = 1 on the same feet.
+    #[test]
+    fn a_closed_leader_s_seam_points_take_the_two_ends_of_its_interval() {
+        let d = [1.0, 0.5];
+        let (mut h, edge) = whole_rim(d, false);
+        let seam = given_on(&mut h, &edge, 0.0, d);
+        let t = trace(
+            &mut h,
+            &[seam.clone(), seam.clone()],
+            &StationTraceOptions::default(),
+        );
+        t.result.unwrap();
+        assert_stations(&t.flushed, d, true);
+        assert_eq!(t.flushed.first().unwrap().user_doubles[0], 0.0);
+        assert_eq!(t.flushed.last().unwrap().user_doubles[0], 1.0);
+        let [first, last] = [&t.given[0], &t.given[1]];
+        assert_eq!(first.user_doubles[0], 0.0);
+        assert_eq!(last.user_doubles[0], 1.0);
+        for rail in 0..2 {
+            let moved = first.surface_pv[rail][0][0].distance(last.surface_pv[rail][0][0]);
+            assert!(moved < 1e-9, "rail {rail}: the seam's feet {moved} apart");
+        }
+        assert_flushed(&h, d);
+    }
+
+    /// The same closed rim with the edge running clockwise (reversed: s = 0 and 1 still at the
+    /// seam, s growing clockwise), traced the other way: given points at the seam, then at s =
+    /// 0.75 and 0.25 (down the edge), then at the seam again. The first seam point takes s = 1,
+    /// the last s = 0, and the stations run down, each at the closed-form feet.
+    #[test]
+    fn a_reversed_closed_leader_traced_down_its_edge_runs_from_1_to_0() {
+        let d = [1.0, 0.5];
+        let (mut h, edge) = whole_rim(d, true);
+        let given = [
+            given_on(&mut h, &edge, 0.0, d),
+            given_on(&mut h, &edge, 0.75, d),
+            given_on(&mut h, &edge, 0.25, d),
+            given_on(&mut h, &edge, 0.0, d),
+        ];
+        let t = trace(&mut h, &given, &StationTraceOptions::default());
+        t.result.unwrap();
+        assert_stations(&t.flushed, d, false);
+        assert_eq!(t.flushed.first().unwrap().user_doubles[0], 1.0);
+        assert_eq!(t.flushed.last().unwrap().user_doubles[0], 0.0);
+        assert_eq!(t.given[0].user_doubles[0], 1.0);
+        assert_eq!(t.given[3].user_doubles[0], 0.0);
+        assert_flushed(&h, d);
     }
 }

@@ -1104,6 +1104,47 @@ struct Crossing<'a> {
     seam: Option<Seam>,
 }
 
+/// How [`first_crossing`] reads a foot `foot` against the edge's projection `edge_proj`: a
+/// along the edge (the face's parameter whose partial at the projection's middle has the
+/// larger component along the edge's tangent at the span's middle), and the sign `sb_dir` b
+/// runs in from the projection's middle to the foot's (the boxes' midpoints). The first-
+/// crossing proof and the choice of the projection's side (`prove_setback_feet`) both read it
+/// here, so they cannot disagree.
+struct FootSide {
+    a_is_u: bool,
+    sb_dir: f64,
+    partials: Partials<f64>,
+}
+
+/// [`FootSide`] of `foot` and `edge_proj` over the span `at`; `None` where the edge has no
+/// derivatives there or the two midpoints do not tell a side.
+fn foot_side(
+    face: &Nurbs,
+    edge: &NurbsCurve,
+    at: Span,
+    foot: &FootTube,
+    edge_proj: &FootTube,
+) -> Result<Option<FootSide>> {
+    let pm = [edge_proj.uv_box[0].mid(), edge_proj.uv_box[1].mid()];
+    let fm = [foot.uv_box[0].mid(), foot.uv_box[1].mid()];
+    let Some([_, c1m, _]) = edge_at(edge, at.m)? else {
+        return Ok(None);
+    };
+    let p = face_at(face, pm, 1);
+    let (uc, vc) = (dot3(f64_v(p.at(1, 0)), c1m), dot3(f64_v(p.at(0, 1)), c1m));
+    let a_is_u = uc.abs() >= vc.abs();
+    let ib = usize::from(a_is_u);
+    let (pbm, fbm) = (
+        pm.get(ib).copied().unwrap_or(f64::NAN),
+        fm.get(ib).copied().unwrap_or(f64::NAN),
+    );
+    Ok(sign_of(Ivl::from(fbm - pbm)).map(|sb_dir| FootSide {
+        a_is_u,
+        sb_dir,
+        partials: p,
+    }))
+}
+
 /// The first-crossing proof (module docs) for the foot `foot` at the setback `d` (an
 /// interval: the chord's d over its span) on `face`, from the edge's projection `edge_proj`
 /// on the same face, the face on the side of `into` (a vector from the edge into it).
@@ -1152,15 +1193,16 @@ pub fn first_crossing(
     if !near {
         return not;
     }
-    // the axes: a along the edge (the larger |S_a . C'| at the projection's middle)
-    let pm = [edge_proj.uv_box[0].mid(), edge_proj.uv_box[1].mid()];
-    let fm = [foot.uv_box[0].mid(), foot.uv_box[1].mid()];
-    let Some([_, c1m, _]) = edge_at(edge, at.m)? else {
+    // the axes: a along the edge (the larger |S_a . C'| at the projection's middle), and
+    // the side b runs toward the foot (`foot_side`)
+    let Some(FootSide {
+        a_is_u,
+        sb_dir,
+        partials: p,
+    }) = foot_side(face, edge, at, foot, edge_proj)?
+    else {
         return not;
     };
-    let p = face_at(face, pm, 1);
-    let (uc, vc) = (dot3(f64_v(p.at(1, 0)), c1m), dot3(f64_v(p.at(0, 1)), c1m));
-    let a_is_u = uc.abs() >= vc.abs();
     // b's lengths in a's units, for K's margin in a
     let (nu, nv) = (
         dot3(f64_v(p.at(1, 0)), f64_v(p.at(1, 0))).sqrt(),
@@ -1171,14 +1213,6 @@ pub fn first_crossing(
         return not;
     }
     let ib = usize::from(a_is_u);
-    // the side: b runs from the projection toward the foot
-    let (pbm, fbm) = (
-        pm.get(ib).copied().unwrap_or(f64::NAN),
-        fm.get(ib).copied().unwrap_or(f64::NAN),
-    );
-    let Some(sb_dir) = sign_of(Ivl::from(fbm - pbm)) else {
-        return not;
-    };
     // past the projection's knot line or domain end, the face-side piece continued across b
     // (`Continued`). A projection continued along a, the edge, is its tube's root only: the
     // cells read the face's own pieces along a (`support_partials`, `knot_cuts` over a), and
@@ -1834,17 +1868,12 @@ pub fn prove_setback_feet(
             let eta = 1e-9 * (kb - ka).abs().max(f64::MIN_POSITIVE);
             let meets = |x: f64| (x - kb).abs() <= 1e3 * eta || (x - ka).abs() <= 1e3 * eta;
             // along a, the side of the line the projection meets at a span's end (the piece it
-            // comes from, continued); across b, as it lies or else the foot's piece continued
-            // past the line, away from the foot: `first_crossing` reads the continued piece on
-            // the far side from the foot, so the piece on the far side, continued toward the
-            // foot, is never proved and trying it would hide the foot's (a rim on an inner
-            // knot line of its face, a hemisphere's on the ball's equator)
-            let b_of = |x: [f64; 2]| x.get(ib).copied().unwrap_or(f64::NAN);
-            let toward_foot = if b_of(x_m) > 0.5 * (b_of(p_lo) + b_of(p_hi)) {
-                1
-            } else {
-                -1
-            };
+            // comes from, continued); across b, as it lies or else a piece continued past the
+            // line away from the foot: `first_crossing` reads the continued piece on the far
+            // side from the foot, so a projection continued from the far side toward the foot
+            // is never proved, and taking it would hide the foot's side (a rim on an inner
+            // knot line of its face, a hemisphere's on the ball's equator). Which side the
+            // foot is on is `foot_side`'s, as `first_crossing` reads it
             let a_side = [a_of(p_lo), a_of(p_hi)]
                 .into_iter()
                 .find(|&x| meets(x))
@@ -1856,7 +1885,7 @@ pub fn prove_setback_feet(
                     }
                 });
             let mut proj = None;
-            for b_side in [0, toward_foot] {
+            for b_side in [0, 1, -1] {
                 let mut try_sides = [0, 0];
                 if let Some(x) = try_sides.get_mut(ia) {
                     *x = a_side;
@@ -1864,8 +1893,18 @@ pub fn prove_setback_feet(
                 if let Some(x) = try_sides.get_mut(ib) {
                     *x = b_side;
                 }
-                proj = enclose_projection(k, face, &edge, at, x_m, try_sides)?;
-                if proj.is_some() {
+                let Some(p) = enclose_projection(k, face, &edge, at, x_m, try_sides)? else {
+                    continue;
+                };
+                // continued across b, only from the foot's side: the side first_crossing reads
+                // (b continued from the piece above the line, +1, where the foot is above)
+                let fits = b_side == 0
+                    || foot_side(face, &edge, at, &foot, &p)?.is_some_and(|f| {
+                        p.sides.get(usize::from(f.a_is_u)).copied() == Some(b_side)
+                            && (f.sb_dir > 0.0) == (b_side > 0)
+                    });
+                if fits {
+                    proj = Some(p);
                     break;
                 }
             }

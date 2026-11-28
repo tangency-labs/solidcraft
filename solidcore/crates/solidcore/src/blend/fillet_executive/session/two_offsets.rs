@@ -1293,19 +1293,35 @@ mod tests {
         /// `whole`: the whole ball (`create_partial_sphere` over the whole turn) instead, its
         /// rim one closed edge (#13710, a closed leader), the expectation turned the whole
         /// turn (2π): twice the half's.
-        fn ball_rim_chamfered_by_setbacks_1_and_1(r: f64, z0: f64, full: f64, whole: bool) {
+        ///
+        /// `cap`: the part z >= `z0` kept instead, the cap of height c: kept π c² (3 r - c) / 3
+        /// (halved for the half model), the sphere foot a chord 1 up the meridian, at
+        /// a0 + φ; the rim runs the other way round its faces.
+        fn ball_rim_chamfered_by_setbacks_1_and_1(
+            r: f64,
+            z0: f64,
+            full: f64,
+            whole: bool,
+            cap: bool,
+        ) {
             let r0 = (r * r - z0 * z0).sqrt();
             let a0 = z0.atan2(r0);
             let phi = 2.0 * (0.5 / r).asin();
-            let a1 = a0 - phi;
+            let a1 = if cap { a0 + phi } else { a0 - phi };
             let (p, e, s) = ([r0 - 1.0, z0], [r0, z0], [r * a1.cos(), r * a1.sin()]);
             let tri = 0.5 * ((e[0] - p[0]) * (s[1] - p[1]) - (s[0] - p[0]) * (e[1] - p[1])).abs();
             let tri_r = (p[0] + e[0] + s[0]) / 3.0;
             let seg = 0.5 * r * r * (phi - phi.sin());
             let seg_r = 4.0 * r * (0.5 * phi).sin().powi(3) / (3.0 * (phi - phi.sin()))
                 * (0.5 * (a0 + a1)).cos();
-            let cap = r - z0;
-            let kept = 0.5 * (4.0 / 3.0 * PI * r.powi(3) - PI * cap * cap * (3.0 * r - cap) / 3.0);
+            let c = r - z0;
+            let cap_volume = PI * c * c * (3.0 * r - c) / 3.0;
+            let kept = 0.5
+                * if cap {
+                    cap_volume
+                } else {
+                    4.0 / 3.0 * PI * r.powi(3) - cap_volume
+                };
             let removed = PI * (tri * tri_r + seg * seg_r);
             let half = kept - removed;
             assert!(
@@ -1323,16 +1339,21 @@ mod tests {
                 if whole { 360.0 } else { 180.0 },
             )
             .unwrap();
-            let below = crate::primitive::api_primitives::create_box(
+            let (z_from, height) = if cap {
+                (z0, 2.0 * r - z0)
+            } else {
+                (-2.0 * r, z0 + 2.0 * r)
+            };
+            let kept_box = crate::primitive::api_primitives::create_box(
                 &mut k,
-                Point3::new(-2.0 * r, -2.0 * r, -2.0 * r),
+                Point3::new(-2.0 * r, -2.0 * r, z_from),
                 4.0 * r,
                 4.0 * r,
-                z0 + 2.0 * r,
+                height,
             )
             .unwrap();
             let mut b =
-                crate::boolean::api_brep::boolean_intersection(&mut k, ball, below).unwrap();
+                crate::boolean::api_brep::boolean_intersection(&mut k, ball, kept_box).unwrap();
             assert!(closed(&b));
             let rim: Vec<EdgeId> = crate::topology::brep::p1::edges(&b, None)
                 .unwrap()
@@ -1343,16 +1364,18 @@ mod tests {
                         .all(|q| (q.z - z0).abs() < 1e-9 && (whole || q.y > 1e-6))
                 })
                 .collect();
-            assert_eq!(rim.len(), 1, "{rim:?}");
+            // (one edge, or the cap's two: its face's boundary split where the box cut it)
+            assert!(!rim.is_empty() && (cap || rim.len() == 1), "{rim:?}");
             let top = face_holding(&k, &b, |bx| {
                 (bx.min().z - z0).abs() < 1e-9 && (bx.max().z - z0).abs() < 1e-9
             });
             assert_eq!(top.len(), 1);
-            chamfer_setbacks(&mut k, &mut b, &rim, &[[1.0, 1.0]], &top).unwrap();
+            let along = vec![top[0]; rim.len()];
+            chamfer_setbacks(&mut k, &mut b, &rim, &vec![[1.0, 1.0]; rim.len()], &along).unwrap();
             assert!(closed(&b));
             let faces = setback_faces(&k, &b);
-            assert_eq!(faces.len(), 1, "one chamfer of setbacks");
-            let bound = faces[0].1;
+            assert_eq!(faces.len(), rim.len(), "a chamfer of setbacks per edge");
+            let bound = faces.iter().map(|f| f.1).fold(0.0, f64::max);
             // the chamfer's area: the chord PS turned about the axis at its midpoint's radius
             // (Pappus)
             let chord = ((s[0] - p[0]).powi(2) + (s[1] - p[1]).powi(2)).sqrt();
@@ -1370,7 +1393,7 @@ mod tests {
         /// whole turn's 3510.1200237.
         #[test]
         fn a_ball_cut_at_5_rim_chamfered_by_setbacks_is_its_pappus_volume() {
-            ball_rim_chamfered_by_setbacks_1_and_1(10.0, 5.0, 3_510.120_023_7, false);
+            ball_rim_chamfered_by_setbacks_1_and_1(10.0, 5.0, 3_510.120_023_7, false, false);
         }
 
         /// Half a ball of radius 10 (y >= 0) cut at z = 0, the part below kept: a hemisphere on
@@ -1390,7 +1413,7 @@ mod tests {
         /// the line, not on the piece beyond it (which refused it as `SectionNotProved`).
         #[test]
         fn a_hemisphere_rim_on_the_ball_s_knot_line_chamfered_by_setbacks_is_its_pappus_volume() {
-            ball_rim_chamfered_by_setbacks_1_and_1(10.0, 0.0, 2_063.593_708_594_2, false);
+            ball_rim_chamfered_by_setbacks_1_and_1(10.0, 0.0, 2_063.593_708_594_2, false, false);
         }
 
         /// The whole hemisphere of radius 10 on its flat, its rim one closed edge (a closed
@@ -1400,7 +1423,7 @@ mod tests {
         /// (#20253's 2063.5937).
         #[test]
         fn a_whole_hemisphere_rim_chamfered_by_setbacks_is_its_pappus_volume() {
-            ball_rim_chamfered_by_setbacks_1_and_1(10.0, 0.0, 2_063.593_708_594_2, true);
+            ball_rim_chamfered_by_setbacks_1_and_1(10.0, 0.0, 2_063.593_708_594_2, true, false);
         }
 
         /// The whole ball of radius 10 cut at z = 5, the part below kept, its rim (radius
@@ -1411,7 +1434,19 @@ mod tests {
         /// 24.1717115566; 3510.1200237319 (#20253's 3510.1200).
         #[test]
         fn a_whole_ball_cut_at_5_rim_chamfered_by_setbacks_is_its_pappus_volume() {
-            ball_rim_chamfered_by_setbacks_1_and_1(10.0, 5.0, 3_510.120_023_7, true);
+            ball_rim_chamfered_by_setbacks_1_and_1(10.0, 5.0, 3_510.120_023_7, true, false);
+        }
+
+        /// The cap of a ball of radius 10 above z = 5 (height 5, 60 degrees at the rim), its
+        /// rim (two edges, joined at smooth vertices) running the other way round its faces,
+        /// chamfered by setbacks 1 and 1. By Pappus over the whole turn: the cap holds π 25
+        /// (30 - 5) / 3 = 654.4984694979; the region between the chord from P = (7.6602540,
+        /// 5) to the sphere foot a chord 1 up the meridian, S = (8.1175782, 5.8399422), the
+        /// flat and the arc removes 21.9351767885 (as the integral of π (a² - b²), a and b the
+        /// sphere's and the chord's radii, over z from 5 to S's); 632.5632927094.
+        #[test]
+        fn a_whole_cap_above_its_rim_chamfered_by_setbacks_is_its_pappus_volume() {
+            ball_rim_chamfered_by_setbacks_1_and_1(10.0, 5.0, 632.563_292_709_4, true, true);
         }
 
         /// A foot crossing a smooth seam mid-edge: a slab, the profile x in [0, 40], y in [-5, 30]
