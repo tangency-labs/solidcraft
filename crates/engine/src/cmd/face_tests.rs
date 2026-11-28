@@ -983,6 +983,34 @@ fn extruding_a_curved_face_points_to_offset_face() {
     assert_eq!(s.doc.features.len(), features);
 }
 
+/// An M12 modeled thread's 27 thread faces move in 0.05 (#15715): the body builds as a valid
+/// solid (the offset's own check passes) and loses `distance x area` of the moved faces, to
+/// first order. The land is 0.4375 wide at this pitch and a move of 0.05 shrinks it by 0.115,
+/// so the move is no size limit. The second-order part is the move's curvature term, about
+/// `distance / radius` of the first, under 1% on the 4.9 root; 5% bounds it.
+#[test]
+fn a_modeled_threads_faces_offset_in_a_little_lose_their_area_times_the_distance() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":6,"height":20,"base":[0,0,0],"axis":"Z","body_name":"Bolt"}));
+    run(&mut s, "solid.thread", json!({"face":[6,0,10],"designation":"M12","modeled":true}));
+    let before = body_volume(&mut s, "Bolt");
+    let (names, area) = {
+        let state = s.model.state();
+        let body = state.body("Bolt").unwrap();
+        let all = solidcraft_doc::naming::face_names(body);
+        let moved: Vec<usize> = (0..all.len()).filter(|&i| !all[i].starts_with("F1:")).collect();
+        let area: f64 = moved.iter().map(|&i| body.body.face_area(i).unwrap().unwrap()).sum();
+        (moved.iter().map(|&i| all[i].clone()).collect::<Vec<_>>(), area)
+    };
+    assert_eq!(names.len(), 27);
+    let distance = 0.05;
+    run(&mut s, "solid.offset_face", json!({"body":"Bolt","faces":names,"distance":-distance}));
+    let lost = before - body_volume(&mut s, "Bolt");
+    let want = distance * area;
+    eprintln!("volume {before} lost {lost}, moved area {area} x {distance} = {want}");
+    assert!((lost - want).abs() <= 0.05 * want, "lost {lost}, the faces' area {area} times {distance} is {want}");
+}
+
 /// #22804: moving the flat annular face of a half-torus outward across the torus's tube seam
 /// succeeds at the exact cut volume; inward continues to succeed; moving past the minor radius
 /// is refused cleanly.
