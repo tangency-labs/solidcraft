@@ -399,6 +399,32 @@ fn empty_forms_draw_checking_and_worker_failure_status() {
     }
 }
 
+/// #23388: an entry's dialog leaves out the plugin's name, version and description, which say what
+/// the plugin does rather than this form; an entry whose schema has a description shows that.
+#[test]
+fn entry_dialogs_show_the_entrys_purpose_not_the_plugins_about_line() {
+    let mut h = crate::scenario::Harness::new();
+    let mut setup = entry("job-setup", "edit", json!([]));
+    setup.input_schema = json!({"type":"object","description":"Set the stock size and the zero point.","properties":{}});
+    let mut toolpath = entry("toolpath", "edit", json!([]));
+    toolpath.input_schema = json!({"type":"object","properties":{}});
+    let mut carve = listed("carve", vec![setup, toolpath]);
+    carve.description = "Cut your designs on a CNC router.".into();
+    h.app.plugin_menu.listed = vec![carve];
+    h.app.plugin_menu.loaded = true;
+    for (index, purpose) in [(0, Some("Set the stock size and the zero point.")), (1, None)] {
+        h.app.plugin_menu.dialogs.clear();
+        open_entry(&mut h.app, 0, index);
+        let mut dialog = h.app.plugin_menu.dialogs.pop().unwrap();
+        let output = form_frame(&h.ctx, |ui| {
+            let _ = body(&h.app, ui, &mut dialog, None, &mut None, &mut None);
+        });
+        let texts: Vec<String> = crate::test_support::text_shapes(&output).map(|t| t.galley.text().to_owned()).collect();
+        assert!(!texts.iter().any(|t| t.contains("0.1.0") || t.contains("CNC router") || t.contains("carve plugin")), "{texts:?}");
+        assert_eq!(purpose.is_some_and(|p| texts.iter().any(|t| t == p)), purpose.is_some(), "{texts:?}");
+    }
+}
+
 #[test]
 fn invalid_prefilled_values_and_conditional_choices_are_not_replaced_on_draw() {
     let mut h = crate::scenario::Harness::new();
