@@ -16,7 +16,7 @@ use super::{extrusion, invalid, native, TriMesh, MAX_BOUNDARY, MAX_TRIANGLES};
 const MAX_ATTEMPTS: usize = 24;
 const MAX_DEPTH: usize = 8;
 const MAX_COMPONENTS: usize = 32;
-const MAX_FACES: usize = 256;
+pub(super) const MAX_FACES: usize = 256;
 
 /// Start bounded shoulder decomposition with one shared cut budget and original-mesh circle hints.
 pub(super) fn reconstruct(k: &mut Kernel, mesh: &TriMesh, tolerance: f64) -> Result<Option<Brep>> {

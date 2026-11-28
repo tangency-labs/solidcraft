@@ -9,7 +9,8 @@
 //! whole on a cap or within the tolerance of a wall of one of them (the chord certificate of
 //! [`super::curves`]), and its volume is the source's within the tolerance times the source's
 //! area. The solid built is the first extrusion less the holes of the others' sections, which
-//! holds their intersection.
+//! holds their intersection. A kernel error while building or measuring it keeps the source's
+//! facets, which the step only replaces ([`Refused::Failed`]).
 //!
 //! Deviations: no upstream counterpart. No recursion.
 
@@ -18,30 +19,58 @@ use std::f64::consts::{FRAC_PI_2, TAU};
 use crate::kernel::Kernel;
 use crate::math::{det, Vec3};
 use crate::prism::profile::{Loop2, Region2, Seg2};
-use crate::{Brep, Result};
+use crate::{Brep, Result, SolidError};
 
 use super::curves::certified;
 use super::geometry::{distance_to_segment, MeshPlane};
-use super::{invalid, native, parts, prism, Prism, Sides, TriMesh};
+use super::parts::{self, MAX_FACES};
+use super::{invalid, native, prism, Prism, Sides, TriMesh, MAX_WALL_WORK};
 
-/// Point and triangle tests against section segments, the same work bound as the wall check of
-/// [`super::extrusion`].
-const MAX_WORK: usize = 32_000_000;
-/// Faces of the intersection, the shoulder decomposition's bound.
-const MAX_FACES: usize = 256;
+/// Why [`reconstruct`] keeps the source's facets.
+#[derive(Debug)]
+pub(super) enum Refused {
+    /// The source is not the boundary of such an intersection, or it exceeds a work bound.
+    NotAnIntersection,
+    /// The kernel failed reading, building or measuring the intersection: a defect of the kernel,
+    /// not of the source, which keeps its facets as it would without this step (such as the
+    /// B-rep Boolean failure the seam note in [`candidate`] avoids). The error names the defect;
+    /// only the tests read it.
+    Failed(#[cfg_attr(not(test), allow(dead_code))] SolidError),
+}
 
 /// Intersect the extrusions of every axis with matching caps, at least two, when the source is
-/// the boundary of that intersection and has its volume; `None` when a certificate fails.
-pub(super) fn reconstruct(k: &mut Kernel, mesh: &TriMesh, tolerance: f64) -> Result<Option<Brep>> {
+/// the boundary of that intersection and has its volume. Cancellation is the only error.
+pub(super) fn reconstruct(
+    k: &mut Kernel,
+    mesh: &TriMesh,
+    tolerance: f64,
+) -> Result<std::result::Result<Brep, Refused>> {
+    refusal(candidate(k, mesh, tolerance))
+}
+
+/// The answer of [`reconstruct`] from the candidate's: a stop the caller asked for (cancellation,
+/// spent fuel) stays an error, any other error is [`Refused::Failed`].
+pub(super) fn refusal(
+    candidate: Result<Option<Brep>>,
+) -> Result<std::result::Result<Brep, Refused>> {
+    match candidate {
+        Ok(Some(body)) => Ok(Ok(body)),
+        Ok(None) => Ok(Err(Refused::NotAnIntersection)),
+        Err(error) if error.is_cancelled() => Err(error),
+        Err(error) => Ok(Err(Refused::Failed(error))),
+    }
+}
+
+/// The certified intersection; `None` when a certificate fails.
+fn candidate(k: &mut Kernel, mesh: &TriMesh, tolerance: f64) -> Result<Option<Brep>> {
     let size = mesh.size();
-    let epsilon = (size.max(1.) * 1e-7).min(tolerance * 0.01).max(1e-9);
     let mut prisms: Vec<Prism> = Vec::new();
     for (axis, _) in parts::axes(mesh) {
         k.check_cancelled("reconstruct mesh")?;
         // A normal within the source's rounding of an axis already taken is that axis.
         if prisms
             .iter()
-            .any(|p| size * p.plane.normal().cross(axis).length() <= epsilon * 3.)
+            .any(|p| size * p.axis.cross(axis).length() <= p.epsilon * 3.)
         {
             continue;
         }
@@ -49,16 +78,16 @@ pub(super) fn reconstruct(k: &mut Kernel, mesh: &TriMesh, tolerance: f64) -> Res
             prisms.push(found);
         }
     }
-    if prisms.len() < 2 {
+    let Some(epsilon) = prisms.get(1).map(|p| p.epsilon) else {
         return Ok(None);
-    }
+    };
     let segments: usize = prisms
         .iter()
         .flat_map(|p| &p.loops)
         .map(|lp| lp.segs.len())
         .sum();
     let samples = mesh.positions.len() + mesh.triangles.len();
-    if samples.saturating_mul(segments) > MAX_WORK {
+    if samples.saturating_mul(segments) > MAX_WALL_WORK {
         return Ok(None);
     }
     k.check_cancelled("reconstruct mesh")?;
@@ -84,12 +113,12 @@ pub(super) fn reconstruct(k: &mut Kernel, mesh: &TriMesh, tolerance: f64) -> Res
         let corners = [a, b, c];
         let on_first = prisms
             .first()
-            .is_some_and(|first| bounds(first, corners, tolerance, epsilon, Bound::Whole));
+            .is_some_and(|first| bounds(first, corners, tolerance, Bound::Whole));
         if !on_first
             && !prisms
                 .iter()
                 .skip(1)
-                .any(|prism| bounds(prism, corners, tolerance, epsilon, Bound::Holes))
+                .any(|prism| bounds(prism, corners, tolerance, Bound::Holes))
         {
             return Ok(None);
         }
@@ -104,7 +133,7 @@ pub(super) fn reconstruct(k: &mut Kernel, mesh: &TriMesh, tolerance: f64) -> Res
     };
     let mut body = first.body;
     for prism in prisms {
-        let normal = prism.plane.normal();
+        let normal = prism.axis;
         let Some(start) = MeshPlane::from_normal(normal * (prism.lo - size), normal) else {
             return Ok(None);
         };
@@ -112,8 +141,11 @@ pub(super) fn reconstruct(k: &mut Kernel, mesh: &TriMesh, tolerance: f64) -> Res
             // A fitted circle starts on its frame's x direction, which is horizontal for every
             // horizontal axis: the seams of two bores at one height then lie in one plane and
             // meet where the bores cross, and the Boolean fails when rounding moves them apart
-            // (NoRadialEdgeUse at a 1e-7 miss). A tool's seam starts a quarter turn on, on the
-            // frame's y direction, which is up for a horizontal axis.
+            // (NoRadialEdgeUse at a 1e-7 miss, for the f32 X and Y bores of the tests). A way
+            // round that Boolean defect, not a certificate: a tool's seam starts a quarter turn
+            // on, on the frame's y direction, which is up for a horizontal axis. Where it still
+            // meets a seam (the X and Z bores of the tests, through one point of their curve)
+            // the Boolean builds; where one fails, [`Refused::Failed`] keeps the facets.
             let mut outer = hole.reversed();
             for seg in &mut outer.segs {
                 if let Seg2::Arc { start, sweep, .. } = seg {
@@ -154,7 +186,7 @@ pub(super) fn reconstruct(k: &mut Kernel, mesh: &TriMesh, tolerance: f64) -> Res
 
 /// Whether the point is inside the extrusion or within `tolerance` of its boundary.
 fn inside(prism: &Prism, p: Vec3, tolerance: f64) -> bool {
-    let h = p.dot(prism.plane.normal());
+    let h = p.dot(prism.axis);
     if !(prism.lo - tolerance..=prism.hi + tolerance).contains(&h) {
         return false;
     }
@@ -185,16 +217,15 @@ enum Bound {
     Holes,
 }
 
-/// Whether the triangle is one of the extrusion's cap triangles (within `epsilon` of a cap's
+/// Whether the triangle is one of the extrusion's cap triangles (within its rounding of a cap's
 /// plane, as [`prism`] reads them) or lies whole within `tolerance` of one of its walls, for
 /// the part of the boundary `bound` allows.
-fn bounds(prism: &Prism, corners: [Vec3; 3], tolerance: f64, epsilon: f64, bound: Bound) -> bool {
-    let normal = prism.plane.normal();
-    let heights = corners.map(|p| p.dot(normal));
+fn bounds(prism: &Prism, corners: [Vec3; 3], tolerance: f64, bound: Bound) -> bool {
+    let heights = corners.map(|p| p.dot(prism.axis));
     if bound == Bound::Whole
         && [prism.lo, prism.hi]
             .iter()
-            .any(|level| heights.iter().all(|h| (h - level).abs() <= epsilon))
+            .any(|level| heights.iter().all(|h| (h - level).abs() <= prism.epsilon))
     {
         return true;
     }

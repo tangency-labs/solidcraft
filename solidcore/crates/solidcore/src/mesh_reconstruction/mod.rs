@@ -78,6 +78,8 @@ const MAX_BOUNDARY: usize = 8192;
 /// so the loop count (not the segment count) bounds its cost: 50 loops (an
 /// outline with 49 holes) is at most 1225 pairs and 2450 booleans.
 const MAX_LOOPS: usize = 50;
+/// Point and segment tests of a source against a fitted section, for the wall checks.
+const MAX_WALL_WORK: usize = 32_000_000;
 
 /// A malformed mesh or a reconstruction that fails a certificate.
 fn invalid(message: &'static str) -> SolidError {
@@ -179,7 +181,7 @@ pub fn reconstruct(
             kind: ReconstructionKind::Analytic,
         });
     }
-    if let Some(body) = crossed::reconstruct(k, &mesh, tolerance)? {
+    if let Ok(body) = crossed::reconstruct(k, &mesh, tolerance)? {
         return Ok(MeshReconstruction {
             body,
             kind: ReconstructionKind::Analytic,
@@ -399,6 +401,10 @@ enum Sides {
 /// The straight extrusion of a mesh's two matching end caps along an axis.
 struct Prism {
     body: Brep,
+    /// The unit extrusion direction, `plane`'s normal.
+    axis: Vec3,
+    /// The source's rounding: a point within it of a cap's plane is on the cap.
+    epsilon: f64,
     plane: MeshPlane,
     lo: f64,
     hi: f64,
@@ -413,8 +419,7 @@ fn extrusion(k: &mut Kernel, mesh: &TriMesh, axis: Vec3, tolerance: f64) -> Resu
     let Some(mut prism) = prism(k, mesh, axis, tolerance, Sides::Walls)? else {
         return Ok(None);
     };
-    let size = mesh.size();
-    let epsilon = (size.max(1.) * 1e-7).min(tolerance * 0.01).max(1e-9);
+    let (size, epsilon) = (mesh.size(), prism.epsilon);
     let height = prism.hi - prism.lo;
     let perimeter: f64 = prism
         .loops
@@ -618,7 +623,7 @@ fn prism(
                 .map(move |&b| (point(a), point(b)))
         })
         .collect();
-    if walls && mesh.positions.len().saturating_mul(boundary_segments.len()) > 32_000_000 {
+    if walls && mesh.positions.len().saturating_mul(boundary_segments.len()) > MAX_WALL_WORK {
         return Ok(None);
     }
     for p in mesh.positions.iter().filter(|_| walls) {
@@ -679,6 +684,8 @@ fn prism(
     }
     Ok(Some(Prism {
         body,
+        axis,
+        epsilon,
         plane,
         lo,
         hi,
