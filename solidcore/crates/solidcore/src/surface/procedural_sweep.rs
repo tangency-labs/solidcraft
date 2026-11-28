@@ -78,6 +78,7 @@ use crate::nurbs::srf_adv::p6::SweepTrace;
 use crate::surface::procedural_blend::{BlendRef, NetScope};
 
 pub mod path;
+pub mod record;
 
 pub use path::PathMotion;
 

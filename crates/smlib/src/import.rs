@@ -758,13 +758,27 @@ impl crate::Brep {
                 _ => None,
             })
             .collect();
-        if faces.is_empty() {
+        let sweeps: Vec<(usize, &solidcore_record::brep::sweep::SweepDefinition)> = record
+            .faces
+            .iter()
+            .enumerate()
+            .filter_map(|(i, f)| match &f.surface {
+                b::Surface::Sweep { definition } => Some((i, definition.as_ref())),
+                _ => None,
+            })
+            .collect();
+        if faces.is_empty() && sweeps.is_empty() {
             return Ok(self);
         }
         if crate::core::counts(self.core())?[0] != record.faces.len() {
             return Err(crate::Error::Record(Unsupported::Invalid("the body built has another number of faces than its record")));
         }
-        crate::core::definition::adopt(self.core(), &faces)?;
+        if !faces.is_empty() {
+            crate::core::definition::adopt(self.core(), &faces)?;
+        }
+        if !sweeps.is_empty() {
+            crate::core::definition::adopt_sweeps(self.core(), &sweeps)?;
+        }
         Ok(self)
     }
 

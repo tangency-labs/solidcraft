@@ -121,6 +121,7 @@ pub mod surface;
 pub mod surface_cvs;
 pub mod surface_intersection;
 pub mod sweep;
+pub mod sweep_definition;
 pub mod tangent;
 pub mod trim;
 pub mod tube_cope;

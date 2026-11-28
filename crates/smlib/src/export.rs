@@ -175,6 +175,18 @@ impl Brep {
             face.surface = b::Surface::Blend { definition: Box::new(definition) };
             face.nurbs = Some(net);
         }
+        // A screw-swept wall: its definition as its label, its net as its form.
+        let sweeps = crate::core::definition::sweeps(self.core()).map_err(ExportError::Smlib)?;
+        for (i, definition) in sweeps.into_iter().enumerate() {
+            let Some(definition) = definition else { continue };
+            let at = if order.faces.is_empty() { i } else { *order.faces.get(i).ok_or_else(|| invalid("a face the order does not place"))? };
+            let face = record.faces.get_mut(at).ok_or_else(|| invalid("a face the record does not have"))?;
+            if face.nurbs.is_some() || !matches!(face.surface, b::Surface::Spline { .. } | b::Surface::RationalSpline { .. }) {
+                continue;
+            }
+            let net = std::mem::replace(&mut face.surface, b::Surface::Sweep { definition: Box::new(definition) });
+            face.nurbs = Some(net);
+        }
         Ok(())
     }
 }
