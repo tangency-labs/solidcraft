@@ -981,66 +981,79 @@ impl<'a> BrepQuery<'a> {
                 opt_vectors: &vectors,
             },
         )?;
-        // the faces at each solution's point as `face_hits` finds them: those of the vertex,
-        // edge or face there at the zone tolerance (`entity_at`), else those of the
-        // solution's own vertex, edge or face
         let order = bp1::faces(b, None)?;
         let rank = |f: FaceId| order.iter().position(|&g| g == f).unwrap_or(usize::MAX);
         let all = solutions.as_slice();
-        let mut met: Vec<(f64, usize, FaceId, usize)> = Vec::new();
-        for (index, solution) in all.iter().enumerate() {
-            let distance = solution.start.solution_value;
-            let on_ray = ray.origin + ray.direction * distance;
-            let entity = match self.entity_at(k, b, on_ray, tolerance) {
-                Ok(Some(entity)) => Some(entity),
-                _ => solution
-                    .objects
-                    .first()
-                    .copied()
-                    .flatten()
-                    .and_then(|object| bp2::cache_entity(object).ok()),
-            };
-            let faces = match entity {
-                Some(EntityRef::Vertex(v)) => vertex::faces(b, v).unwrap_or_default(),
-                Some(EntityRef::Edge(e)) => edge::faces(b, e, None).unwrap_or_default(),
-                Some(EntityRef::Face(f)) => vec![f],
-                _ => Vec::new(),
-            };
-            for face in faces {
-                met.push((distance, rank(face), face, index));
+        // nearest first; the solutions at one distance are taken together, and those of a
+        // farther distance only when no nearer one gives a hit
+        let mut nearest_first: Vec<(f64, usize)> = all
+            .iter()
+            .enumerate()
+            .map(|(index, solution)| (solution.start.solution_value, index))
+            .collect();
+        nearest_first.sort_by(|p, q| p.0.total_cmp(&q.0));
+        for at_one_distance in nearest_first.chunk_by(|p, q| p.0.total_cmp(&q.0).is_eq()) {
+            // the faces at each solution's point as `face_hits` finds them: those of the
+            // vertex, edge or face there at the zone tolerance (`entity_at`, its errors
+            // returned as `face_hits` returns them), else those of the solution's own
+            // vertex, edge or face
+            let mut met: Vec<(usize, FaceId, f64, usize)> = Vec::new();
+            for &(distance, index) in at_one_distance {
+                let Some(solution) = all.get(index) else {
+                    continue;
+                };
+                let on_ray = ray.origin + ray.direction * distance;
+                let entity = match self.entity_at(k, b, on_ray, tolerance)? {
+                    Some(entity) => Some(entity),
+                    None => solution
+                        .objects
+                        .first()
+                        .copied()
+                        .flatten()
+                        .and_then(|object| bp2::cache_entity(object).ok()),
+                };
+                let faces = match entity {
+                    Some(EntityRef::Vertex(v)) => vertex::faces(b, v).unwrap_or_default(),
+                    Some(EntityRef::Edge(e)) => edge::faces(b, e, None).unwrap_or_default(),
+                    Some(EntityRef::Face(f)) => vec![f],
+                    _ => Vec::new(),
+                };
+                for face in faces {
+                    met.push((rank(face), face, distance, index));
+                }
             }
-        }
-        // nearest first, then in `GetFaces` order, as `face_hits` orders its hits
-        met.sort_by(|p, q| p.0.total_cmp(&q.0).then(p.1.cmp(&q.1)));
-        for (distance, _, face, index) in met {
-            let Some(solution) = all.get(index) else {
-                continue;
-            };
-            let surface = face::p2::surface(b, face)?.ok_or_else(|| {
-                SolidError::invalid_input(OP_FIRST_HIT, "a face without a surface")
-            })?;
-            // the solution's (u, v) when it is a solution on this face; else that of the
-            // surface's point nearest the ray's point there, and a face without one is
-            // passed over
-            let uv = match solution.objects.first().copied().flatten() {
-                Some(CacheObject::Face(f)) if f == face => {
-                    Point2::new(solution.start.param(0)?, solution.start.param(1)?)
-                }
-                _ => {
-                    let on_ray = ray.origin + ray.direction * distance;
-                    let nearest = surface_closest_point(k, surface, on_ray).ok();
-                    let Some(&uv) = nearest.as_ref().and_then(|n| n.uvs.first()) else {
-                        continue;
-                    };
-                    uv
-                }
-            };
-            return Ok(Some(FaceRayHit {
-                face,
-                uv,
-                point: surface.evaluate_point(k, uv)?,
-                distance: distance.max(0.0),
-            }));
+            // at one distance in `GetFaces` order, as `face_hits` orders its hits
+            met.sort_by_key(|hit| hit.0);
+            for (_, face, distance, index) in met {
+                let Some(solution) = all.get(index) else {
+                    continue;
+                };
+                let surface = face::p2::surface(b, face)?.ok_or_else(|| {
+                    SolidError::invalid_input(OP_FIRST_HIT, "a face without a surface")
+                })?;
+                // the solution's (u, v) when it is a solution on this face; else that of
+                // the surface's point nearest the ray's point there, and a face without
+                // one is passed over
+                let uv = match solution.objects.first().copied().flatten() {
+                    Some(CacheObject::Face(f)) if f == face => {
+                        Point2::new(solution.start.param(0)?, solution.start.param(1)?)
+                    }
+                    _ => {
+                        let on_ray = ray.origin + ray.direction * distance;
+                        let nearest = surface_closest_point(k, surface, on_ray).ok();
+                        let Some(&uv) = nearest.as_ref().and_then(|n| n.uvs.first()) else {
+                            continue;
+                        };
+                        uv
+                    }
+                };
+                return Ok(Some(FaceRayHit {
+                    face,
+                    uv,
+                    point: surface.evaluate_point(k, uv)?,
+                    distance: distance.max(0.0),
+                }));
+            }
         }
         Ok(None)
     }
@@ -2319,21 +2332,24 @@ mod tests {
     /// #21621 and the #22030 reviews: shallow rays through a cylinder's side. On the
     /// cylinder of radius r and height 4r about z, the ray through p = r(cos t, sin t, 0) +
     /// (0, 0, 2r) on its side along d = c r̂ + s t̂ + ẑ (r̂ and t̂ the radial and tangent
-    /// directions at p; c = -e from outside, e from inside), from p - rd. At p + kd its
+    /// directions at p; c = -e inward, e outward), from p - rd. At p + kd its
     /// squared distance from the axis is r^2 + 2rck + (c^2 + s^2)k^2, so it crosses the side
     /// at k = 0 and at k = -2rc / (c^2 + s^2). A hit is a point of the side within T (the
     /// zone tolerance plus the side's) of the ray, so its k is where that distance is within
     /// T of r: between the roots for r + T and not between those for r - T; both queries
     /// give the side first, at a k in that set's piece around the first crossing past the
     /// origin (k = -r), and `first_face_hit`'s point is the surface's at its (u, v), within
-    /// T of the ray. Unskewed from outside, the ray then leaves through the top at k = 2r,
-    /// within T. The rays, each from outside and from inside unless said: on radius 5,
-    /// e = 1e-4, 1e-3 and 2e-3, s = 0, +-0.003, +-0.01, +-0.05, at t = 0 (the seam), 45, 89,
-    /// 90, 180 and 270 degrees (90, 180 and 270 the joins of the side surface's spans),
-    /// the unskewed one at 270 degrees at e = 1e-4 from inside only; on radius 500, 5000
-    /// and 50000, e = 1e-5, s = 0.01, at 67.5 degrees, from outside only; on radius 50000,
-    /// e = 1e-3 and 1e-4, s = +-0.1, at 67.5, 80, 85 and 90; on radius 0.5, e = 1e-4,
-    /// s = +-0.01, at 89 and 90. Every ray that misses is listed.
+    /// T of the ray. The origin is outside the side for every inward ray, and inside it
+    /// for an outward one only where c^2 + s^2 < 2c (the unskewed ones among them).
+    /// Unskewed and inward, the ray then leaves through the top at k = 2r, within T. The
+    /// rays, each inward and outward unless said: on radius 5, e = 1e-4, 1e-3 and 2e-3,
+    /// s = 0, +-0.003, +-0.01, +-0.05, at t = 0 (the seam), 45, 89, 90, 180 and 270 degrees
+    /// (90, 180 and 270 the joins of the side surface's spans), the unskewed one at 270
+    /// degrees at e = 1e-4 outward only; on radius 500, 5000 and 50000, e = 1e-5,
+    /// s = 0.01, at 67.5 degrees, inward only; on radius 50000, e = 1e-3 and 1e-4,
+    /// s = +-0.1, at 67.5, 80, 85 and 90; on radius 0.5, e = 1e-4, s = +-0.01, at 89 and
+    /// 90. `first_face_hit`'s distance is its point's from the origin, within T. Every ray
+    /// that misses is listed.
     #[test]
     fn a_shallow_ray_meets_a_cylinder_side_at_its_seam_and_span_joins() {
         let mut k = Kernel::default();
@@ -2347,21 +2363,21 @@ mod tests {
             let (k1, k2) = (q / a, -rhs / q);
             Some((k1.min(k2), k1.max(k2)))
         };
-        // each ray's directions: `true` is from outside (c = -e)
-        let (both, outside, inside): (&[bool], &[bool], &[bool]) =
+        // each ray's directions: `true` is inward (c = -e)
+        let (both, inward_only, outward_only): (&[bool], &[bool], &[bool]) =
             (&[true, false], &[true], &[false]);
         let mut cases = Vec::new();
         for e in [1e-4, 1e-3, 2e-3] {
             for degrees in [0.0_f64, 45.0, 89.0, 90.0, 180.0, 270.0] {
                 for skew in [0.0, 0.003, -0.003, 0.01, -0.01, 0.05, -0.05] {
                     let unskewed_at_270 = e == 1e-4 && degrees == 270.0 && skew == 0.0;
-                    let inwards = if unskewed_at_270 { inside } else { both };
+                    let inwards = if unskewed_at_270 { outward_only } else { both };
                     cases.push((5.0, e, skew, degrees, inwards));
                 }
             }
         }
         for r in [500.0, 5000.0, 50000.0] {
-            cases.push((r, 1e-5, 0.01, 67.5, outside));
+            cases.push((r, 1e-5, 0.01, 67.5, inward_only));
         }
         for e in [1e-3, 1e-4] {
             for degrees in [67.5, 80.0, 85.0, 90.0] {
@@ -2463,6 +2479,7 @@ mod tests {
                     || !in_band(first_hit.distance)
                     || surface.evaluate_point(&k, first_hit.uv).unwrap() != first_hit.point
                     || off_ray > within
+                    || (w.length() - first_hit.distance).abs() > within
                 {
                     misses.push(format!(
                         "first_face_hit {at:?}: {first_hit:?}, k in [{lo}, {hi}]"
