@@ -2213,7 +2213,9 @@ pub(crate) fn curve_surface_gap_bound_within(
 /// Not upstream (#20373): [`plane_gap_bound`] of the curve data `cn` over `range` against the
 /// net of `surface`, for a plane or a B-spline surface (whose net is the surface, as
 /// [`NetSurface::of`] takes it) whose net agrees with the surface at its four corners. `None`
-/// for other kinds, a net that is not bilinear, and where [`plane_gap_bound`] gives none.
+/// for other kinds, a net that is not bilinear, and where [`plane_gap_bound`] gives none. A cone
+/// or cylinder takes [`cone_residual::cone_curve_gap_bound`] instead (its STEP domain for the
+/// box).
 ///
 /// It bounds the distance to the surface over its whole parameter box (the net's), not over
 /// the face's `uv_domain`. That is sound: it is the quantity [`curve_face_gap_bound_within`]
@@ -2232,6 +2234,10 @@ fn plane_face_gap_bound(
     range: [f64; 2],
 ) -> Result<Option<f64>> {
     use crate::surface::surface::SurfaceKind;
+    // (not upstream, tangency-labs/solidcraft#23213: a cone's or cylinder's in closed form)
+    if let SurfaceKind::Cone(cone) = surface.kind() {
+        return Ok(cone_residual::cone_curve_gap_bound(cone, cn, range));
+    }
     if !matches!(
         surface.kind(),
         SurfaceKind::Plane(_) | SurfaceKind::BSpline(_)
@@ -3619,6 +3625,20 @@ fn bisected_surface_gap_bound(
         let drop = ignored(surface.drop_point::<NoObject>(k, point, domain, &opts))?;
         Ok(drop.filter(|d| d.success).map(|d| d.result_uv))
     };
+    // (not upstream, tangency-labs/solidcraft#23213) a straight curve on a ruled net is bounded
+    // by one piece between its ends' nearest points first, as the plane bound is taken first
+    // ([`ruled_line_gap_bound`]): taken where it is within `enough`, else the bisection below
+    // (only where the caller asks whether it is within a finite `enough`, as for the plane bound)
+    if enough.is_finite() && line_on_ruled_net(k, surface, &cn, lo, hi)? {
+        if let (Some(a), Some(b)) = (drop_at(lo, None)?, drop_at(hi, None)?) {
+            if let Some(g) = ruled_line_gap_bound(k, surface, &cn, [lo, hi], [a, b])? {
+                if g <= enough && g <= over {
+                    pieces.set(pieces.get() + 1);
+                    return Ok(Some(g));
+                }
+            }
+        }
+    }
     // The first pieces' ends: equally spaced, and every kink of the curve, so no first piece
     // has a corner inside it ([`certified_gap`]); their nearest points are followed from the
     // middle out to each end, each drop started from its neighbour's ([`correspondence`]).
@@ -3743,6 +3763,117 @@ fn bisected_surface_gap_bound(
     } else {
         bound
     }))
+}
+
+/// Not upstream (tangency-labs/solidcraft#23213): whether `cn` over `[lo, hi]` is straight
+/// ([`straight_over`]: a line, of whatever degree its B-spline has) and `surface`'s net is of
+/// degree 1 in `u` or in `v`: a ruled net, each of whose iso lines in that direction is a
+/// straight segment (a plane's, a cylinder's or a cone's rulings, an extrusion's). There
+/// [`bisected_surface_gap_bound`] first takes the one piece between the curve's ends
+/// ([`ruled_line_gap_bound`]). Only whether that is tried depends on it, never the bound's
+/// soundness: `dist(C, S) <= |C - S(W)|` for any `W`.
+///
+/// For a line lying along a ruling, its ends' nearest points `(u, v0)` and `(u, v1)` are on
+/// that ruling and the straight map between them runs along it: `S(W)` is then the ruling
+/// itself (the net's points along a degree-1 direction are affine in its parameter where the
+/// two rows' weights agree), `g = C - S(W)` is linear where the line's parameter is (its
+/// control points evenly spaced, as a line's B-spline has them), its second derivative
+/// vanishes up to rounding, and the one piece is bounded by its ends. The bisection's start
+/// (thirty-two pieces, each end's nearest point dropped) costs thirty-three drops and as many
+/// piece bounds on an edge whose bound already holds from its two ends.
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+fn line_on_ruled_net(
+    k: &Kernel,
+    surface: &Surface,
+    cn: &NurbsCurve,
+    lo: f64,
+    hi: f64,
+) -> Result<bool> {
+    if !straight_over(cn, lo, hi) {
+        return Ok(false);
+    }
+    Ok(NetSurface::of(k, surface, &[])?.is_some_and(|s| s.net.p == 1 || s.net.q == 1))
+}
+
+/// Not upstream (tangency-labs/solidcraft#23213): the bound of the one piece `range` of the
+/// curve data `cn` against `surface`'s net, matched to it by the straight map between the
+/// nearest points `feet` of its ends ([`surface_piece`]: the larger end value plus the
+/// second-order term), with the net's own distance to the surface added
+/// ([`bisection_residual`]), rounded up: the bisection's bound of that piece, so proved as it
+/// is. For a straight curve along a ruling of a ruled net ([`line_on_ruled_net`]) the second
+/// term vanishes up to rounding and the bound is the ends'. `None` where the net or a piece
+/// enclosure is not had.
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+fn ruled_line_gap_bound(
+    k: &Kernel,
+    surface: &Surface,
+    cn: &NurbsCurve,
+    range: [f64; 2],
+    feet: [Point2; 2],
+) -> Result<Option<f64>> {
+    let [lo, hi] = range;
+    let Some(net) = NetSurface::of(k, surface, &feet)? else {
+        return Ok(None);
+    };
+    let piece = match surface_piece(cn, range, &net, feet, lo, hi) {
+        Ok(Some(p)) => p,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Ok(None) | Err(_) => return Ok(None),
+    };
+    let Some(to_surface) = bisection_residual(k, surface, &net, None)? else {
+        return Ok(None);
+    };
+    let bound = (Ivl::from(piece.ends) + Ivl::from(piece.with_slack) + Ivl::from(to_surface)).hi;
+    Ok(bound.is_finite().then_some(bound))
+}
+
+/// Not upstream (tangency-labs/solidcraft#23213): whether the control points of `cn` whose
+/// basis functions may not vanish in `[lo, hi]` have one weight and lie on the line through
+/// the first and the last of them, each within `1e-9` of that segment's length (the relative
+/// scale [`NetSurface::of`] probes to): the curve is then that line there. A choice of the
+/// bisection's first pieces only ([`line_on_ruled_net`]), so a rounding either way costs time,
+/// never the bound.
+fn straight_over(cn: &NurbsCurve, lo: f64, hi: f64) -> bool {
+    let mut points: Vec<[f64; 4]> = Vec::new();
+    for i in 0..cn.n {
+        let (Some(&a), Some(&b)) = (cn.u.get(i), cn.u.get(i + cn.p + 1)) else {
+            return false;
+        };
+        if !(a <= hi && b >= lo) {
+            continue;
+        }
+        let Some(s) = cn.pw.get(4 * i..4 * i + 4) else {
+            return false;
+        };
+        let (Some(&x), Some(&y), Some(&z), Some(&w)) = (s.first(), s.get(1), s.get(2), s.get(3))
+        else {
+            return false;
+        };
+        points.push([x, y, z, w]);
+    }
+    let (Some(&first), Some(&last)) = (points.first(), points.last()) else {
+        return false;
+    };
+    let w = first[3];
+    if !(w.is_finite() && w > 0.0) || points.iter().any(|q| q[3] != w) {
+        return false;
+    }
+    let at = |q: [f64; 4]| crate::math::Vec3::new(q[0] / w, q[1] / w, q[2] / w);
+    let (a, b) = (at(first), at(last));
+    let along = b - a;
+    let length = along.length();
+    if !(length.is_finite() && length > 0.0) {
+        return false;
+    }
+    points
+        .iter()
+        .all(|&q| (at(q) - a).cross(along).length() <= 1e-9 * length * length)
 }
 
 /// The correspondence `W` of `curve` over `[lo, hi]` on `surface` (module docs): a cubic

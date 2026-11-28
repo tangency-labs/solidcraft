@@ -299,6 +299,264 @@ struct Setup<'a> {
     loose: f64,
 }
 
+/// The rounding of the cone's STEP formula on the frame `[o, x, y, z]` (radius `r0`, tangent
+/// of the semi-angle `t`) at angles of size at most `big` degrees and heights of size at most
+/// `v`: `|S − E|`, rounded up ([`Setup::evaluation`], [`cone_curve_gap_bound`]).
+fn formula_rounding(frame: [&[Ivl; 3]; 4], r0: f64, t: f64, big: f64, v: f64) -> f64 {
+    let [o, x, y, z] = frame;
+    let g8 = Ivl::from(gamma(8.0));
+    let g3 = Ivl::from(gamma(3.0));
+    let (r0, t, v) = (Ivl::from(r0.abs()), Ivl::from(t.abs()), Ivl::from(v));
+    let radius = (r0 + t * v) * (Ivl::from(1.0) + g3);
+    let trig = Ivl::from(big) * pi() / Ivl::from(180.0) * Ivl::from(4.04 * U)
+        + Ivl::from(4.0 * U)
+        + Ivl::from(1.0e-300);
+    let mut sum = zero();
+    for k in 0..3 {
+        let get = |a: &[Ivl; 3]| Ivl::from(a.get(k).copied().unwrap_or_else(zero).mag());
+        let (ok, xy, zk) = (get(o), get(x) + get(y), get(z));
+        sum = sum
+            + g8 * (ok + radius * xy + v * zk)
+            + g3 * (r0 + t * v) * xy
+            + radius * trig * xy * (Ivl::from(1.0) + g8);
+    }
+    if sum.is_finite() {
+        sum.hi
+    } else {
+        f64::INFINITY
+    }
+}
+
+/// The most degree [`cone_curve_gap_bound`] takes a Bézier piece of.
+const CURVE_MAX_DEGREE: usize = 8;
+
+/// `n choose k`, exact for the degrees [`cone_curve_gap_bound`] takes.
+fn binomial(n: usize, k: usize) -> f64 {
+    (0..k).fold(1.0, |acc, i| acc * (n - i) as f64 / (i + 1) as f64)
+}
+
+/// The Bernstein coefficients (degree `2p`) of the product of two polynomials given by their
+/// Bernstein coefficients of degree `p` (Farouki and Rajan, "Algorithms for polynomials in
+/// Bernstein form", 1988): `(fg)_k = Σ_{i+j=k} C(p,i) C(p,j) / C(2p,k) f_i g_j`, enclosed.
+fn bernstein_product(f: &[Ivl], g: &[Ivl]) -> Vec<Ivl> {
+    let p = f.len().saturating_sub(1);
+    (0..=2 * p)
+        .map(|k| {
+            let mut sum = zero();
+            for (i, &fi) in f.iter().enumerate() {
+                let Some(j) = k.checked_sub(i) else { continue };
+                let Some(&gj) = g.get(j) else { continue };
+                let c = Ivl::from(binomial(p, i)) * Ivl::from(binomial(p, j))
+                    / Ivl::from(binomial(2 * p, k));
+                sum = sum + c * fi * gj;
+            }
+            sum
+        })
+        .collect()
+}
+
+/// Not upstream (tangency-labs/solidcraft#23213): a proved bound on the distance from every
+/// point of the curve `cn` over `range` to the cone (or cylinder) `cone` over its STEP domain,
+/// in closed form, for a curve that is one rational Bézier piece of positive weights: the
+/// counterpart of the plane bound for the surfaces of revolution of a line (an edge along a
+/// cylinder's ruling, a circle round its axis), whose nets the general bisection follows only
+/// as `h^2` where the curve's parameter and the surface's run at different speeds.
+///
+/// With `F = [X Y Z]` the stored frame, `g ≥ ‖FᵀF − I‖` and `d = C − O`, the surface's
+/// exact formula `E(x, v) = O + F (R(v) cos x°, R(v) sin x°, v)`, `R(v) = R0 + t v`, has
+/// `C − E = F (Fᵀd − e) + (I − FFᵀ) d`, `e = (R cos x°, R sin x°, v)` (as in
+/// [`cone_net_residual`]). Taken at the curve point's own height `v = (Fᵀd)_z` and angle `x`
+/// (that of `((Fᵀd)_x, (Fᵀd)_y)`), `|Fᵀd − e| = |ρ − R(v)|`, `ρ` the length of that pair. In
+/// homogeneous form, with `c_i = Fᵀ(P_i − O) w_i` and `W = Σ w_i B_i`,
+///
+/// `|ρ − R(v)| = |N| / (W² (ρ + R(v)))`, `N = c_x² + c_y² − (R0 W + t c_z)²`,
+///
+/// a polynomial of degree `2p` in Bernstein form ([`bernstein_product`]), as `W²` is with positive
+/// coefficients: `M = N / W² = ρ² − R²` is then a convex combination of the ratios `N_k / (W²)_k`
+/// and lies in their hull (the convex hull property of the Bernstein form; Garloff, Interval
+/// Computations 1993). `ρ + R(v) ≥ R_min + √(R_min² + M_lo)` over the heights `v`, each a convex
+/// combination of the control points' `c_z / w`, with `R_min > 0`. Where the curve's angle or height passes the domain the witness
+/// is clamped into it, which moves it by at most `R_max Δx` (radians) and `(1 + |t|) Δv`: the
+/// angles are those of positive combinations of the `(c_x, c_y)`, so in the sector they span
+/// when it is under half a turn. So
+///
+/// `dist(C, S) ≤ √(1+g) (|M| / (R_min + √(R_min² + M_lo)) + R_max Δx + (1 + |t|) Δv) + g max|d| + |S − E|`.
+///
+/// A rational quadratic is a circular arc exactly where its control triangle is isosceles with
+/// the middle weight the cosine of half the angle (Piegl and Tiller, *The NURBS Book*, 7.3), so
+/// a circle on its coaxial cylinder has `N ≡ 0` and the bound is the rounding; nothing here
+/// assumes it. `None` (the bisection decides) for a curve that is not one Bézier piece of
+/// degree at most [`CURVE_MAX_DEGREE`] with positive finite weights, a sector of half a turn or
+/// more, a cone of a whole turn (its seam snap leaves the points just before the end unreached,
+/// a tear [`cone_net_residual`] counts), `R_min ≤ 0` (the heights reach the apex), or a bound
+/// that is not finite.
+pub(super) fn cone_curve_gap_bound(
+    cone: &Cone,
+    cn: &NurbsCurve,
+    [lo, hi]: [f64; 2],
+) -> Option<f64> {
+    let p = cn.p;
+    if !(lo.is_finite() && hi.is_finite() && lo < hi) || p == 0 || p > CURVE_MAX_DEGREE {
+        return None;
+    }
+    // one Bézier piece holding the range
+    if cn.n != p + 1 {
+        return None;
+    }
+    let (Some(&d0), Some(&d1)) = (cn.u.get(p), cn.u.get(cn.n)) else {
+        return None;
+    };
+    if !(d0 <= lo && hi <= d1) {
+        return None;
+    }
+    let rev = &cone.rev;
+    let position = &rev.position;
+    let (o, x, y, z) = (
+        ivl3(position.origin()),
+        ivl3(position.x_axis()),
+        ivl3(position.y_axis()),
+        ivl3(position.z_axis()),
+    );
+    let axes = [x, y, z];
+    let mut g2 = zero();
+    for (i, a) in axes.iter().enumerate() {
+        for (j, b) in axes.iter().enumerate() {
+            let e = dot3(a, b) - Ivl::from(if i == j { 1.0 } else { 0.0 });
+            g2 = g2 + e * e;
+        }
+    }
+    let g = g2.sqrt().hi;
+    let s1g = (Ivl::from(1.0) + Ivl::from(g)).sqrt();
+    let (r0, t) = (cone.base_radius, cone.tan_semi_angle());
+    let angles = rev.anal_uv_domain.u_interval();
+    let heights = rev.anal_uv_domain.v_interval();
+    let (a0, a1, h0, h1) = (angles.min(), angles.max(), heights.min(), heights.max());
+    if ![r0, t, a0, a1].iter().all(|v| v.is_finite()) || h0.is_nan() || h1.is_nan() {
+        return None;
+    }
+    let [ox, oy, oz] = o;
+    // the control points in the frame, homogeneous, and their weights
+    let mut cx = Vec::new();
+    let mut cy = Vec::new();
+    let mut cz = Vec::new();
+    let mut w = Vec::new();
+    let mut d_max = 0.0_f64;
+    let mut v_lo = f64::INFINITY;
+    let mut v_hi = f64::NEG_INFINITY;
+    let mut sector: Vec<(f64, f64)> = Vec::new();
+    for i in 0..=p {
+        let s = cn.pw.get(4 * i..4 * i + 4)?;
+        let (&px, &py, &pz, &wi) = (s.first()?, s.get(1)?, s.get(2)?, s.get(3)?);
+        if !(wi.is_finite() && wi > 0.0 && px.is_finite() && py.is_finite() && pz.is_finite()) {
+            return None;
+        }
+        let wv = Ivl::from(wi);
+        let dh = [
+            Ivl::from(px) - ox * wv,
+            Ivl::from(py) - oy * wv,
+            Ivl::from(pz) - oz * wv,
+        ];
+        let [ax, ay, az] = &axes;
+        let (xi, yi, zi) = (dot3(&dh, ax), dot3(&dh, ay), dot3(&dh, az));
+        let height = zi / wv;
+        v_lo = v_lo.min(height.lo);
+        v_hi = v_hi.max(height.hi);
+        let [dx, dy, dz] = dh;
+        let dist = (dx * dx + dy * dy + dz * dz).sqrt() / wv;
+        d_max = d_max.max(dist.hi);
+        // the control point's angle (degrees) and how far its enclosure may turn it:
+        // asin(s / r) <= (π / 2) s / r, in degrees, and the atan2's and conversion's rounding
+        let (mx, my) = (0.5 * (xi.lo + xi.hi), 0.5 * (yi.lo + yi.hi));
+        let r = (Ivl::from(mx) * Ivl::from(mx) + Ivl::from(my) * Ivl::from(my))
+            .sqrt()
+            .lo;
+        let spread = (Ivl::from((xi.hi - xi.lo).max(0.0)) + Ivl::from((yi.hi - yi.lo).max(0.0))).hi;
+        if !(r > 0.0 && spread.is_finite() && 2.0 * spread < r) {
+            return None;
+        }
+        let turn = (Ivl::from(spread) / Ivl::from(r) * Ivl::from(90.0)).hi + slack(360.0);
+        sector.push((my.atan2(mx).to_degrees(), turn));
+        cx.push(xi);
+        cy.push(yi);
+        cz.push(zi);
+        w.push(wv);
+    }
+    // the sector, unwrapped about the first control point's angle
+    let (&(first, _), _) = sector.split_first()?;
+    let mut s_lo = f64::INFINITY;
+    let mut s_hi = f64::NEG_INFINITY;
+    for &(a, turn) in &sector {
+        let rel = (a - first + 540.0).rem_euclid(360.0) - 180.0;
+        s_lo = s_lo.min(first + rel - turn);
+        s_hi = s_hi.max(first + rel + turn);
+    }
+    let width = s_hi - s_lo;
+    if width.is_nan() || width >= 180.0 {
+        return None;
+    }
+    // how far the sector passes the angular domain, moved by the whole turns nearest it (a
+    // whole turn's seam snap leaves the points just before its end unreached: that tear is
+    // [`cone_net_residual`]'s, so a whole turn is left to the bisection)
+    if a1 - a0 >= 360.0 - slack(a0.abs() + a1.abs()) {
+        return None;
+    }
+    let mid = 0.5 * (a0 + a1);
+    let shift = ((mid - 0.5 * (s_lo + s_hi)) / 360.0).round() * 360.0;
+    let dx_deg = (a0 - (s_lo + shift)).max(s_hi + shift - a1).max(0.0) + slack(mid.abs() + 360.0);
+    let dv = (h0 - v_lo).max(v_hi - h1).max(0.0);
+    if !(dx_deg.is_finite() && dv.is_finite()) {
+        return None;
+    }
+    // the radii over the heights
+    let (tv, r0v) = (Ivl::from(t), Ivl::from(r0));
+    let at_lo = r0v + tv * Ivl::from(v_lo);
+    let at_hi = r0v + tv * Ivl::from(v_hi);
+    let r_min = at_lo.lo.min(at_hi.lo);
+    let r_max = at_lo.mag().max(at_hi.mag());
+    if !(r_min > 0.0 && r_max.is_finite()) {
+        return None;
+    }
+    // N = c_x² + c_y² − (R0 W + t c_z)², in Bernstein form
+    let rw: Vec<Ivl> = w
+        .iter()
+        .zip(&cz)
+        .map(|(&wi, &zi)| r0v * wi + tv * zi)
+        .collect();
+    let xx = bernstein_product(&cx, &cx);
+    let yy = bernstein_product(&cy, &cy);
+    let rr = bernstein_product(&rw, &rw);
+    // M = N / W² = ρ² − R², within the hull of the coefficient ratios N_k / (W²)_k (a
+    // rational Bézier function of positive denominator coefficients is a convex combination of
+    // them); then |ρ − R| = |M| / (ρ + R), ρ ≥ √(R_min² + M_lo)
+    let ww = bernstein_product(&w, &w);
+    let mut m = None::<Ivl>;
+    for (((&a, &b), &c), &d) in xx.iter().zip(&yy).zip(&rr).zip(&ww) {
+        if d.lo.is_nan() || d.lo <= 0.0 {
+            return None;
+        }
+        let ratio = (a + b - c) / d;
+        m = Some(m.map_or(ratio, |h: Ivl| {
+            Ivl::new(h.lo.min(ratio.lo), h.hi.max(ratio.hi))
+        }));
+    }
+    let m = m?;
+    let rmin = Ivl::from(r_min);
+    let below = (rmin * rmin + Ivl::from(m.lo)).lo;
+    let rho_min = if below > 0.0 {
+        Ivl::from(below).sqrt().lo
+    } else {
+        0.0
+    };
+    let radial = Ivl::from(m.mag()) / (rmin + Ivl::from(rho_min));
+    let clamped = Ivl::from(r_max) * Ivl::from(dx_deg) * pi() / Ivl::from(180.0)
+        + (Ivl::from(1.0) + Ivl::from(t.abs())) * Ivl::from(dv);
+    let big = a0.abs().max(a1.abs()) + 721.0;
+    let v_mag = v_lo.abs().max(v_hi.abs());
+    let rounding = formula_rounding([&o, &x, &y, &z], r0, t, big, v_mag);
+    let bound = s1g * (radial + clamped) + Ivl::from(g) * Ivl::from(d_max) + Ivl::from(rounding);
+    (bound.is_finite() && bound.hi.is_finite()).then_some(bound.hi)
+}
+
 /// The `j`-th basis of the span `k` (degree `p`) as a polynomial about `m`.
 fn basis_polys(knots: &[f64], k: usize, p: usize, m: f64) -> Vec<Poly> {
     let ders = ders_basis(knots, k, p, Ivl::from(m), p);
@@ -335,31 +593,13 @@ impl Setup<'_> {
     /// The rounding of the STEP formula at angles of size at most `big` degrees and heights
     /// of size at most `v`: `|S − E|`, rounded up.
     fn evaluation(&self, big: f64, v: f64) -> f64 {
-        let g8 = Ivl::from(gamma(8.0));
-        let g3 = Ivl::from(gamma(3.0));
-        let (r0, t, v) = (
-            Ivl::from(self.r0.abs()),
-            Ivl::from(self.t.abs()),
-            Ivl::from(v),
-        );
-        let radius = (r0 + t * v) * (Ivl::from(1.0) + g3);
-        let trig = Ivl::from(big) * pi() / Ivl::from(180.0) * Ivl::from(4.04 * U)
-            + Ivl::from(4.0 * U)
-            + Ivl::from(1.0e-300);
-        let mut sum = zero();
-        for k in 0..3 {
-            let get = |a: &[Ivl; 3]| Ivl::from(a.get(k).copied().unwrap_or_else(zero).mag());
-            let (ok, xy, zk) = (get(&self.o), get(&self.x) + get(&self.y), get(&self.z));
-            sum = sum
-                + g8 * (ok + radius * xy + v * zk)
-                + g3 * (r0 + t * v) * xy
-                + radius * trig * xy * (Ivl::from(1.0) + g8);
-        }
-        if sum.is_finite() {
-            sum.hi
-        } else {
-            f64::INFINITY
-        }
+        formula_rounding(
+            [&self.o, &self.x, &self.y, &self.z],
+            self.r0,
+            self.t,
+            big,
+            v,
+        )
     }
 
     /// The angle hull, angle error and the circle's `|a|` at a piece: `None` where the piece
@@ -1673,5 +1913,123 @@ mod tests {
         assert!(net.offset.is_some());
         let r = bisection_residual(&k, &s, &net, None).unwrap().unwrap();
         assert!(tear <= r, "{tear:e} over the residual {r:e}");
+    }
+
+    /// The rational quadratic of the circle of radius `r` about the z axis at height `h` from
+    /// `a` to `b` degrees (`b - a` under half a turn): the middle point on the bisector at
+    /// `r / cos(θ / 2)`, of weight `cos(θ / 2)`.
+    fn arc(
+        r: f64,
+        h: f64,
+        a: f64,
+        b: f64,
+    ) -> crate::blend::fillet_section::certificate::NurbsCurve {
+        let (a, b) = (a.to_radians(), b.to_radians());
+        let half = 0.5 * (b - a);
+        let m = 0.5 * (a + b);
+        let w = half.cos();
+        let rm = r / w;
+        crate::blend::fillet_section::certificate::NurbsCurve {
+            p: 2,
+            n: 3,
+            u: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            pw: vec![
+                r * a.cos(),
+                r * a.sin(),
+                h,
+                1.0,
+                rm * m.cos() * w,
+                rm * m.sin() * w,
+                h * w,
+                w,
+                r * b.cos(),
+                r * b.sin(),
+                h,
+                1.0,
+            ],
+        }
+    }
+
+    /// The segment from `p` to `q`, of degree 1.
+    fn segment(p: Point3, q: Point3) -> crate::blend::fillet_section::certificate::NurbsCurve {
+        crate::blend::fillet_section::certificate::NurbsCurve {
+            p: 1,
+            n: 2,
+            u: vec![0.0, 0.0, 1.0, 1.0],
+            pw: vec![p.x, p.y, p.z, 1.0, q.x, q.y, q.z, 1.0],
+        }
+    }
+
+    /// tangency-labs/solidcraft#23213: a circle on its coaxial cone or cylinder, and a segment
+    /// along a ruling, are bounded in closed form at the rounding; the same circle lifted off
+    /// the surface by `d` across the axis is bounded at least by its distance `d cos α` (`α`
+    /// the semi-angle) and at most a rounding past `d`; a whole turn, and a sector of half a
+    /// turn or more, are left to the bisection.
+    #[test]
+    fn a_circle_on_its_cone_and_a_ruling_are_bounded_in_closed_form() {
+        use crate::surface::surface::SurfaceKind;
+        let k = Kernel::default();
+        let mut checked = 0;
+        for (name, s, _, _) in cones(&k) {
+            let SurfaceKind::Cone(c) = s.kind() else {
+                panic!("{name}: not a cone");
+            };
+            let angles = c.rev.anal_uv_domain.u_interval();
+            let (a0, a1) = (angles.min(), angles.max());
+            let (r0, t) = (c.base_radius, c.tan_semi_angle());
+            let h = 1.5;
+            let r = r0 + t * h;
+            let cos_alpha = 1.0 / (1.0 + t * t).sqrt();
+            if a1 - a0 >= 360.0 {
+                let whole = arc(r, h, a0 + 10.0, a0 + 100.0);
+                assert_eq!(
+                    super::cone_curve_gap_bound(c, &whole, [0.0, 1.0]),
+                    None,
+                    "{name}"
+                );
+                continue;
+            }
+            // the arc over the whole domain where it is under half a turn, else a part of it
+            let (b0, b1) = if a1 - a0 < 179.0 {
+                (a0, a1)
+            } else {
+                (a0 + 5.0, a0 + 150.0)
+            };
+            let on = super::cone_curve_gap_bound(c, &arc(r, h, b0, b1), [0.0, 1.0])
+                .unwrap_or_else(|| panic!("{name}: no bound on the cone"));
+            assert!(on <= 1e-12 * (1.0 + r), "{name}: {on:e}");
+            for d in [1e-9, 1e-6, 1e-3, 0.1] {
+                let off = super::cone_curve_gap_bound(c, &arc(r + d, h, b0, b1), [0.0, 1.0])
+                    .unwrap_or_else(|| panic!("{name}: no bound {d:e} off"));
+                assert!(
+                    off >= d * cos_alpha * (1.0 - 1e-9),
+                    "{name}: {off:e} under {d:e}"
+                );
+                assert!(
+                    off <= d * (1.0 + 1e-9) + 1e-12 * (1.0 + r),
+                    "{name}: {off:e} over {d:e}"
+                );
+            }
+            // a ruling at the middle angle, from the bottom to the top
+            let m = (0.5 * (b0 + b1)).to_radians();
+            let at = |v: f64| {
+                let rv = r0 + t * v;
+                Point3::new(rv * m.cos(), rv * m.sin(), v)
+            };
+            let ruling = super::cone_curve_gap_bound(c, &segment(at(0.0), at(3.0)), [0.0, 1.0])
+                .unwrap_or_else(|| panic!("{name}: no bound on the ruling"));
+            assert!(ruling <= 1e-12 * (1.0 + r), "{name}: ruling {ruling:e}");
+            // half a turn or more spans no sector
+            if a1 - a0 > 200.0 {
+                let wide = arc(r, h, a0 + 1.0, a0 + 181.0);
+                assert_eq!(
+                    super::cone_curve_gap_bound(c, &wide, [0.0, 1.0]),
+                    None,
+                    "{name}"
+                );
+            }
+            checked += 1;
+        }
+        assert!(checked >= 24, "{checked} partial cones checked");
     }
 }
