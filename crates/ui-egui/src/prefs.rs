@@ -5549,7 +5549,9 @@ mod tests {
             h.call("ui.prefs", json!({"open":"Layout"}));
             h.frames(20);
             let body = crate::scenario::rect_of("prefs:page_body").unwrap();
-            for (key, label) in checks {
+            // The window buttons' row is drawn only where the app draws its own buttons (#22848).
+            let buttons = platform::shown(&h.app, platform::Needs::OwnWindowButtons);
+            for (key, label) in checks.into_iter().filter(|(key, _)| buttons || *key != "show_window_controls") {
                 let label = solidcraft_ui_text::tr(label);
                 let check = crate::scenario::rect_of(&format!("prefs:{key}")).unwrap();
                 assert!(check.left() >= body.left() - 0.5 && check.right() <= body.right() + 0.5, "{key} at {width}: {check:?} outside {body:?}");
@@ -12312,6 +12314,23 @@ mod tests {
         }
         h.call("ui.prefs", json!({"button":"apply"}));
         assert!(h.app.preferences.trackpad_twist_turns, "a hidden option keeps its value");
+    }
+
+    /// The window buttons' option is drawn only where the app draws its own window buttons
+    /// (`platform::available`): not on macOS, which draws its own, nor in the browser. A hidden
+    /// option keeps its saved value.
+    #[test]
+    fn layout_shows_the_window_buttons_option_only_where_the_app_draws_them() {
+        use platform::{Facts, Needs, available};
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.show_window_controls = false;
+        h.call("ui.prefs", json!({"open":"Layout"}));
+        h.frames(2);
+        let shown = crate::scenario::handle_at("prefs:show_window_controls").is_some();
+        assert_eq!(shown, available(Needs::OwnWindowButtons, Facts::of(&h.app)));
+        assert_eq!(shown, !cfg!(target_os = "macos"), "hidden on macOS only, in a desktop build");
+        h.call("ui.prefs", json!({"button":"apply"}));
+        assert!(!h.app.preferences.show_window_controls, "a hidden option keeps its value");
     }
 
     #[test]
