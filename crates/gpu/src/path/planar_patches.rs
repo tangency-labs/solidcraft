@@ -125,6 +125,7 @@ mod tests {
             transmission: None,
             medium: body,
             scalar_face: false,
+            flakes: 0,
         }
     }
 

@@ -29,9 +29,9 @@ fn casing() -> Color32 {
 /// How much wider than its core a casing is (both sides together).
 const CASE: f32 = 0.8;
 
-/// The feature's footprint on the face while the marker drags it: a filled shape in the preview's
-/// own blue with a thin darker edge, so white stays reserved for the handles. It shows where the
-/// feature is going before the recomputed preview gets there.
+/// The feature's footprint on the face while the marker drags it or the ring turns it: a filled
+/// shape in the preview's own blue with a thin darker edge, so white stays reserved for the
+/// handles. It shows where the feature is going before the recomputed preview gets there.
 pub(super) fn footprint(painter: &egui::Painter, pts: &[Pos2], t: &Tokens) {
     for shape in crate::viewport::projected_polygon(pts, t.preview_add.gamma_multiply(0.38), Stroke::new(1.2, t.manipulator)) {
         painter.add(shape);

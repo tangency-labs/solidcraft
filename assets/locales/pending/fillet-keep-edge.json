@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "ui.fillet_fit_keep_edge": "إبقاء الحافة العلوية",
+    "ui.fillet_fit_keep_edge_tip": "إبقاء الحافة العلوية: الحافة المقعرة التي يكون جدارها أخفض من نصف القطر تُدوَّر بتدوير مماسّ للأرضية فقط وينتهي عند الحافة العلوية للجدار، فيبقى الوجه العلوي وحافته كما هما. أما الحواف الأخرى فتُدوَّر كالمعتاد."
+  },
+  "de": {
+    "ui.fillet_fit_keep_edge": "Oberkante behalten",
+    "ui.fillet_fit_keep_edge_tip": "Oberkante behalten: Eine konkave Kante, deren Wand niedriger als der Radius ist, wird mit einer nur zum Boden tangentialen Rundung verrundet, die an der Oberkante der Wand endet. Die Deckfläche und ihre Kante bleiben unverändert. Andere Kanten werden wie üblich verrundet."
+  },
+  "en": {
+    "ui.fillet_fit_keep_edge": "Keep top edge",
+    "ui.fillet_fit_keep_edge_tip": "Keep top edge: a concave edge whose wall is lower than the radius is rounded by a round tangent to the floor only, ending on the wall's top edge, so the top face and its edge stay as they are. Other edges are rounded as usual."
+  },
+  "he": {
+    "ui.fillet_fit_keep_edge": "שמירת הקצה העליון",
+    "ui.fillet_fit_keep_edge_tip": "שמירת הקצה העליון: קצה קעור שהקיר שלו נמוך מהרדיוס מעוגל בעיגול משיק לרצפה בלבד, שמסתיים בקצה העליון של הקיר, כך שהפן העליון וקצהו נשארים כפי שהם. קצוות אחרים מעוגלים כרגיל."
+  },
+  "ja": {
+    "ui.fillet_fit_keep_edge": "上端を残す",
+    "ui.fillet_fit_keep_edge_tip": "上端を残す: 壁が半径より低い凹んだエッジを、床にだけ接する丸めで丸め、壁の上端で終わらせます。上面とその縁はそのまま残ります。ほかのエッジは通常どおり丸めます。"
+  },
+  "ko": {
+    "ui.fillet_fit_keep_edge": "위쪽 모서리 유지",
+    "ui.fillet_fit_keep_edge_tip": "위쪽 모서리 유지: 벽이 반지름보다 낮은 오목한 모서리를 바닥에만 접하는 둥글기로 처리하고 벽의 위쪽 모서리에서 끝냅니다. 윗면과 그 모서리는 그대로 유지됩니다. 다른 모서리는 평소처럼 둥글게 처리합니다."
+  },
+  "vi": {
+    "ui.fillet_fit_keep_edge": "Giữ cạnh trên",
+    "ui.fillet_fit_keep_edge_tip": "Giữ cạnh trên: một cạnh lõm có tường thấp hơn bán kính được bo bằng mặt bo chỉ tiếp xúc với sàn và kết thúc ở cạnh trên của tường, nên mặt trên và cạnh của nó giữ nguyên. Các cạnh khác được bo như thường."
+  },
+  "zh": {
+    "ui.fillet_fit_keep_edge": "保留顶边",
+    "ui.fillet_fit_keep_edge_tip": "保留顶边：壁比半径低的凹边，用只与底面相切的圆角处理，并在壁的顶边处结束，因此顶面及其边保持不变。其他边按常规倒圆。"
+  }
+}

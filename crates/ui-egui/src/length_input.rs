@@ -213,6 +213,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
         D::PatternRect { spacing, spacing2, extent, extent2, .. } => vec![spacing, spacing2, extent, extent2],
         D::OffsetPlane { offset } | D::Section { offset, .. } => vec![offset],
         D::OffsetFaces { distance } => vec![distance],
+        D::TransformFace { translate, origin, .. } => translate.iter_mut().chain(origin).collect(),
         D::MeshConvert { tolerance } => vec![tolerance],
         D::MeshSectionStack { from, to, spacing, .. } => vec![spacing, from, to],
         D::Thread { length, options, .. } => {
@@ -260,8 +261,8 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
             _ => vec![],
         },
         D::Sheet(k) => match k {
-            Sm::Flange { height, radius, distance, relief_size, own, segments, .. } => {
-                let mut values = vec![height, radius, distance, relief_size];
+            Sm::Flange { height, radius, distance, relief_size, offset, own, segments, .. } => {
+                let mut values = vec![height, radius, distance, relief_size, offset];
                 values.extend(own.iter_mut().map(|(_, _, height)| height));
                 values.extend(segments.iter_mut().flat_map(|(_, list)| list.iter_mut().map(|row| &mut row.height)));
                 values

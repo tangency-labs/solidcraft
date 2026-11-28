@@ -1146,6 +1146,9 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         } else {
             v.push(cmd(app, "solid.press_pull", "Press Pull"));
         }
+        if matches!(sel, [Sel::Face { .. }]) {
+            v.push(cmd(app, "solid.transform_face", "Transform Face"));
+        }
         v.push(cmd(app, "solid.shell", "Shell"));
         v.push(cmd(app, "solid.dome", "Dome"));
         if crate::joint_handles::selected_occurrence(app).is_some() {
@@ -4648,6 +4651,24 @@ mod tests {
         assert!(item.enabled);
         h.step(&json!({"click":{"handle":"menu:sketch.spline.remove_point"}})).unwrap();
         assert_eq!(places(&h), left, "the spline runs through its other points");
+    }
+
+    #[test]
+    fn transform_face_menu_accepts_a_single_curved_or_planar_face() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.cylinder", json!({"diameter":30,"height":20})).unwrap();
+        let state = crate::open_meshing::session_world(&h.app.session);
+        let body = &state.bodies[0];
+        let offered = |app: &SolveApp| items(app, &Target::Viewport).iter().any(|i| i.id == "solid.transform_face" && i.enabled);
+        let mut all = Vec::new();
+        for f in body.body.faces(0.1).unwrap() {
+            let sel = Sel::Face { body: body.name.clone(), index: f.index, point: f.centroid };
+            all.push(sel.clone());
+            h.app.session.selection = vec![sel];
+            assert!(offered(&h.app));
+        }
+        h.app.session.selection = all;
+        assert!(!offered(&h.app));
     }
 
     #[test]

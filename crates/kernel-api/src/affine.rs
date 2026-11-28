@@ -45,6 +45,14 @@ pub struct SquareFaceLevel {
 
 /// The placement maths of one kernel ([`crate::OpKind::Affine`]).
 pub trait Affine: Backend {
+    /// Signed volume scale of the linear part.
+    fn linear_determinant(&self, matrix: &Matrix) -> f64;
+    /// Unit direction with the input sense; none for a zero or non-finite direction.
+    fn directed_unit(&self, axis: [f64; 3]) -> Option<[f64; 3]>;
+    /// Point displaced by `by`, in the same frame.
+    fn translated_point(&self, point: [f64; 3], by: [f64; 3]) -> [f64; 3];
+    /// Axis and radians after applying the first turn, then the world-space turn.
+    fn compose_turn(&self, first: [f64; 3], radians: f64, world: [f64; 3], turn: f64) -> Option<([f64; 3], f64)>;
     /// The turn by `angle` radians, right-handed about `axis` (any length but none), about the
     /// line through `point` along it.
     fn rotation(&self, point: [f64; 3], axis: [f64; 3], angle: f64) -> Result<Matrix, AffineRefused>;

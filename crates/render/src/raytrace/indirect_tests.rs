@@ -229,6 +229,60 @@ fn opaque_path_oblique_and_grazing_coated_response_and_null_mass_match_independe
 }
 
 #[test]
+fn opaque_path_on_a_tilted_flake_samples_its_base_lobes_about_the_flake_and_matches_hemisphere_quadrature() {
+    use solidcraft_viewport::flakes::{Flake, FlakeLayer};
+    let side = 512;
+    let cells = f64::from(side * side);
+    let flakes = FlakeLayer::new(1.0, 0.05, 1.0, 1.0, Vec3::new(0.9, 0.8, 0.6), 1.0, 0.3).unwrap();
+    let tilted = unit_direction(Vec3::new(0.45, 0.2, 1.0)).unwrap();
+    let paint = OpaqueSurface::new(Vec3::new(0.1, 0.2, 0.5), 0.0, 0.5, 1.5)
+        .unwrap()
+        .with_clear_coat(ClearCoat::new(0.8, 0.3, 1.5).unwrap())
+        .with_flakes(flakes);
+    for depth in [0.0, 0.4] {
+        let surface = paint.on_flake(Flake { normal: tilted, depth }).unwrap();
+        for view in [unit_direction(Vec3::new(0.6, 0.0, 0.8)).unwrap(), unit_direction(Vec3::new(-0.7, 0.4, 0.3)).unwrap()] {
+            let [diffuse, specular, coat] = solidcraft_viewport::clear_coat::lobe_probabilities(surface);
+            let components = [(0.5 * coat, coat), (coat + 0.5 * diffuse, diffuse), (coat + diffuse + 0.5 * specular, specular)];
+            let (mut quadrature, mut density, mut sampled, mut mass) = (Vec3::ZERO, 0.0, Vec3::ZERO, 0.0);
+            let mut drew_from_the_base = false;
+            for row in 0..side {
+                let u = (f64::from(row) + 0.5) / f64::from(side);
+                for col in 0..side {
+                    let v = (f64::from(col) + 0.5) / f64::from(side);
+                    let phi = TAU * v;
+                    let l = Vec3::new((1.0 - u * u).sqrt() * phi.cos(), (1.0 - u * u).sqrt() * phi.sin(), u);
+                    quadrature += surface.brdf(Vec3::Z, view, l).unwrap() * (u * TAU / cells);
+                    density += surface_pdf(surface, Vec3::Z, view, l).unwrap() * TAU / cells;
+                    for (component, probability) in components.into_iter().filter(|&(_, probability)| probability > 0.0) {
+                        if let Some(s) = sample(surface, Vec3::Z, Vec3::Z, view, [component, u, v]).unwrap() {
+                            mass += probability / cells;
+                            sampled += s.weight * (probability / cells);
+                            drew_from_the_base |= component > coat;
+                            assert!((s.pdf - surface_pdf(surface, Vec3::Z, view, s.direction).unwrap()).abs() < 1e-12 * s.pdf.max(1.0));
+                        }
+                    }
+                }
+            }
+            assert!(drew_from_the_base);
+            assert!((mass - density).abs() < 0.005, "depth {depth}, view {view:?}: accepted mass {mass}, density mass {density}");
+            for (actual, expected) in [sampled.x, sampled.y, sampled.z].into_iter().zip([quadrature.x, quadrature.y, quadrature.z]) {
+                assert!((actual - expected).abs() < 0.005, "depth {depth}, view {view:?}: sampled {actual}, hemisphere {expected}");
+            }
+        }
+    }
+    // Seen from behind, the flake's base lobes have no mass; the coat still reflects.
+    let behind = paint.on_flake(Flake { normal: tilted, depth: 0.0 }).unwrap();
+    let view = unit_direction(Vec3::new(-0.95, -0.1, 0.25)).unwrap();
+    assert!(view.dot(tilted) <= 0.0);
+    let [_, _, coat] = solidcraft_viewport::clear_coat::lobe_probabilities(behind);
+    for component in [coat + 0.01, 0.99] {
+        assert!(sample(behind, Vec3::Z, Vec3::Z, view, [component, 0.3, 0.6]).unwrap().is_none());
+    }
+    assert!(sample(behind, Vec3::Z, Vec3::Z, view, [0.5 * coat, 0.5, 0.5]).unwrap().is_some());
+}
+
+#[test]
 fn opaque_path_nearly_orthogonal_extreme_aspect_rectangles_round_trip_their_admitted_samples() {
     // The common light contract permits |cos(U,V)| <= 1e-10. A diagonal
     // projection would infer s≈22.5 for the first sample despite its true s=0.

@@ -772,6 +772,7 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
         let fields: &[&str] = match command.as_str() {
             "solid.extrude" => &["distance", "distance2", "to_offset", "to_offset2"],
             "solid.offset_face" => &["distance"],
+            "solid.transform_face" => &["translate", "angle"],
             // A radius dragged or typed: each result shows while the next computes, rather than
             // the preview holding still until the input stops changing.
             "solid.fillet" => &["radius", "radius2", "mid"],
@@ -819,6 +820,11 @@ pub(crate) fn colors(app: &SolveApp) -> Colors {
 /// take finished results. Called once per frame.
 pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     crate::control_joint_drive::expire(app);
+    if app.dialog.as_ref().and_then(crate::dialogs::transform_face::pivot_input).is_some() {
+        // Pick on the unchanged model, even while a previous drag's scratch job is in flight.
+        app.preview.clear();
+        return;
+    }
     if app.control_joint_drive.active() || !crate::ui_kit::numeric_preview_ready(ctx) {
         return;
     }
@@ -1059,8 +1065,10 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
                 | "sketch.chamfer.distance_angle"
                 | "sketch.insert_svg"
                 | "sketch.insert_dxf"
-        ) || command == "construct.plane.along_path"
-            || params.get("command").and_then(Value::as_str) == Some("construct.plane.along_path")
+        ) || matches!(
+            if command == "timeline.redefine" { params.get("command").and_then(Value::as_str) } else { Some(command.as_str()) },
+            Some("construct.plane.along_path" | "solid.transform_face")
+        )
     }) {
         let preview = s.preview_visible_world(cmds).map_err(|error| error.to_string())?;
         return std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

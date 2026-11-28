@@ -230,6 +230,49 @@ pub fn install(plugin: &Unpacked, plugins: &Path, replace: bool) -> Result<PathB
     install_locked(plugin, plugins, replace)
 }
 
+/// Whether `e` is Windows refusing to rename or remove a folder because something inside it is open
+/// for a moment: `ERROR_ACCESS_DENIED` (5) or `ERROR_SHARING_VIOLATION` (32). Windows refuses to rename
+/// a folder while any file or folder in it has an open handle, even one that allows deleting. The
+/// app's plugin-folder watcher, the plugins scan, an antivirus or the search indexer each open files
+/// there briefly (#23591).
+#[cfg(not(target_arch = "wasm32"))]
+fn held_for_a_moment(e: &std::io::Error) -> bool {
+    cfg!(windows) && matches!(e.raw_os_error(), Some(5 | 32))
+}
+
+/// Runs `op` until it succeeds, it fails for another reason than `held`, or `tries` attempts have
+/// failed, waiting `pause` between attempts. Returns the last result.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn retry_while_held(
+    mut op: impl FnMut() -> std::io::Result<()>,
+    held: impl Fn(&std::io::Error) -> bool,
+    tries: u32,
+    pause: std::time::Duration,
+) -> std::io::Result<()> {
+    let mut attempt = 1;
+    loop {
+        match op() {
+            Err(e) if held(&e) && attempt < tries => {
+                attempt += 1;
+                std::thread::sleep(pause);
+            }
+            done => return done,
+        }
+    }
+}
+
+/// How long a rename or a removal in the plugins folder waits for a file that is open for a moment:
+/// 40 attempts 50 ms apart, about 2 s.
+#[cfg(not(target_arch = "wasm32"))]
+const HELD_TRIES: u32 = 40;
+#[cfg(not(target_arch = "wasm32"))]
+const HELD_PAUSE: std::time::Duration = std::time::Duration::from_millis(50);
+
+#[cfg(not(target_arch = "wasm32"))]
+fn rename_when_free(from: &Path, to: &Path) -> std::io::Result<()> {
+    retry_while_held(|| std::fs::rename(from, to), held_for_a_moment, HELD_TRIES, HELD_PAUSE)
+}
+
 /// Writes `plugin` to `plugins/<id>/`. An installed plugin of that id is replaced only when
 /// `replace`; the old folder is kept until the new one is in place. The caller holds [`write_lock`].
 #[cfg(not(target_arch = "wasm32"))]
@@ -267,22 +310,24 @@ pub fn install_locked(plugin: &Unpacked, plugins: &Path, replace: bool) -> Resul
         let _ = std::fs::remove_dir_all(&staging);
         return Err(io(e));
     }
+    // Each step names the folder it could not move, so a refusal says where it happened.
+    let step = |what: &str, folder: &Path, e: std::io::Error| InstallError::Io(format!("{what} ({}): {e}", folder.display()));
     let old = target.exists().then(|| plugins.join(format!(".replaced-{id}-{}-{stamp}", std::process::id())));
     if let Some(old) = &old
-        && let Err(e) = std::fs::rename(&target, old)
+        && let Err(e) = rename_when_free(&target, old)
     {
         let _ = std::fs::remove_dir_all(&staging);
-        return Err(io(e));
+        return Err(step("could not move the installed plugin aside", &target, e));
     }
-    if let Err(e) = std::fs::rename(&staging, &target) {
+    if let Err(e) = rename_when_free(&staging, &target) {
         if let Some(old) = &old {
-            let _ = std::fs::rename(old, &target);
+            let _ = rename_when_free(old, &target);
         }
         let _ = std::fs::remove_dir_all(&staging);
-        return Err(io(e));
+        return Err(step("could not move the new plugin into place", &target, e));
     }
     if let Some(old) = old {
-        let _ = std::fs::remove_dir_all(old);
+        let _ = retry_while_held(|| std::fs::remove_dir_all(&old), held_for_a_moment, HELD_TRIES, HELD_PAUSE);
     }
     Ok(target)
 }

@@ -67,7 +67,8 @@ pub static COMMANDS: &[CommandSpec] = &[
          the inner virtual sharp, or past 90 deg the line square to the flange touching the bend's outside (tangent; up to 90 deg the outer sharp)), \
          position?: inside|outside|middle|material_outside|tangent (where the bend starts: the outer virtual sharp on the edge (default), \
          the bend starting at the edge (bend_outside is the same), half way, the inner virtual sharp on the edge, \
-         or the bend's outer face tangent to the edge's face (below 90 deg the bend's end on that face)), flip?, body?, corner_relief_shape?: notch|round|rectangular|tear and corner_relief? (size across): \
+         or the bend's outer face tangent to the edge's face (below 90 deg the bend's end on that face)), \
+         offset? (how far each bend moves out past its position, the panel growing by that strip; negative moves it in; default 0), flip?, body?, corner_relief_shape?: notch|round|rectangular|tear and corner_relief? (size across): \
          the relief at the corners these flanges make (default: the rule's); \
          bend_relief_shape?: rectangular|obround|tear (the relief beside a bend's end where the sheet runs on past it; default: the rule's); \
          then?: [{angle?, height, flip?}] further bends (at most 16), each a flange on the far edge of the one before, flip: true turns that bend the other way (edge only); \
@@ -527,6 +528,9 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
     if ty != "edge" && p.get("then").is_some_and(|v| !v.is_null()) {
         return Err(bad(cmd, "`then` (further bends) is only for edge flanges"));
     }
+    if ty != "edge" && p.get("offset").is_some_and(|v| !v.is_null()) {
+        return Err(bad(cmd, "`offset` is only for edge flanges (it moves an edge flange's bend out past its position)"));
+    }
     if ty != "edge" && p.get("segments").is_some_and(|v| !v.is_null()) {
         return Err(bad(cmd, "segments is only for edge flanges (a base or contour flange has no edge to divide)"));
     }
@@ -639,6 +643,11 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
             if let Some(c) = &corner_relief {
                 check_expr(s, c, Kind::Length, cmd, "corner_relief")?;
             }
+            // How far the bends move out past their position; none is saved as nothing.
+            let offset = expr(p, "offset");
+            if let Some(o) = &offset {
+                check_expr(s, o, Kind::Length, cmd, "offset")?;
+            }
             let flip = bool_(p, "flip").unwrap_or(false);
             let mut before = surface_panel_counts(s);
             let mut reply = add_feature(
@@ -657,6 +666,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                     height_from: height_from.clone(),
                     bend_relief_shape: bend_relief_shape.clone(),
                     corners,
+                    offset: offset.clone(),
                 },
             )?;
             // The first bend owns the supplied name. Keep its identity and report the completed chain's result.
@@ -682,6 +692,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                         height_from: height_from.clone(),
                         bend_relief_shape: bend_relief_shape.clone(),
                         corners: Vec::new(),
+                        offset: offset.clone(),
                     },
                 )?;
             }
