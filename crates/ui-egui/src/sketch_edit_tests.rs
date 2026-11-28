@@ -1810,3 +1810,56 @@ fn ownerless_sheet_sketch_does_not_receive_hosted_tool_input() {
     app.preferences.workspace_follows_view = false;
     assert!(crate::workspace::tool_receives_input(&app), "legacy independent workspace behavior remains available");
 }
+
+/// #23342: Extrude started while an earlier sketch is edited takes that sketch's profile, with
+/// it picked first or with nothing picked, not the later sketch's.
+#[test]
+fn extrude_from_an_edited_sketch_takes_its_profile_not_a_later_sketchs() {
+    use serde_json::json;
+    use solidcraft_engine::Sel;
+    for picked in [false, true] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let mut ids = Vec::new();
+        for (name, x) in [("First", 0), ("Second", 40)] {
+            let created = h.app.run("sketch.create", json!({"plane": "XY", "name": name})).unwrap();
+            ids.push(created["sketch"].as_u64().unwrap());
+            h.app.run("sketch.rectangle.two_point", json!({"p0": [x, 0], "p1": [x + 20, 10]})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        h.settle();
+        h.app.edit_sketch(ids[0]);
+        h.settle();
+        assert_eq!(h.app.session.active_sketch, Some(ids[0]), "picked: {picked}");
+        if picked {
+            h.app.session.selection = vec![Sel::Profile { sketch: ids[0], index: 0 }];
+        }
+        h.step(&json!({"start": "solid.extrude"})).unwrap();
+        h.settle();
+        let dialog = h.app.dialog.as_ref().expect("Extrude opens");
+        assert_eq!(dialog.inputs[0].items, vec![Sel::Profile { sketch: ids[0], index: 0 }], "picked: {picked}");
+    }
+}
+
+/// #23342: where the edited sketch has several profiles, Extrude waits for a pick instead of
+/// taking a later sketch's.
+#[test]
+fn extrude_from_an_edited_sketch_with_two_profiles_waits_for_a_pick() {
+    use serde_json::json;
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let first = h.app.run("sketch.create", json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+    for x in [0, 40] {
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [x, 0], "p1": [x + 20, 10]})).unwrap();
+    }
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 40], "p1": [20, 50]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.settle();
+    h.app.edit_sketch(first);
+    h.settle();
+    h.step(&json!({"start": "solid.extrude"})).unwrap();
+    h.settle();
+    assert_eq!(h.app.dialog.as_ref().expect("Extrude opens").inputs[0].items, vec![]);
+}

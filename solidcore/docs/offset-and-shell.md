@@ -81,7 +81,8 @@ negates it (`OffsetGeometryCreation::faceuse_offset_with_backend`, `offset/offse
 | surface of revolution | the generator offset in its plane and swept again: a line or circle stays a line or circle; a B-spline or conic generator is offset by `create_simple_offset` within the approximation tolerance | exact for lines and arcs; **fitted, not certified**, otherwise | `surface/surf_of_revolution/p2.rs` |
 | extrusion, B-spline, curve-bounded, STEP | an `OffsetSurface`: S + d n of a copy of the surface, evaluated on demand (`base_create_offset_surface`); the extrusion's own override is not ported (commented out upstream) | exact as a definition; its net is §3.2's | `surface/surface/p1.rs`, `surface/offset_surface.rs` |
 | round of the ball's circle, one radius | the round of radius r + τd on the supports offset by σᵢd, the same spine, leader and seeds; its net built on the stations and certified; r + τd ≤ 0: collapsed | certified | `surface/procedural_blend/offset.rs` |
-| round of an exact class | its kind's exact offset (a cylinder of r to a cylinder of r ± d) carrying the definition of the new radius, re-certified by identity | exact | same |
+| round of an exact class whose kind offsets as itself (line, circle, point: a cylinder, torus or sphere) | its kind's exact offset (a cylinder of r to a cylinder of r ± d) carrying the definition of the new radius, re-certified by identity | exact | same |
+| round of a rational exact class (a conic, a conic pair or a nodal quartic spine) | its kind's offset is the offset surface of its B-spline net, kept as it is; the net is S (bound 0), so it is S + d n; no definition kept, since that offset has no NURBS form to re-certify one on | exact as a definition; its net is §3.2's | `surface/procedural_blend/offset.rs` |
 | chamfer between planes | the plane offset as a plane; no definition kept | exact | `surface/surface/p1.rs` |
 | Gⁿ round (order ≥ 2), radius law, round on a B-spline support | the offset surface of the face, as an extrusion's | see §3.2 | `surface/procedural_blend/offset.rs` |
 | corner face, drafted face | the offset of the face's own surface kind; a drafted face's surface is its plane or cone, so the offset is exact; a corner keeps no definition | as its kind | `surface/surface/p1.rs` |
@@ -359,6 +360,15 @@ face's surface and intersects neighbouring offsets instead of filling convex edg
   face's chart seam split off past the neighbours' offsets, nearer the edge's middle than the
   whole curve's). A marched piece lying on an exact line or conic of the two surfaces is replaced
   by that curve.
+- **Tangent edges** are not mitred: their faces' offsets are tangent too. `extend_trim_edges`
+  carries each face's trim onto its offset, and `trim_extended_edge` ends it where a neighbour's
+  offset cuts it. At a vertex where those cuts are tangential it ends at the vertex's image
+  V + d n(V) instead, where the curve passes nearest it: at a lamina edge's vertex, between two
+  faces on one plane, and at a smooth vertex, where every edge is a tangent sector (a round's
+  rail meeting the tangent edge between its support and the next round) and every face moves by
+  the one distance (not in a local operation, nor at a face the shell keeps). There every face's
+  offset passes through the one image, and a tangential crossing is found only to about the
+  square root of its residual along the curve.
 - **The merge** joins the offset faces into one body. When it leaves two or more finite regions,
   an inset solid offset keeps those `cavity::is_cavity_region` finds cavity: a region with a face
   that has the input's face one wall behind it and none with it one wall ahead (a point solve
@@ -424,7 +434,12 @@ line on the neutral plane until it makes the draft angle with the pull; a cone o
 pull moves each control point radially, keeping its parameters. The hinge, the lean and a cone's
 sense are proved in rounded interval arithmetic or refused (`DraftRefusal`). The result is a plane
 or cone with a `DraftDefinition` (bound 0, re-certified by `lies_on`), applied by the local
-operation (`solidcore-ops/src/offset.rs`, `draft`).
+operation (`solidcore-ops/src/offset.rs`, `draft`). The tangent blends on the drafted faces follow
+them as they follow moved faces (`OffsetFacesExecutive::move_onto`): taken off, the faces drafted,
+put back at their sizes. A blend rolled on the old surface cannot be extended to meet the drafted
+one: a round of a cylinder's rim lies off the cone the side drafts to, and leaning in, the cone
+passes inside the round's torus, so there is no meeting to bound. With no blend to follow, the
+draft is the local operation alone.
 
 **A complete radial wall drafted inward.** Where the one drafted face is a whole cylinder or cone
 about the pull (its UV box's four sides its whole boundary, bare planes across both rims, one
@@ -484,7 +499,9 @@ point of the body. If a turn before the shell fails, the shell builds, or is ref
 as it would without that turn. If a turn back fails, the result is the same valid body, with
 that face's seam left on the turned ruling. An inward closed shell refused for a thin feature
 (`offset/thin_features.rs`) takes off together every feature with a face whose inset collapses,
-then each other feature on its own.
+then each other feature on its own. Each cap's rim is taken out where the cap and the face beside
+it lie on one plane (`remove_cap_rims`), so that face runs on across the footprint; left in, a
+footprint touching the face's outer edge pinched the face, and the offset refused it (solidcraft#22785).
 
 Ops (`solidcore-ops/src/offset.rs`) calls this as `SmApiShellBrepFull` with convex edges extended,
 results merged, the offset solid made and the sheet's side walls merged. `thicken` with

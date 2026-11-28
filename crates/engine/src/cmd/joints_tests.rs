@@ -3822,6 +3822,16 @@ fn joint_drive_and_refresh_do_not_repeat_dof_analysis() {
     }
 }
 
+#[test]
+fn quiet_joint_drive_without_contact_solves_once_and_settles_refresh() {
+    let (mut s, _, _) = four_bar();
+    for angle in [17, 58, 105] {
+        super::solve_counts::take();
+        run(&mut s, "joint.drive", json!({"joint": "Crank", "value": angle, "quiet": true}));
+        assert_eq!(super::solve_counts::take(), (1, 0), "quiet drive without contact or conflicts solves once (and refresh keeps it)");
+    }
+}
+
 /// A parameter change solves the joints once: the refresh that follows the command finds the
 /// design and the model as the command's own solve left them (the sketch the parameter drives
 /// has its new solution stored after that solve). A move the joints undo is still solved.

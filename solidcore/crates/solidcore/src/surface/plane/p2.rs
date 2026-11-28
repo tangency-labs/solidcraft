@@ -103,6 +103,7 @@ use crate::geom::tol::{are_same, is_zero, is_zero_to_tol, within_contact_tol, ZO
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
@@ -1610,8 +1611,8 @@ impl Plane {
                     // A side of zero length makes its roots one point.
                     let h = bi_norm_in.unitize().map_or(0.0, |n| {
                         let support = sqrt(
-                            (radius_x * n.dot(x_axis)).powi(2)
-                                + (radius_y * n.dot(circ_y_axis_for_plane_normal)).powi(2),
+                            det::powi(radius_x * n.dot(x_axis), 2)
+                                + det::powi(radius_y * n.dot(circ_y_axis_for_plane_normal), 2),
                         );
                         max2(support - n.dot(plane_start_pt - center).abs(), 0.0)
                     });
@@ -1731,13 +1732,13 @@ impl Plane {
             let vec = point1 - center;
             let dx = vec.dot(x_axis);
             let dy = vec.dot(y_axis);
-            let enter_ang_rad = (radius_x / radius_y * dy).atan2(dx);
+            let enter_ang_rad = det::atan2(radius_x / radius_y * dy, dx);
 
             // ellipse end angle Rad
             let vec = point2 - center;
             let dx = vec.dot(x_axis);
             let dy = vec.dot(y_axis);
-            let exit_ang_rad = (radius_x / radius_y * dy).atan2(dx);
+            let exit_ang_rad = det::atan2(radius_x / radius_y * dy, dx);
 
             // ellipse start/stop angles deg with periodicity
             let enter_ang_deg = anal_ivl
@@ -1767,8 +1768,8 @@ impl Plane {
                 let arc_len = (trim_ivl.length() * (PI / 180.0)) * radius_x;
                 if arc_len < tol {
                     // build a degenerate line at the degenerate point
-                    let cos_u = (trim_ivl.min() * PI / 180.0).cos();
-                    let sin_u = (trim_ivl.min() * PI / 180.0).sin();
+                    let cos_u = det::cos(trim_ivl.min() * PI / 180.0);
+                    let sin_u = det::sin(trim_ivl.min() * PI / 180.0);
                     let point = center + cos_u * radius_x * x_axis + sin_u * radius_y * y_axis;
                     let Some(crv) = ignored(BSplineCurve::create_degenerate_curve(3, point))?
                     else {

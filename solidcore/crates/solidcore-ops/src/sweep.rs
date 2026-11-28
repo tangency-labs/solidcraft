@@ -6,10 +6,15 @@
 //!
 //! Each call makes its curves from the list (the kernel's constructors), checks its numbers
 //! before the kernel sees them, runs the kernel's sweep and hands the result over only when it
-//! is what was asked for ([`finish`]): a closed manifold solid when the ends are capped, never a
-//! body without faces. What a path is (one line, arcs about one axis, lines and arcs turning
-//! with it) is the kernel's certified query; a path it leaves undecided is refused, naming the
-//! piece and the comparison, never fitted instead ([`sweep_placed`]).
+//! is what was asked for ([`finish_closed`], [`crate::Contract::Closed`]): a closed manifold
+//! solid when the ends are capped, by the topology test alone, never a body without faces. No
+//! proof is made, so a caller that wants the result proved valid and facing out asks for it
+//! ([`Body::check_solid`]). Two calls differ: [`sweep_placed`] proves its solid and keeps the
+//! proof, and [`curve_sweep`] runs under the contract its caller names.
+//!
+//! What a path is (one line, arcs about one axis, lines and arcs turning with it) is the
+//! kernel's certified query; a path it leaves undecided is refused, naming the piece and the
+//! comparison, never fitted instead ([`sweep_placed`]).
 //!
 //! The arcs of a profile on one circle: whether to make them one wall is the application's
 //! rule; [`arcs_on_one_circle`], [`curves_meet`] and [`join_arcs`] answer and build for it.
@@ -52,7 +57,8 @@ use solidcore::sweep::directed;
 use solidcore::sweep::extrude::{self as kextrude, Draft, ExtrudeTolerances};
 use solidcore::sweep::screw;
 use solidcore::sweep::segments::{
-    build_faces, line_placements, sweep_along_segments, turn_placements,
+    build_faces, line_placements, sweep_along_segments, sweep_round_closed_segments,
+    turn_placements,
 };
 use solidcore::sweep::skin_ends::SkinEnd;
 use solidcore::topology::brep::p1::ParallelProjectionOptions;
@@ -77,7 +83,7 @@ pub use solidcore::geom::certified::Verdict;
 /// kernel's own reasons.
 pub use solidcore::sweep::api_brep::TaperCornerRefusal as CornerRefusal;
 
-use crate::body::{finish, finish_proved, finish_under, Body, Contract, Expect, Outward};
+use crate::body::{finish_closed, finish_proved, finish_under, Body, Contract, Expect, Outward};
 use crate::error::status;
 use crate::order::{self, Order};
 use crate::session::{read_body, run, with_body};
@@ -275,8 +281,8 @@ pub enum SweepRoute {
     Line,
     /// The rotational sweep along arcs proved about one axis: exact.
     Arc,
-    /// The sweep piece by piece along lines and arcs proved end to end and turning with it:
-    /// exact.
+    /// The sweep piece by piece along lines and arcs proved end to end (open, or closed
+    /// round a loop) and turning with it: exact.
     Segments,
     /// The kernel's curve sweep along the path joined into one curve, carried as the frame
     /// says. With [`SweepFrame::Translate`] it is exact for the joined curve; with
@@ -598,7 +604,7 @@ pub fn planar_faces(loops: &[Curve]) -> Result<Body> {
             return Ok(Err(status(e)));
         }
         b.refresh_cached_topology();
-        finish(k, b, Expect::FACES)
+        finish_closed(k, b, Expect::FACES)
     })
 }
 
@@ -963,7 +969,7 @@ pub fn extrude(
             cap,
             &DRAFT,
         ) {
-            Ok(TaperExtrude::Solid(r)) => finish(k, r, expect),
+            Ok(TaperExtrude::Solid(r)) => finish_closed(k, r, expect),
             Ok(TaperExtrude::Refused(r)) => Ok(Err(refused(r))),
             Err(SolidError::InvalidInput { operation, .. }) if operation == kextrude::OP => {
                 Ok(Err(Error::Argument))
@@ -1004,7 +1010,7 @@ pub fn revolve(
         // a whole turn at most
         let degrees = degrees(angle).min(360.0);
         match directed::revolve(k, &made.refs(), v3(origin), v3(axis), degrees, cap) {
-            Ok(r) => finish(k, r, if cap { Expect::SOLID } else { Expect::FACES }),
+            Ok(r) => finish_closed(k, r, if cap { Expect::SOLID } else { Expect::FACES }),
             Err(e) => Ok(Err(directed_or_status(e))),
         }
     })
@@ -1049,6 +1055,113 @@ fn joined(path: &[KCurve]) -> Out<BSplineCurve> {
 /// The identity placements of a sweep that has not run.
 fn unplaced() -> [Affine; 3] {
     [Affine::of(&Transform::IDENTITY); 3]
+}
+
+/// `profile` swept round `path` turning with it ([`SweepFrame::Follow`]), when the path is one
+/// [`sweep_placed`] sweeps piece by piece round a closed loop: lines and arcs proved end to end
+/// round one closed loop, each joining the next (and the last the first) tangentially, and not
+/// arcs about one axis (those are the rotational sweep). Then the solid (with `cap`; else the
+/// sheet), as [`sweep_placed`] gives it along that path, with the motions that placed the profile
+/// at the start, half way round and back at the start; `None` for any other path or a curve list
+/// refused, which [`sweep_placed`] answers. For a caller with a sweep of its own along the other
+/// paths, so that round a closed path of lines and arcs both sweep the same way.
+///
+/// Round a closed path each closed loop of the profile sweeps a tube closing on itself, with no
+/// cap to join an outline to its holes: so for a solid each loop is swept on its own and the
+/// holes' tubes (the loops after the first, in the profile's order) are taken from the first's.
+///
+/// # Errors
+/// The kernel's status; [`Error::NotSolid`] for walls that do not close into a solid with `cap`;
+/// the boolean's errors taking a hole's tube away.
+pub fn sweep_round_closed_path(
+    profile: &[Curve],
+    path: &[Curve],
+    cap: bool,
+) -> Result<Option<(Body, [Affine; 3])>> {
+    let made = run("sweep_round_closed_path", |k| {
+        let (Ok(made), Ok(along)) = (parse(k, profile), parse(k, path)) else {
+            return Ok(None);
+        };
+        let lines: Vec<&KCurve> = along.curves.iter().collect();
+        if path::path_as_line(k, &lines, &PATH)? != PathShape::Not
+            || path::path_as_arc(k, &along.pieces, &PATH)? != PathShape::Not
+        {
+            return Ok(None);
+        }
+        let PathShape::Is(segs) = path::path_as_closed_segments(k, &along.pieces, &PATH)? else {
+            return Ok(None);
+        };
+        let groups = if cap {
+            loops_of(k, &made.curves)?
+        } else {
+            std::iter::once(0..made.curves.len()).collect()
+        };
+        let mut tubes = Vec::with_capacity(groups.len());
+        for g in groups {
+            let Some(curves) = made.curves.get(g) else {
+                return Ok(Some(Err(Error::Argument)));
+            };
+            match round_closed_segments(k, curves, &segs, cap)? {
+                Ok(t) => tubes.push(t),
+                Err(e) => return Ok(Some(Err(e))),
+            }
+        }
+        Ok(Some(Ok(tubes)))
+    })?;
+    let tubes = match made {
+        None => return Ok(None),
+        Some(r) => r?,
+    };
+    let mut tubes = tubes.into_iter();
+    let Some((first, placed)) = tubes.next() else {
+        return Err(Error::Argument);
+    };
+    let mut whole = Body::new(first);
+    for (hole, _) in tubes {
+        whole = match crate::boolean::boolean(whole, Body::new(hole), crate::BooleanOp::Subtract)? {
+            Some(b) => b,
+            None => return Err(Error::Empty),
+        };
+    }
+    Ok(Some((whole, placed)))
+}
+
+/// The runs of `curves` that each close a loop, in order: each run's curves proved end to end,
+/// the last's end proved to meet the first's start (to the path gap). One run of all of them
+/// when they do not split into closed loops.
+fn loops_of(k: &Kernel, curves: &[KCurve]) -> solidcore::Result<Vec<std::ops::Range<usize>>> {
+    let mut out = Vec::new();
+    let mut from = 0;
+    for (i, c) in curves.iter().enumerate() {
+        let Some(first) = curves.get(from) else {
+            break;
+        };
+        if arc::curves_meet(k, c, first, PATH.gap)?.is_yes() {
+            out.push(from..i + 1);
+            from = i + 1;
+        }
+    }
+    if from != curves.len() || out.is_empty() {
+        return Ok(std::iter::once(0..curves.len()).collect());
+    }
+    Ok(out)
+}
+
+/// The profile's `curves` swept round the closed `segments` ([`sweep_round_closed_segments`]),
+/// finished as a solid with `cap` (else a sheet), with its motions.
+fn round_closed_segments(
+    k: &mut Kernel,
+    curves: &[KCurve],
+    segs: &[path::Segment],
+    cap: bool,
+) -> solidcore::Result<Out<(Brep, [Affine; 3])>> {
+    let expect = if cap { Expect::SOLID } else { Expect::FACES };
+    match sweep_round_closed_segments(k, curves, segs, cap, &PATH) {
+        Ok((b, motions)) => {
+            Ok(finish_proved(k, b, expect)?.map(|(b, _)| (b, motions.map(|t| Affine::of(&t)))))
+        }
+        Err(e) => Ok(Err(status(e))),
+    }
 }
 
 /// `profile` swept along `path`, with the rigid motions that placed it at the start, half way
@@ -1203,7 +1316,20 @@ pub fn sweep_placed(
                 Err(e) => Err(status(e)),
             },
         )
-    })?;
+    });
+    let body = match body {
+        Ok(b) => b,
+        // Round a closed path of lines and arcs the curve sweep cannot close (a wall shrinking
+        // to an edge): the same exact pieces, the walls closing on each other. Where the curve
+        // sweep builds, its result stays.
+        Err(e) if frame == SweepFrame::Follow => {
+            match sweep_round_closed_path(profile, path, cap) {
+                Ok(Some((b, placed))) => return Ok((b, placed, SweepRoute::Segments)),
+                Ok(None) | Err(_) => return Err(e),
+            }
+        }
+        Err(e) => return Err(e),
+    };
     Ok((body, placed, route))
 }
 
@@ -1518,7 +1644,7 @@ pub fn loft(sections: &[Vec<Curve>], degree: u32, cap: bool) -> Result<Body> {
             return Ok(planar);
         }
         match create_skin_primitive(k, &counts, &made.refs(), degree as usize, cap) {
-            Ok(r) => finish(k, r.brep, if cap { Expect::SOLID } else { Expect::FACES }),
+            Ok(r) => finish_closed(k, r.brep, if cap { Expect::SOLID } else { Expect::FACES }),
             Err(e) => Ok(Err(status(e))),
         }
     })
@@ -1628,7 +1754,7 @@ fn planar_sides(
         return Ok(None);
     }
     b.refresh_cached_topology();
-    finish(k, b, if cap { Expect::SOLID } else { Expect::FACES }).map(Some)
+    finish_closed(k, b, if cap { Expect::SOLID } else { Expect::FACES }).map(Some)
 }
 
 /// Whether a loft section (its plane's normal and its middle) faces back from the section
@@ -1724,7 +1850,7 @@ pub fn loft_sheet(sections: &[Vec<Curve>], degree: u32) -> Result<(Body, Option<
                 SkinSources::Traced(faces) => Some(faces),
                 SkinSources::NotTraced { .. } => None,
             };
-            Ok(finish(k, skin.brep, Expect::FACES)?.map(|b| (b, traced)))
+            Ok(finish_closed(k, skin.brep, Expect::FACES)?.map(|b| (b, traced)))
         },
     )?;
     let (brep, traced) = made?;
@@ -1766,7 +1892,7 @@ pub fn loft_sheet_planar_g1(
     });
     let made = run("loft_sheet_planar_g1", |k| {
         match skin_planar_g1(k, &given, tangent_at, crown, faced, MAX_CURVES) {
-            Ok(skin) => Ok(finish(k, skin.brep, Expect::FACES)?.map(|b| (b, skin.sources))),
+            Ok(skin) => Ok(finish_closed(k, skin.brep, Expect::FACES)?.map(|b| (b, skin.sources))),
             Err(e) => Ok(Err(status(e))),
         }
     })??;
@@ -1842,7 +1968,7 @@ pub fn loft_with_ends(sections: &[Vec<Curve>], cap: bool, ends: [LoftEnd; 2]) ->
         }
         let counts: Vec<usize> = sections.iter().map(Vec::len).collect();
         match skin_with_ends(k, &counts, &made.refs(), cap, ends) {
-            Ok(Ok(b)) => finish(k, b, if cap { Expect::SOLID } else { Expect::FACES }),
+            Ok(Ok(b)) => finish_closed(k, b, if cap { Expect::SOLID } else { Expect::FACES }),
             Ok(Err(e)) => Ok(Err(e)),
             Err(e) => Ok(Err(status(e))),
         }
@@ -1979,7 +2105,7 @@ pub fn loft_to_point(section: &[Curve], apex: [f64; 3]) -> Result<Body> {
             return Ok(Err(status(e)));
         }
         b.refresh_cached_topology();
-        finish(k, b, Expect::SOLID)
+        finish_closed(k, b, Expect::SOLID)
     })
 }
 
@@ -2107,7 +2233,7 @@ pub fn loft_to_point_through(
             return Ok(Err(status(e)));
         }
         b.refresh_cached_topology();
-        finish(k, b, Expect::SOLID)
+        finish_closed(k, b, Expect::SOLID)
     })
 }
 
@@ -2167,7 +2293,7 @@ pub fn sweep_stations(profile: &[Curve], stations: &[Affine], end: Ends) -> Resu
                 Err(e) => return Ok(Err(status(e))),
             }
         }
-        finish(
+        finish_closed(
             k,
             r,
             if end == Ends::Open {
@@ -2323,7 +2449,7 @@ pub fn screw_sweep_with(
             walls,
         );
         match built {
-            Ok(b) => finish(k, b, Expect::SOLID),
+            Ok(b) => finish_closed(k, b, Expect::SOLID),
             Err(e) => Ok(Err(status(e))),
         }
     })
@@ -2929,5 +3055,49 @@ mod tests {
         let body = loft(&[lower, upper], 1, true).expect("loft");
         assert_eq!(body.counts().expect("counts"), [6, 12, 8]);
         assert!((body.volume(1.0e-3).expect("volume") - 96.0).abs() < 1.0e-6);
+    }
+
+    /// #22655: a sweep's plain call tests its solid for closure only ([`finish_closed`],
+    /// `Contract::Closed`), so it decides no volume sign. Since #21968 every extrusion and
+    /// revolution SolidCraft made, a cut's tools among them, was proved valid and facing out,
+    /// one decided volume sign each, and nothing read the proof. Counted on the kernel, so the
+    /// same on every machine. A caller that wants the proof asks for it: `check_solid` on the
+    /// same body decides one.
+    #[test]
+    fn a_plain_sweep_decides_no_volume_sign() {
+        use crate::session::counted;
+        use solidcore::kernel::WorkCounters;
+        const Z: [f64; 3] = [0.0, 0.0, 1.0];
+        let circle = [Curve::Arc {
+            center: [0.0, 0.0, 0.0],
+            axis: Z,
+            reference: [1.0, 0.0, 0.0],
+            radius: 3.0,
+            start: 0.0,
+            end: 2.0 * PI,
+        }];
+        let (cylinder, decided) = counted(WorkCounters::volume_sign_decisions, || {
+            extrude(&circle, Z, 2.0, 0.0, DraftCorner::default(), true)
+        });
+        let cylinder = cylinder.expect("extrude");
+        assert_eq!(decided, 0, "the extrusion");
+        // x 10 to 20, z 0 to 30 in the XZ plane, turned 270 degrees about Z
+        let p = [[10.0, 0.0], [20.0, 0.0], [20.0, 30.0], [10.0, 30.0]];
+        let rectangle: Vec<Curve> = (0..4)
+            .map(|i| Curve::Line {
+                start: [p[i][0], 0.0, p[i][1]],
+                end: [p[(i + 1) % 4][0], 0.0, p[(i + 1) % 4][1]],
+            })
+            .collect();
+        let (ring, decided) = counted(WorkCounters::volume_sign_decisions, || {
+            revolve(&rectangle, [0.0; 3], Z, 1.5 * PI, true)
+        });
+        ring.expect("revolve");
+        assert_eq!(decided, 0, "the revolution");
+        let (checked, decided) = counted(WorkCounters::volume_sign_decisions, || {
+            cylinder.check_solid()
+        });
+        assert_eq!(checked, Ok(()));
+        assert_eq!(decided, 1, "the proof asked for");
     }
 }

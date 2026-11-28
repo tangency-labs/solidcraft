@@ -636,7 +636,7 @@ fn app_bar_displacement_changes_paint_only_and_skips_resizing_and_appearing_item
     assert_eq!(render(0.35, 510.0, 900.0, true).0.min, previous.min, "retargeting starts where the last frame was painted");
     assert_eq!(render(0.55, 510.0, 900.0, true).0.left(), 510.0);
     let key = motion_key(&ctx);
-    assert!(!ctx.data(|data| data.get_temp::<BarMotion>(key).unwrap().items.get("save").unwrap().active));
+    assert!(!ctx.data(|data| { data.get_temp::<BarMotion>(key).unwrap().items.get("save").unwrap().active }));
 }
 
 #[test]
@@ -1079,30 +1079,40 @@ const TAB_HANDLES: TabHandles<'static> = TabHandles {
     file_drop: "t:file_drop",
 };
 
-const VIEW_MENU: [TabMenuRow<'static>; 4] = [
-    TabMenuRow::new("move_to_window", "Move to window", "").for_local_view().with_children(&[TabMenuRow::new("move_new", "New window", "")]),
-    TabMenuRow::new("vclose", "Close view", "Ctrl+W"),
-    TabMenuRow::new("vothers", "Close other views", "").needing_others().separated(),
-    TabMenuRow::new("vright", "Close views to the right", "").needing_others(),
-];
-const PLUS_MENU: [TabMenuRow<'static>; 4] = [
-    TabMenuRow::heading("Open as a view"),
-    TabMenuRow::new("plus_render", "Render", "").with_icon("render", Some(egui::Color32::GREEN)),
-    TabMenuRow::new("plus_dup", "Duplicate this view", "").with_icon("duplicate", None).separated(),
-    TabMenuRow::new("plus_reopen", "Reopen closed view", "Ctrl+Shift+T").with_icon("reopen", None),
-];
-const SWITCHER_MENU: [TabMenuRow<'static>; 1] = [TabMenuRow::new("as_tabs", "Show views as tabs", "")];
-
-const LAYOUT_MENU: [TabMenuRow<'static>; 8] = [
-    TabMenuRow::new("layout.single", "Single view", ""),
-    TabMenuRow::new("layout.side_by_side", "Two side by side", ""),
-    TabMenuRow::new("layout.stacked", "Two stacked", ""),
-    TabMenuRow::new("layout.large_and_two", "One large and two small", ""),
-    TabMenuRow::new("layout.grid", "Two by two", ""),
-    TabMenuRow::new("fill.angle", "A new angle of this view", ""),
-    TabMenuRow::new("fill.standard", "Standard angles", ""),
-    TabMenuRow::new("fill.ask", "A choice in each empty cell", ""),
-];
+static VIEW_MENU: std::sync::LazyLock<Vec<crate::Item>> = std::sync::LazyLock::new(|| {
+    vec![
+        crate::Item::submenu("move_to_window", "Move to window", "", vec![crate::Item::action("move_new", "New window", "")])
+            .with(serde_json::json!({"_tab_menu":{"needs_local_view":true}})),
+        crate::Item::action("vclose", "Close view", "").key("Ctrl+W"),
+        crate::Item::sep(),
+        crate::Item::action("vothers", "Close other views", "").with(serde_json::json!({"_tab_menu":{"needs_others":true}})),
+        crate::Item::action("vright", "Close views to the right", "").with(serde_json::json!({"_tab_menu":{"needs_others":true}})),
+        crate::Item::action("view.compass", "Compass", ""),
+    ]
+});
+static PLUS_MENU: std::sync::LazyLock<Vec<crate::Item>> = std::sync::LazyLock::new(|| {
+    vec![
+        crate::Item::heading("Open as a view"),
+        crate::Item::action("plus_render", "Render", "render"),
+        crate::Item::sep(),
+        crate::Item::action("plus_dup", "Duplicate this view", "duplicate"),
+        crate::Item::action("plus_reopen", "Reopen closed view", "reopen").key("Ctrl+Shift+T"),
+    ]
+});
+static SWITCHER_MENU: std::sync::LazyLock<Vec<crate::Item>> =
+    std::sync::LazyLock::new(|| vec![crate::Item::action("as_tabs", "Show views as tabs", "")]);
+static LAYOUT_MENU: std::sync::LazyLock<Vec<crate::Item>> = std::sync::LazyLock::new(|| {
+    vec![
+        crate::Item::action("layout.single", "Single view", ""),
+        crate::Item::action("layout.side_by_side", "Two side by side", ""),
+        crate::Item::action("layout.stacked", "Two stacked", ""),
+        crate::Item::action("layout.large_and_two", "One large and two small", ""),
+        crate::Item::action("layout.grid", "Two by two", ""),
+        crate::Item::action("fill.angle", "A new angle of this view", ""),
+        crate::Item::action("fill.standard", "Standard angles", ""),
+        crate::Item::action("fill.ask", "A choice in each empty cell", ""),
+    ]
+});
 
 const VIEWS: [ViewTab<'static>; 3] = [
     ViewTab {
@@ -1152,13 +1162,20 @@ const VIEWS: [ViewTab<'static>; 3] = [
     },
 ];
 
-const TAB_MENU: [TabMenuRow<'static>; 2] = [TabMenuRow::new("close", "Close", ""), TabMenuRow::new("others", "Close Others", "").needing_others()];
+static TAB_MENU: std::sync::LazyLock<Vec<crate::Item>> = std::sync::LazyLock::new(|| {
+    vec![
+        crate::Item::action("close", "Close", ""),
+        crate::Item::action("others", "Close Others", "").with(serde_json::json!({"_tab_menu":{"needs_others":true}})),
+    ]
+});
 
 /// Three document tabs, the first selected, in a strip 600 wide.
 struct TabsRig {
     ctx: egui::Context,
     time: std::cell::Cell<f64>,
     screen_height: f32,
+    compass: [Option<bool>; 3],
+    layout_details: bool,
     /// The first design has the three [`VIEWS`], shown as sub-tabs (`Some(true)`) or behind a
     /// switcher (`Some(false)`); the strip then has more room.
     views: Option<bool>,
@@ -1171,13 +1188,15 @@ struct TabsRig {
     pop_out: bool,
     /// The + has a menu.
     plus: bool,
-    plus_rows: &'static [TabMenuRow<'static>],
+    plus_rows: &'static [crate::Item],
     /// The name of this view is being typed: its place, and the text and focus the strip edits.
     rename: Option<usize>,
     text: std::cell::RefCell<String>,
     focused: std::cell::Cell<bool>,
     /// The first design's sub-tabs are folded into its tab.
     collapsed: std::cell::Cell<bool>,
+    /// A double-click renames ([`TabStrip::double_click_renames`]); on unless a test turns it off.
+    renames: std::cell::Cell<bool>,
 }
 
 impl TabsRig {
@@ -1196,6 +1215,8 @@ impl TabsRig {
             ctx: crate::test_support::context(),
             time: std::cell::Cell::new(0.0),
             screen_height: 400.0,
+            compass: [None; 3],
+            layout_details: false,
             views,
             room: None,
             single_view: false,
@@ -1210,6 +1231,7 @@ impl TabsRig {
             text: std::cell::RefCell::new(text),
             focused: std::cell::Cell::new(false),
             collapsed: std::cell::Cell::new(false),
+            renames: std::cell::Cell::new(true),
         };
         rig.frame(Vec::new());
         rig
@@ -1232,6 +1254,9 @@ impl TabsRig {
         let tab =
             |name: &'static str| DocTab { name, list_name: name, dirty: false, place: "Not saved yet", security: None, views: &[], collapsed: false };
         let mut views = VIEWS;
+        for (view, compass) in views.iter_mut().zip(self.compass) {
+            view.compass = compass;
+        }
         if self.detached {
             views[1].to_window = Some(1);
             views[1].window_name = Some("Window 2");
@@ -1245,7 +1270,22 @@ impl TabsRig {
             &[]
         };
         let first = DocTab { views, collapsed: self.collapsed.get(), ..tab(self.name) };
-        let layout = self.layout.map(|(visible, window_count)| layout_test_data(visible, window_count));
+        let mut layout = self.layout.map(|(visible, window_count)| layout_test_data(visible, window_count));
+        if self.layout_details
+            && let Some(data) = &mut layout
+        {
+            data.link = "both".into();
+            data.can_link = false;
+            data.text.this_window = "This window".into();
+            data.text.link = "Link cameras".into();
+            data.text.off = "Off".into();
+            data.text.orientation = "Orientation".into();
+            data.text.zoom = "Zoom".into();
+            data.text.both = "Both".into();
+            for window in &mut data.windows {
+                window.display = Some(format!("Display {}", window.id + 1));
+            }
+        }
         let (mut text, mut focused) = (self.text.borrow().clone(), self.focused.get());
         let mut strip = TabStrip {
             tabs: if self.pop_out { vec![first] } else { vec![first, tab("Two"), tab("Three")] },
@@ -1253,7 +1293,7 @@ impl TabsRig {
             shown_selected: Some(0),
             pop_out: self.pop_out,
             title_bar: false,
-            double_click_renames: true,
+            double_click_renames: self.renames.get(),
             rename: None,
             menu: &TAB_MENU,
             close_name: "Close tab",
@@ -1284,7 +1324,7 @@ impl TabsRig {
             layout_current: "layout.single",
             layout_tip: "Layout",
             layout_fill: "fill.angle",
-            layout_fill_heading: "",
+            layout_fill_heading: "Empty cells show",
             switcher_menu: &SWITCHER_MENU,
             tear_off_below: 40.0,
         };
@@ -1305,6 +1345,18 @@ impl TabsRig {
         let mut actions = self.frame(vec![egui::Event::PointerMoved(at)]);
         actions.extend(self.frame(vec![egui::Event::PointerMoved(at), event(true)]));
         actions.extend(self.frame(vec![egui::Event::PointerMoved(at), event(false)]));
+        actions
+    }
+
+    /// Two clicks at `at` close enough together to be a double-click.
+    fn double_press(&self, at: Pos2) -> Vec<TabAction> {
+        self.time.set(self.time.get() + 1.0);
+        let event = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        let mut actions = self.frame(vec![egui::Event::PointerMoved(at)]);
+        for _ in 0..2 {
+            actions.extend(self.frame(vec![egui::Event::PointerMoved(at), event(true)]));
+            actions.extend(self.frame(vec![egui::Event::PointerMoved(at), event(false)]));
+        }
         actions
     }
 
@@ -1373,17 +1425,23 @@ fn the_tab_strip_returns_what_was_clicked_and_dragged() {
 }
 
 fn file_item(id: &str, enabled: bool) -> FileItem {
-    FileItem { id: id.to_string(), label: format!("Item {id}"), key: String::new(), icon: "open".to_string(), enabled }
+    FileItem { id: id.to_string(), label: format!("Item {id}"), icon: "open".into(), enabled, ..Default::default() }
 }
 
 /// The File menu drawn for a frame with `events`: what it returned, and where each text was.
-fn file_menu_frame(ctx: &egui::Context, time: f64, events: Vec<egui::Event>) -> (FileMenuOut, Vec<(String, Pos2)>) {
-    let rows = vec![FileRow::Item(file_item("new", true)), FileRow::Item(file_item("save", false)), FileRow::Separator];
+fn file_menu_frame(ctx: &egui::Context, time: f64, events: Vec<egui::Event>) -> (crate::MenuOutput, Vec<(String, Pos2)>) {
+    let rows = vec![file_item("new", true), file_item("save", false), crate::Item::sep()];
     file_menu_frame_of(ctx, &rows, 600.0, time, events)
 }
 
 /// The File menu with `rows` in an 800 by `height` window, drawn for a frame with `events`.
-fn file_menu_frame_of(ctx: &egui::Context, rows: &[FileRow], height: f32, time: f64, events: Vec<egui::Event>) -> (FileMenuOut, Vec<(String, Pos2)>) {
+fn file_menu_frame_of(
+    ctx: &egui::Context,
+    rows: &[FileRow],
+    height: f32,
+    time: f64,
+    events: Vec<egui::Event>,
+) -> (crate::MenuOutput, Vec<(String, Pos2)>) {
     let input = egui::RawInput {
         screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, height))),
         time: Some(time),
@@ -1391,9 +1449,9 @@ fn file_menu_frame_of(ctx: &egui::Context, rows: &[FileRow], height: f32, time: 
         focused: true,
         ..Default::default()
     };
-    let mut out = FileMenuOut::default();
+    let mut out = crate::MenuOutput::default();
     let output = crate::test_support::raw_frame(ctx, input, |ui| {
-        out = file_menu(ui.ctx(), rows, pos2(100.0, HEIGHT), egui::Id::unique("test_file_menu"), false);
+        out = crate::Menu::popup(ui.ctx(), egui::Id::unique("test_file_menu"), crate::MenuAnchor::Point(pos2(100.0, HEIGHT)), rows, false);
     });
     let texts = crate::test_support::text_shapes(&output).map(|s| (s.galley.text().to_string(), s.visual_bounding_rect().center())).collect();
     (out, texts)
@@ -1403,11 +1461,11 @@ fn file_menu_frame_of(ctx: &egui::Context, rows: &[FileRow], height: f32, time: 
 #[test]
 fn a_file_menu_taller_than_the_window_scrolls_its_rows() {
     let ctx = crate::test_support::context();
-    let rows: Vec<FileRow> = (0..40).map(|i| FileRow::Item(file_item(&format!("r{i}"), true))).collect();
+    let rows: Vec<FileRow> = (0..40).map(|i| file_item(&format!("r{i}"), true)).collect();
     let height = 360.0;
     file_menu_frame_of(&ctx, &rows, height, 0.0, Vec::new());
-    file_menu_frame_of(&ctx, &rows, height, 0.1, Vec::new());
-    let menu = ctx.memory(|m| m.area_rect(egui::Id::unique("test_file_menu"))).expect("the menu is laid out");
+    let (out, _) = file_menu_frame_of(&ctx, &rows, height, 0.1, Vec::new());
+    let menu = out.rect.expect("the menu is laid out");
     assert!(menu.bottom() <= height, "the menu ends at {} inside a {height} high window", menu.bottom());
     let shown = |texts: &[(String, Pos2)], text: &str| texts.iter().any(|(t, p)| t == text && menu.contains(*p));
     let over = menu.center();
@@ -1434,11 +1492,11 @@ fn the_file_menu_returns_the_row_chosen() {
     let mut time = 0.0;
     let mut click = |at: Pos2| {
         let press = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
-        let mut last = FileMenuOut::default();
+        let mut last = crate::MenuOutput::default();
         for events in [vec![egui::Event::PointerMoved(at)], vec![egui::Event::PointerMoved(at), press(true)], vec![press(false)]] {
             time += 0.5;
             let (out, _) = file_menu_frame(&ctx, time, events);
-            if out.chosen.is_some() || out.close {
+            if out.picked.is_some() || out.close {
                 last = out;
             }
         }
@@ -1449,9 +1507,13 @@ fn the_file_menu_returns_the_row_chosen() {
     let (_, texts) = file_menu_frame(&ctx, 0.1, Vec::new());
     let at = |text: &str| texts.iter().find(|(t, _)| t == text).map(|(_, p)| *p).unwrap_or_else(|| panic!("{text} is painted"));
     let (new, save) = (at("Item new"), at("Item save"));
-    assert_eq!(click(save), FileMenuOut::default(), "a disabled row chooses nothing and the menu stays");
-    assert_eq!(click(new), FileMenuOut { chosen: Some("new".into()), close: true });
-    assert_eq!(click(pos2(700.0, 500.0)), FileMenuOut { chosen: None, close: true }, "a click elsewhere closes it");
+    let disabled = click(save);
+    assert!(disabled.picked.is_none() && !disabled.close, "a disabled row chooses nothing and the menu stays");
+    let picked = click(new);
+    assert_eq!(picked.picked.as_ref().map(|item| item.id.as_str()), Some("new"));
+    assert!(picked.close);
+    let outside = click(pos2(700.0, 500.0));
+    assert!(outside.picked.is_none() && outside.close, "a click elsewhere closes it");
 }
 
 /// The switcher returns its click and publishes where it is.
@@ -1694,6 +1756,23 @@ fn the_chevron_folds_a_designs_sub_tabs_into_its_tab() {
     assert!(solidcraft_ui_registry::rect_of("t:vcollapse").is_none(), "a pop-out's strip has no chevron");
 }
 
+/// A double-click on a sub-tab shows the view (its first click) and then asks to rename it through
+/// the view menu's Rename row, in both sub-tab styles; with double-click renaming off, both clicks
+/// only show the view, as before.
+#[test]
+fn a_double_click_on_a_sub_tab_renames_its_view() {
+    for clear in [false, true] {
+        for renames in [true, false] {
+            let mut rig = TabsRig::with(Some(true));
+            rig.clear = clear;
+            rig.renames.set(renames);
+            rig.frame(Vec::new());
+            let second = if renames { TabAction::ViewMenu { view: 1, id: "vrename".into() } } else { TabAction::SelectView(1) };
+            assert_eq!(rig.double_press(rig.at("t:view:1")), vec![TabAction::SelectView(1), second], "clear={clear}, renames={renames}");
+        }
+    }
+}
+
 /// With a view switcher the views list in a menu: a row picks a view, the footer's rows are the app's.
 #[test]
 fn the_view_switcher_lists_every_view() {
@@ -1770,8 +1849,14 @@ fn the_plus_menu_has_a_header_icon_rows_and_a_separator() {
     assert_eq!(rig.press(rig.at("t:menu:plus_reopen"), egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "plus_reopen".into() }]);
 }
 
-const SHEET_PLUS_MENU: [TabMenuRow<'static>; 1] = [TabMenuRow::new("sheet", "Sheet", "")
-    .with_children(&[TabMenuRow::new("sheet.new", "New sheet", ""), TabMenuRow::new("sheet.open:drawing/sheet", "Drawing / Sheet 1", "")])];
+static SHEET_PLUS_MENU: std::sync::LazyLock<Vec<crate::Item>> = std::sync::LazyLock::new(|| {
+    vec![crate::Item::submenu(
+        "sheet",
+        "Sheet",
+        "",
+        vec![crate::Item::action("sheet.new", "New sheet", ""), crate::Item::action("sheet.open:drawing/sheet", "Drawing / Sheet 1", "")],
+    )]
+});
 
 #[test]
 fn plus_sheet_submenu_hover_survives_the_gap_and_returns_the_child_action() {
@@ -1833,12 +1918,13 @@ fn plus_sheet_submenu_arrow_right_and_enter_choose_the_child_action() {
 /// The row builders set only what they say, and the glyphs the menus use exist.
 #[test]
 fn menu_row_builders_and_glyphs() {
-    let plain = TabMenuRow::new("a", "A", "Ctrl+A");
-    assert!(!plain.heading && !plain.separator_before && !plain.needs_others && plain.icon.is_empty() && plain.accent.is_none());
-    let head = TabMenuRow::heading("H");
-    assert!(head.heading && head.id == "H" && head.label == "H");
-    let row = plain.separated().needing_others().with_icon("close", None);
-    assert!(row.separator_before && row.needs_others && row.icon == "close");
+    let plain = crate::Item::action("a", "A", "").key("Ctrl+A");
+    assert!(!plain.is_heading() && !plain.is_sep() && plain.icon.is_empty() && plain.accent.is_none());
+    let head = crate::Item::heading("H");
+    assert!(head.is_heading() && head.label == "H");
+    let row = crate::Item::action("a", "A", "close").with(serde_json::json!({"_tab_menu":{"needs_others":true}}));
+    assert_eq!(row.params.as_ref().and_then(|params| params.pointer("/_tab_menu/needs_others")).and_then(serde_json::Value::as_bool), Some(true));
+    assert!(row.icon == "close");
     for glyph in ["model", "sheet", "render", "animation", "rename", "close", "duplicate", "tiles", "reopen"] {
         assert!(!glyph_lines(glyph).is_empty(), "{glyph} has strokes");
     }
@@ -1865,6 +1951,57 @@ fn a_view_menu_opens_under_its_view_and_turns_off_rows_that_do_not_apply() {
     rig.frame(Vec::new());
     rig.frame(Vec::new());
     assert_eq!(rig.press(rig.at("t:menu:vothers"), egui::PointerButton::Primary), vec![TabAction::ViewMenu { view: 2, id: "vothers".into() }]);
+}
+
+#[test]
+fn switcher_context_actions_use_the_target_views_availability_and_compass() {
+    for (index, compass) in [(2, None), (1, Some(false)), (0, Some(true))] {
+        let mut rig = TabsRig::with(Some(false));
+        rig.ctx.enable_accesskit();
+        rig.compass[index] = compass;
+        rig.frame(Vec::new());
+        rig.press(rig.at("t:switcher"), egui::PointerButton::Primary);
+        rig.frame(Vec::new());
+        rig.frame(Vec::new());
+        rig.press(rig.at(&format!("t:switcher:row:{index}")), egui::PointerButton::Secondary);
+        rig.frame(Vec::new());
+        let (_, output) = rig.frame_output(Vec::new());
+        let nodes = &output.platform_output.accesskit_update.as_ref().unwrap().nodes;
+        let right = nodes.iter().find(|(_, node)| node.label() == Some("Close views to the right")).unwrap();
+        assert_eq!(right.1.is_disabled(), index == 2);
+        if let Some(on) = compass {
+            let row = nodes.iter().find(|(_, node)| node.label() == Some("Compass")).unwrap();
+            assert_eq!(row.1.toggled(), Some(if on { egui::accesskit::Toggled::True } else { egui::accesskit::Toggled::False }));
+            assert_eq!(
+                rig.press(rig.at("t:menu:view.compass"), egui::PointerButton::Primary),
+                vec![TabAction::ViewMenu { view: index, id: "view.compass".into() }]
+            );
+        } else {
+            assert!(solidcraft_ui_registry::rect_of("t:menu:view.compass").is_none());
+            assert!(rig.press(rig.at("t:menu:vright"), egui::PointerButton::Primary).is_empty());
+        }
+    }
+}
+
+#[test]
+fn legacy_layout_rows_keep_their_grid_glyph_and_fill_heading() {
+    let mut rig = TabsRig::with(Some(true));
+    rig.screen_height = 800.0;
+    rig.layout = Some((2, 1));
+    rig.frame(Vec::new());
+    rig.press(rig.at("view:layout"), egui::PointerButton::Primary);
+    rig.frame(Vec::new());
+    let (_, output) = rig.frame_output(Vec::new());
+    let row = solidcraft_ui_registry::rect_of("t:menu:layout.grid").unwrap();
+    fn cells(shape: &egui::Shape, row: Rect) -> usize {
+        match shape {
+            egui::Shape::Rect(rect) => usize::from(row.contains_rect(rect.rect) && rect.rect.right() <= row.left() + Tokens::get().control_height),
+            egui::Shape::Vec(shapes) => shapes.iter().map(|shape| cells(shape, row)).sum(),
+            _ => 0,
+        }
+    }
+    assert!(output.shapes.iter().map(|shape| cells(&shape.shape, row)).sum::<usize>() >= 4, "the grid choice retains its four miniature cells");
+    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "EMPTY CELLS SHOW")));
 }
 
 #[test]
@@ -1981,7 +2118,8 @@ fn renaming_a_view_remains_editable_in_the_switcher_fallback() {
 
 #[test]
 fn changing_the_design_discards_its_open_view_popup() {
-    let rig = TabsRig::with(Some(true));
+    let rig = TabsRig::build(Some(true), true, None);
+    rig.press(rig.at("t:view:1"), egui::PointerButton::Primary);
     rig.press(rig.at("t:view:1"), egui::PointerButton::Secondary);
     rig.frame(Vec::new());
     rig.frame(Vec::new());
@@ -1989,6 +2127,10 @@ fn changing_the_design_discards_its_open_view_popup() {
     clear_view_popup(&rig.ctx, egui::Id::unique("test_tabs"));
     rig.frame(Vec::new());
     assert!(solidcraft_ui_registry::handle_at("t:menu:vclose").is_none());
+    rig.press(rig.at("t:vnew"), egui::PointerButton::Primary);
+    let opener = rig.ctx.memory(|memory| memory.focused());
+    rig.frame(vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }]);
+    assert_eq!(rig.ctx.memory(|memory| memory.focused()), opener, "closing Plus cannot restore a previous design's view focus");
 }
 
 // The layout engine: pure arithmetic over a spec, no egui.
@@ -2008,7 +2150,9 @@ fn index_of(spec: &Spec, id: &str) -> usize {
 /// Every placement lies in the bar's room, none has a negative or non-finite width, and no two
 /// overlap (the overflow button and the centre item included).
 fn assert_sound(spec: &Spec, placed: &Placed) {
-    let clamp = |v: f32| if v.is_nan() { 0.0 } else { v.clamp(0.0, crate::app_bar_layout::MAX_WIDTH) };
+    let clamp = |v: f32| {
+        if v.is_nan() { 0.0 } else { v.clamp(0.0, crate::app_bar_layout::MAX_WIDTH) }
+    };
     let (left, right) = (clamp(spec.captions_left), clamp(spec.width) - clamp(spec.captions_right));
     assert_eq!(placed.placements.len(), spec.items.len());
     let mut spans: Vec<(f32, f32, String)> = Vec::new();
@@ -2595,13 +2739,13 @@ fn app_bar_more_menu_returns_the_original_action_and_closes() {
     let report = rows.iter().find(|r| r.id == "report").expect("report overflowed");
     assert_eq!(report.action, BarAction::Report);
     assert_eq!(rig.click("menu:appbar:overflow:report"), [BarAction::Report]);
-    assert!(!rig.ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_appbar_overflow_open")).unwrap_or(false)));
+    assert!(!rig.ctx.data(|d| { d.get_temp::<bool>(egui::Id::unique("sc_appbar_overflow_open")).unwrap_or(false) }));
     rig.click("appbar:overflow");
     rig.frame(Vec::new());
     assert!(rig.click("menu:appbar:overflow:action:1").is_empty(), "disabled undo cannot run");
-    assert!(rig.ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_appbar_overflow_open")).unwrap_or(false)));
+    assert!(rig.ctx.data(|d| { d.get_temp::<bool>(egui::Id::unique("sc_appbar_overflow_open")).unwrap_or(false) }));
     rig.frame(vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }]);
-    assert!(!rig.ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_appbar_overflow_open")).unwrap_or(false)));
+    assert!(!rig.ctx.data(|d| { d.get_temp::<bool>(egui::Id::unique("sc_appbar_overflow_open")).unwrap_or(false) }));
     rig.click("appbar:overflow");
     rig.frame(Vec::new());
     // The uniform layout may put more rows in this menu, including at its bottom edge.
@@ -2613,7 +2757,7 @@ fn app_bar_more_menu_returns_the_original_action_and_closes() {
             egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE },
         ]);
     }
-    assert!(!rig.ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_appbar_overflow_open")).unwrap_or(false)));
+    assert!(!rig.ctx.data(|d| { d.get_temp::<bool>(egui::Id::unique("sc_appbar_overflow_open")).unwrap_or(false) }));
 }
 
 mod app_bar_items {
@@ -3056,4 +3200,26 @@ fn layout_menu_keeps_glyph_choices_open_and_escape_restores_the_button() {
     assert!(rig.frame(vec![key(egui::Key::Enter)]).is_empty());
     rig.frame(Vec::new());
     assert!(solidcraft_ui_registry::rect_of("layout.side_by_side").is_some());
+}
+
+#[test]
+fn layout_menu_retains_window_details_and_unavailable_link_mode() {
+    let mut rig = TabsRig::with(Some(true));
+    rig.screen_height = 800.0;
+    rig.clear = true;
+    rig.layout = Some((2, 2));
+    rig.layout_details = true;
+    rig.frame(Vec::new());
+    rig.press(rig.at("view:layout"), egui::PointerButton::Primary);
+    rig.frame(Vec::new());
+    let (_, output) = rig.frame_output(Vec::new());
+    let text = |value: &str| output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == value));
+    assert!(text("This window — Window 1 · Display 1"));
+    assert!(text("Window 2 · Display 2"));
+    assert!(text("Both"), "the disabled camera-link mode remains visible before opening its choices");
+    rig.press(rig.at("menu:layout.link"), egui::PointerButton::Primary);
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("layout.link.off").is_some(), "disabled choices remain inspectable");
+    assert!(rig.press(rig.at("layout.link.off"), egui::PointerButton::Primary).is_empty(), "inspection cannot change a disabled mode");
 }
