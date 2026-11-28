@@ -245,8 +245,9 @@ Stage 4 is dropped. The bulk is the trims, and they are fitted where the answer 
 ### What changes
 
 1. **The boolean takes the exact intersection.** When a face-face intersection pairs a
-   screw-swept wall (live definition, no radial law over the face) with a cylinder whose axis is
-   the screw's axis (within the record's tolerance, measured from the frames), the intersection
+   screw-swept wall (no radial law over the face) with a cylinder whose axis is the screw's
+   axis (to a thousandth of the intersection tolerance, measured from the frames, and that offset
+   added to each edge's deviation), the intersection
    is the set of iso curves `w = w₀` at the profile's crossings of the radius: their 3D curves
    the net's iso curves, their pcurves a straight line on the wall and the exact rational
    (degree at most three) on the cylinder. Anything else (a law that varies over the face, a tilted or offset cylinder, a
