@@ -2256,8 +2256,8 @@ fn loop_on_open_curve(eval: &CurveEval, a: f64, b: f64, knots: &[f64], p: P3, to
     }
 }
 
-/// The parameter in [a, b] of the curve's point nearest `p`: the nearest of samples along each
-/// knot span, refined by golden-section search between its neighbours.
+/// The parameter in [a, b] of the curve's point nearest `p`: samples along each knot span, every
+/// sampled local minimum refined by golden-section search between its neighbours.
 pub(crate) fn project(c: &CurveEval, a: f64, b: f64, knots: &[f64], p: Vec3) -> Option<f64> {
     let mut breaks: Vec<f64> = knots.iter().copied().filter(|k| *k > a && *k < b).collect();
     breaks.dedup();
@@ -2279,34 +2279,44 @@ pub(crate) fn project(c: &CurveEval, a: f64, b: f64, knots: &[f64], p: Vec3) -> 
         ts.push(last);
     }
     let dist = |t: f64| c.point(t).map_or(f64::INFINITY, |q| q.dist(p));
-    let (best, _) = ts.iter().enumerate().map(|(i, t)| (i, dist(*t))).min_by(|x, y| x.1.total_cmp(&y.1))?;
-    let mut x0 = *ts.get(best.saturating_sub(1))?;
-    let mut x1 = *ts.get((best + 1).min(ts.len() - 1))?;
-    let g = 0.5 * (5f64.sqrt() - 1.0);
-    let (mut c1, mut c2) = (x1 - g * (x1 - x0), x0 + g * (x1 - x0));
-    let (mut f1, mut f2) = (dist(c1), dist(c2));
-    for _ in 0..200 {
-        if x1 - x0 <= 1e-15 * (1.0 + x0.abs().max(x1.abs())) {
-            break;
+    let d: Vec<f64> = ts.iter().map(|t| dist(*t)).collect();
+    let (best, _) = d.iter().enumerate().min_by(|x, y| x.1.total_cmp(y.1))?;
+    let refine = |i: usize| -> Option<f64> {
+        let mut x0 = *ts.get(i.saturating_sub(1))?;
+        let mut x1 = *ts.get((i + 1).min(ts.len() - 1))?;
+        let g = 0.5 * (5f64.sqrt() - 1.0);
+        let (mut c1, mut c2) = (x1 - g * (x1 - x0), x0 + g * (x1 - x0));
+        let (mut f1, mut f2) = (dist(c1), dist(c2));
+        for _ in 0..200 {
+            if x1 - x0 <= 1e-15 * (1.0 + x0.abs().max(x1.abs())) {
+                break;
+            }
+            if f1 < f2 {
+                x1 = c2;
+                c2 = c1;
+                f2 = f1;
+                c1 = x1 - g * (x1 - x0);
+                f1 = dist(c1);
+            } else {
+                x0 = c1;
+                c1 = c2;
+                f1 = f2;
+                c2 = x0 + g * (x1 - x0);
+                f2 = dist(c2);
+            }
         }
-        if f1 < f2 {
-            x1 = c2;
-            c2 = c1;
-            f2 = f1;
-            c1 = x1 - g * (x1 - x0);
-            f1 = dist(c1);
-        } else {
-            x0 = c1;
-            c1 = c2;
-            f1 = f2;
-            c2 = x0 + g * (x1 - x0);
-            f2 = dist(c2);
-        }
-    }
-    let t = 0.5 * (x0 + x1);
+        Some(0.5 * (x0 + x1))
+    };
+    // A thread's helix winds tighter than its samples: the nearest sample can be on the next turn.
+    let dip = |i: usize| {
+        let at = |j: Option<usize>| j.and_then(|j| d.get(j)).copied().unwrap_or(f64::INFINITY);
+        let here = at(Some(i));
+        here < at(i.checked_sub(1)) && here <= at(Some(i + 1))
+    };
+    let dips = (0..ts.len()).filter(|&i| i != best && dip(i)).filter_map(refine);
     // Keep the best sampled parameter: an exact point on an interior knot must
     // not be replaced by a less accurate refinement beside that knot.
-    let t = [a, b, *ts.get(best)?, t].into_iter().min_by(|x, y| dist(*x).total_cmp(&dist(*y)))?;
+    let t = [a, b, *ts.get(best)?, refine(best)?].into_iter().chain(dips).min_by(|x, y| dist(*x).total_cmp(&dist(*y)))?;
     // Prefer the domain's ends when they are just as near (a vertex at the seam).
     let near_end = |e: f64| (dist(e) - dist(t)).abs() <= 1e-12 * (1.0 + p.len());
     Some(
