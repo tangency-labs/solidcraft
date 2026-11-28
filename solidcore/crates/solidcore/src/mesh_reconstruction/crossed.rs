@@ -17,7 +17,7 @@ use crate::kernel::Kernel;
 use crate::math::Vec3;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
-use crate::prism::profile::{Region2, Seg2};
+use crate::prism::profile::{Loop2, Region2, Seg2};
 use crate::{Brep, Result};
 
 use super::curves::certified;
@@ -37,6 +37,7 @@ pub(super) fn reconstruct(k: &mut Kernel, mesh: &TriMesh, tolerance: f64) -> Res
     let epsilon = (size.max(1.) * 1e-7).min(tolerance * 0.01).max(1e-9);
     let mut prisms: Vec<Prism> = Vec::new();
     for (axis, _) in parts::axes(mesh) {
+        k.check_cancelled("reconstruct mesh")?;
         // A normal within the source's rounding of an axis already taken is that axis.
         if prisms
             .iter()
@@ -60,6 +61,7 @@ pub(super) fn reconstruct(k: &mut Kernel, mesh: &TriMesh, tolerance: f64) -> Res
     if samples.saturating_mul(segments) > MAX_WORK {
         return Ok(None);
     }
+    k.check_cancelled("reconstruct mesh")?;
     for &p in &mesh.positions {
         for prism in &prisms {
             if !inside(prism, p, tolerance) {
@@ -77,16 +79,25 @@ pub(super) fn reconstruct(k: &mut Kernel, mesh: &TriMesh, tolerance: f64) -> Res
             return Err(invalid("missing triangle vertex"));
         };
         area += (b - a).cross(c - a).length() * 0.5;
-        if !prisms
-            .iter()
-            .any(|prism| bounds(prism, [a, b, c], tolerance, epsilon))
+        // A face of the solid built below lies on the first extrusion or on a later one's
+        // hole: a triangle on a later extrusion's outline or cap would be material it keeps.
+        let corners = [a, b, c];
+        let on_first = prisms
+            .first()
+            .is_some_and(|first| bounds(first, corners, tolerance, epsilon, Bound::Whole));
+        if !on_first
+            && !prisms
+                .iter()
+                .skip(1)
+                .any(|prism| bounds(prism, corners, tolerance, epsilon, Bound::Holes))
         {
             return Ok(None);
         }
     }
+    k.check_cancelled("reconstruct mesh")?;
     // The first extrusion less each hole of the others' sections, swept past the solid at both
     // ends: no face of a tool lies on a face of the first, as the faces of two extrusions of one
-    // block would. It holds their intersection, and is that when the volumes agree below.
+    // block would. It holds their intersection, and every source triangle lies on its boundary.
     let mut prisms = prisms.into_iter();
     let Some(first) = prisms.next() else {
         return Ok(None);
@@ -165,26 +176,42 @@ fn inside(prism: &Prism, p: Vec3, tolerance: f64) -> bool {
     held
 }
 
+/// Which part of an extrusion's boundary a triangle may lie on.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Bound {
+    /// Its caps and all its walls: the extrusion the solid is cut from.
+    Whole,
+    /// The walls of its sections' holes only: the tools cut from it.
+    Holes,
+}
+
 /// Whether the triangle is one of the extrusion's cap triangles (within `epsilon` of a cap's
-/// plane, as [`prism`] reads them) or lies whole within `tolerance` of one of its walls.
-fn bounds(prism: &Prism, corners: [Vec3; 3], tolerance: f64, epsilon: f64) -> bool {
+/// plane, as [`prism`] reads them) or lies whole within `tolerance` of one of its walls, for
+/// the part of the boundary `bound` allows.
+fn bounds(prism: &Prism, corners: [Vec3; 3], tolerance: f64, epsilon: f64, bound: Bound) -> bool {
     let normal = prism.plane.normal();
     let heights = corners.map(|p| p.dot(normal));
-    if [prism.lo, prism.hi]
-        .iter()
-        .any(|level| heights.iter().all(|h| (h - level).abs() <= epsilon))
+    if bound == Bound::Whole
+        && [prism.lo, prism.hi]
+            .iter()
+            .any(|level| heights.iter().all(|h| (h - level).abs() <= epsilon))
     {
         return true;
     }
-    if heights
+    if !heights
         .iter()
-        .any(|h| *h < prism.lo - tolerance || *h > prism.hi + tolerance)
+        .all(|h| (prism.lo - tolerance..=prism.hi + tolerance).contains(h))
     {
         return false;
     }
     let projected = corners.map(|p| prism.plane.to_local(p));
-    prism
-        .loops
-        .iter()
-        .any(|lp| certified(&projected, &lp.segs, tolerance))
+    let walls = |lp: &Loop2| certified(&projected, &lp.segs, tolerance);
+    match bound {
+        Bound::Whole => prism.loops.iter().any(walls),
+        Bound::Holes => prism
+            .regions
+            .iter()
+            .flat_map(|region| &region.holes)
+            .any(walls),
+    }
 }

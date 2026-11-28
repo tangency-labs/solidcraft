@@ -500,6 +500,10 @@ fn prism(
             *edges.entry((a.min(b), a.max(b))).or_default() += 1;
         }
     }
+    // No cap at either end: nothing to project (the empty boundary below refuses it too).
+    if caps.iter().any(BTreeMap::is_empty) {
+        return Ok(None);
+    }
     let raw_key = |p: Vec2| {
         (
             (p.x / epsilon).floor() as i64,
