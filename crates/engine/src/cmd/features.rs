@@ -5540,13 +5540,13 @@ fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
     let Some(ss) = st.sketch(sketch) else { return Vec::new() };
     let mut ends: Vec<usize> = Vec::new();
     // An arc's centre (a filleted corner's, say) is geometry of the arc, not a hole site, unless a
-    // circle is centred there too.
-    let circle_centres: Vec<usize> = ss
+    // circle or ellipse is centred there too.
+    let closed_centres: Vec<usize> = ss
         .sketch
         .curves
         .iter()
         .filter_map(|c| match &c.kind {
-            solidcraft_sketch::CurveKind::Circle { c, .. } => Some(*c),
+            solidcraft_sketch::CurveKind::Circle { c, .. } | solidcraft_sketch::CurveKind::Ellipse { c, .. } => Some(*c),
             _ => None,
         })
         .collect();
@@ -5555,7 +5555,7 @@ fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
             solidcraft_sketch::CurveKind::Circle { .. } => {}
             solidcraft_sketch::CurveKind::Arc { c, a, b } => {
                 ends.extend([*a, *b]);
-                if !circle_centres.contains(c) {
+                if !closed_centres.contains(c) {
                     ends.push(*c);
                 }
             }
@@ -5597,6 +5597,75 @@ fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
             && construction_rectangle_centre(*l)
         {
             ends.push(*p);
+        }
+    }
+    // A circular pattern's centre (whether made for the pattern, a lone guide point, or a
+    // construction or projected circle's or ellipse's centre) is rotation reference geometry, not
+    // a hole site, unless an authored regular circle or ellipse is centred there or the point is
+    // itself patterned as a standalone point.
+    let mut circular_centres: Vec<usize> = ss
+        .sketch
+        .patterns
+        .iter()
+        .filter_map(|pat| match &pat.kind {
+            solidcraft_sketch::SketchPatternKind::Circular { center, .. } => ss.sketch.resolve_point(center),
+            solidcraft_sketch::SketchPatternKind::Rectangular { .. } => None,
+        })
+        .chain(ss.sketch.constraints.iter().filter_map(|con| match &con.kind {
+            solidcraft_sketch::ConstraintKind::PatternPoint { center: Some(c), .. } => Some(*c),
+            _ => None,
+        }))
+        .collect();
+    circular_centres.sort_unstable();
+    circular_centres.dedup();
+    let regular_closed_at = |pt: usize| {
+        ss.sketch.curves.iter().any(|cu| {
+            !cu.construction
+                && cu.link.is_none()
+                && matches!(
+                    &cu.kind,
+                    solidcraft_sketch::CurveKind::Circle { c: cc, .. } | solidcraft_sketch::CurveKind::Ellipse { c: cc, .. } if *cc == pt
+                )
+        })
+    };
+    let construction_closed_at = |pt: usize| {
+        ss.sketch.curves.iter().any(|cu| {
+            cu.construction
+                && matches!(
+                    &cu.kind,
+                    solidcraft_sketch::CurveKind::Circle { c: cc, .. } | solidcraft_sketch::CurveKind::Ellipse { c: cc, .. } if *cc == pt
+                )
+        })
+    };
+    let patterned_point =
+        |c: usize| {
+            ss.sketch.patterns.iter().any(|pat| {
+                let seeds: Vec<usize> =
+                    pat.entities.iter().filter(|id| ss.sketch.curve_index(id).is_none()).filter_map(|id| ss.sketch.resolve_point(id)).collect();
+                seeds.contains(&c)
+                    || pat.instances.iter().flat_map(|inst| &inst.points).any(|(seed, copy)| {
+                        ss.sketch.resolve_point(copy) == Some(c) && ss.sketch.resolve_point(seed).is_some_and(|s| seeds.contains(&s))
+                    })
+            }) || ss.sketch.constraints.iter().any(|con| {
+                matches!(&con.kind, solidcraft_sketch::ConstraintKind::PatternPoint { p, q, .. }
+                if (*p == c || *q == c) && !ss.sketch.curves.iter().any(|cu| cu.kind.uses(*p)))
+            })
+        };
+    for c in circular_centres {
+        if !ends.contains(&c) && !regular_closed_at(c) && !patterned_point(c) {
+            ends.push(c);
+        }
+        if let Some(pc) = ss.sketch.point(c) {
+            for (i, p) in ss.sketch.points.iter().enumerate() {
+                if solidcraft_kernel::curves::ordered_nearby_points(&[p.pos], &[pc], 1e-6, 16).unwrap_or(false)
+                    && (p.link.is_some() || construction_closed_at(i))
+                    && !ends.contains(&i)
+                    && !regular_closed_at(i)
+                    && !patterned_point(i)
+                {
+                    ends.push(i);
+                }
+            }
         }
     }
     // A point marked construction (#18448) is reference geometry too.
