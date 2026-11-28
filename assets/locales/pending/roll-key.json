@@ -1,0 +1,50 @@
+{
+  "ar": {
+    "nav.roll_key.help": "اضغط هذا المفتاح عند بدء سحب التدوير ليقوم هذا السحب بلفّ العرض بدلًا من ذلك: يدور النموذج حول خط النظر المار بنقطة التدوير، ويتبع المؤشر حول تلك النقطة مثل قرص الضبط. التحرك مباشرة نحو النقطة أو بعيدًا عنها لا يفعل شيئًا. المفتاح الذي يحتاجه تعيين الفأرة للتدوير أصلًا لا يؤثر هنا، ولا يمكن أن يكون نفس مفتاح «تدوير حر أثناء الضغط».",
+    "nav.roll_key.label": "لفّ العرض أثناء الضغط",
+    "prefs.trackpad_twist_rolls": "لفّ حول خط النظر",
+    "prefs.trackpad_twist_rolls_tip": "يلفّ تدوير الإصبعين العرض حول خط النظر المار بالنقطة التي يحددها «التدوير حول»، فتدور الصورة مع أصابعك أيًا كان اتجاه العرض. عند الإيقاف: يدير التدوير العرض حول المحور العلوي. لا يؤثر على Windows ولا على Linux مع X11 ولا في المتصفحات غير Safari، لأنها لا تُبلغ عن التدوير."
+  },
+  "de": {
+    "nav.roll_key.help": "Halten Sie diese Taste beim Beginn eines Drehens gedrückt, rollt dieses Ziehen die Ansicht stattdessen: Das Modell dreht sich um die Blicklinie durch den Drehpunkt und folgt dem Zeiger um diesen Punkt wie ein Drehknopf. Eine Bewegung direkt auf den Punkt zu oder von ihm weg bewirkt nichts. Eine Taste, die die Mausbelegung für das Drehen schon braucht, bewirkt hier nichts, und es kann nicht dieselbe Taste wie beim freien Drehen sein.",
+    "nav.roll_key.label": "Rollen mit gehaltener Taste",
+    "prefs.trackpad_twist_rolls": "Um die Blicklinie rollen",
+    "prefs.trackpad_twist_rolls_tip": "Die Zwei-Finger-Drehung rollt die Ansicht um die Blicklinie durch den Punkt, den „Drehen um“ festlegt, sodass sich das Bild mit den Fingern dreht, egal wohin die Ansicht blickt. Aus: Die Drehung dreht die Ansicht um die Hochachse. Ohne Wirkung unter Windows, unter Linux mit X11 und in anderen Browsern als Safari, die keine Drehung melden."
+  },
+  "en": {
+    "nav.roll_key.help": "Hold this key when an orbit drag starts and that drag rolls the view instead: the model turns about the line of sight through the orbit point, following the pointer around that point like a dial. Moving straight toward or away from the point does nothing. A key the mouse mapping already needs for the orbit does nothing, and it can't be the same key as Free orbit while holding.",
+    "nav.roll_key.label": "Roll while holding",
+    "prefs.trackpad_twist_rolls": "Roll about the line of sight",
+    "prefs.trackpad_twist_rolls_tip": "The two-finger twist rolls the view about the line of sight through the point Orbit around sets, so the picture turns with your fingers whichever way the view looks. Off: the twist turns the view about the up axis. Has no effect on Windows, on Linux under X11, or in browsers other than Safari, which don't report a twist."
+  },
+  "he": {
+    "nav.roll_key.help": "החזיקו מקש זה כשגרירת סיבוב מתחילה, וגרירה זו תגלגל את המבט במקום זאת: הדגם מסתובב סביב קו הראייה שעובר דרך נקודת הסיבוב, ועוקב אחרי הסמן סביב הנקודה כמו חוגה. תנועה ישירה אל הנקודה או ממנה אינה עושה דבר. מקש שמיפוי העכבר כבר דורש לסיבוב אינו משפיע כאן, והוא לא יכול להיות אותו מקש כמו \"סיבוב חופשי בעת לחיצה\".",
+    "nav.roll_key.label": "גלגול המבט בעת לחיצה",
+    "prefs.trackpad_twist_rolls": "גלגול סביב קו הראייה",
+    "prefs.trackpad_twist_rolls_tip": "סיבוב בשתי אצבעות מגלגל את המבט סביב קו הראייה שעובר דרך הנקודה ש\"סיבוב מבט סביב\" קובע, כך שהתמונה מסתובבת עם האצבעות לאן שהמבט לא יפנה. כבוי: הסיבוב מסובב את המבט סביב הציר העליון. אין לכך השפעה ב-Windows, ב-Linux תחת X11 או בדפדפנים שאינם Safari, כי הם אינם מדווחים על סיבוב."
+  },
+  "ja": {
+    "nav.roll_key.help": "回転ドラッグの開始時にこのキーを押していると、そのドラッグは代わりにビューをロールします。モデルは回転中心を通る視線を軸に回り、ダイヤルのようにその点の周りでポインターに付いてきます。その点にまっすぐ近づく・離れる動きでは何も起きません。マウス割り当てが回転にすでに使っているキーはここでは何もせず、「キーを押している間は自由回転」と同じキーにはできません。",
+    "nav.roll_key.label": "キーを押している間はロール",
+    "prefs.trackpad_twist_rolls": "視線を軸にロール",
+    "prefs.trackpad_twist_rolls_tip": "2本指の回転で、「回転の中心」で決めた点を通る視線を軸にビューをロールします。ビューの向きに関係なく、画面が指と同じ向きに回ります。オフ：回転は上方向の軸を中心にビューを回します。 Windows、X11 上の Linux、Safari 以外のブラウザーでは回転が報告されないため、効果はありません。"
+  },
+  "ko": {
+    "nav.roll_key.help": "회전 드래그를 시작할 때 이 키를 누르고 있으면 그 드래그는 대신 뷰를 롤합니다. 모델이 회전 기준점을 지나는 시선을 축으로 돌며, 다이얼처럼 그 점 주위로 포인터를 따라갑니다. 그 점을 향해 곧바로 다가가거나 멀어지는 움직임은 아무 효과가 없습니다. 마우스 매핑이 이미 회전에 쓰는 키는 여기서 아무 효과가 없으며, \"키를 누르는 동안 자유 회전\"과 같은 키로 지정할 수 없습니다.",
+    "nav.roll_key.label": "키를 누르는 동안 롤",
+    "prefs.trackpad_twist_rolls": "시선을 축으로 롤",
+    "prefs.trackpad_twist_rolls_tip": "두 손가락 회전이 \"궤도 회전 기준\"이 정한 점을 지나는 시선을 축으로 뷰를 롤합니다. 뷰가 어느 방향을 보든 화면이 손가락과 함께 돕니다. 끄면 회전이 위쪽 축을 중심으로 뷰를 돌립니다. Windows, X11의 Linux, Safari 이외의 브라우저는 회전을 알려 주지 않으므로 효과가 없습니다."
+  },
+  "vi": {
+    "nav.roll_key.help": "Giữ phím này khi bắt đầu kéo xoay thì lần kéo đó sẽ lăn khung nhìn thay vào đó: mô hình quay quanh đường nhìn đi qua điểm xoay, đi theo con trỏ quanh điểm đó như một núm xoay. Di chuyển thẳng về phía điểm đó hoặc ra xa nó thì không có tác dụng. Phím mà ánh xạ chuột đã cần cho việc xoay thì không có tác dụng ở đây, và không thể trùng với phím của \"Xoay tự do khi giữ phím\".",
+    "nav.roll_key.label": "Lăn khung nhìn khi giữ phím",
+    "prefs.trackpad_twist_rolls": "Lăn quanh đường nhìn",
+    "prefs.trackpad_twist_rolls_tip": "Xoay hai ngón tay sẽ lăn khung nhìn quanh đường nhìn đi qua điểm mà \"Xoay quanh\" đặt, nên hình ảnh xoay theo ngón tay dù khung nhìn hướng về đâu. Tắt: thao tác xoay quay khung nhìn quanh trục hướng lên. Không có tác dụng trên Windows, trên Linux dùng X11, hoặc trong trình duyệt khác Safari, vì chúng không báo thao tác xoay."
+  },
+  "zh": {
+    "nav.roll_key.help": "在旋转拖动开始时按住此键，该次拖动改为滚转视图：模型绕穿过旋转中心的视线转动，像旋钮一样随指针绕该点转动。径直朝该点或背离该点移动不起作用。鼠标映射已用于旋转的按键在此不起作用，且不能与“按住按键时自由旋转”使用同一个键。",
+    "nav.roll_key.label": "按住按键时滚转视图",
+    "prefs.trackpad_twist_rolls": "绕视线滚转",
+    "prefs.trackpad_twist_rolls_tip": "双指旋转使视图绕穿过“环绕”所设点的视线滚转，无论视图朝向哪里，画面都随手指转动。关闭：旋转使视图绕向上轴转动。 在 Windows、X11 下的 Linux 以及 Safari 以外的浏览器中无效，因为它们不报告旋转手势。"
+  }
+}

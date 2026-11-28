@@ -39,8 +39,12 @@ fn plain_name(name: &str) -> bool {
 impl<H: PluginHost> State<H> {
     fn folder_path(&mut self, grant: &str, path: &str) -> std::result::Result<PathBuf, PluginError> {
         self.check()?;
+        self.admit_folder_path(grant, path).map_err(|error| self.fail(error))
+    }
+    /// The checks of `folder_path`; a refusal is returned without ending the run.
+    fn admit_folder_path(&mut self, grant: &str, path: &str) -> std::result::Result<PathBuf, HostError> {
         let Some(folder) = self.input_folders.get(grant) else {
-            return Err(self.fail(HostError::PermissionDenied { permission: format!("folders:{grant}: no approved directory for this entry") }));
+            return Err(HostError::PermissionDenied { permission: format!("folders:{grant}: no approved directory for this entry") });
         };
         let target: PathBuf = Path::new(path).components().collect();
         if path.len() > 4096
@@ -49,18 +53,18 @@ impl<H: PluginHost> State<H> {
             || target.components().count() > 64
             || target.components().any(|c| !matches!(c, PathComponent::Normal(name) if plain_name(&name.to_string_lossy())))
         {
-            return Err(self.fail(HostError::PermissionDenied {
+            return Err(HostError::PermissionDenied {
                 permission: format!("folders:{grant}: path must stay inside the directory with no hidden names"),
-            }));
+            });
         }
         if let Err(error) = refuse_links(&folder.dir, &target) {
-            return Err(self.fail(HostError::PermissionDenied { permission: format!("folders:{grant}: {error}") }));
+            return Err(HostError::PermissionDenied { permission: format!("folders:{grant}: {error}") });
         }
-        self.host.authorize_input_file_path(&folder.path.join(&target)).map_err(|error| self.fail(error))?;
+        self.host.authorize_input_file_path(&folder.path.join(&target))?;
         let key = (grant.to_owned(), target.clone());
         let source_files = self.import.as_ref().map_or(0, |i| i.files.len());
         if self.folder_files.len().saturating_add(source_files) >= MAX_IMPORT_FILES && !self.folder_files.contains(&key) {
-            return Err(self.fail(limit("folders: more than 4096 files")));
+            return Err(limit("folders: more than 4096 files"));
         }
         self.folder_files.insert(key);
         Ok(target)
@@ -113,35 +117,39 @@ impl<H: PluginHost> folders::Host for State<H> {
             return Ok(Some(String::new()));
         }
         let folder = self.input_folders.get(&grant).ok_or_else(|| PluginError::Trap("folder disappeared".into()))?;
-        if folder.dir.metadata(&target).is_ok_and(|m| m.is_file()) {
-            return Ok(Some(target.to_string_lossy().replace('\\', "/")));
-        }
-        let (Some(parent), Some(wanted)) = (target.parent(), target.file_name().map(|n| n.to_string_lossy().to_lowercase())) else {
-            return Ok(None);
+        // A disk that ignores case opens a file under any spelling, so the listing decides how the
+        // folder spells it. The path as typed is the answer only when the listing cannot tell.
+        let typed = folder.dir.metadata(&target).is_ok_and(|m| m.is_file()).then(|| target.to_string_lossy().replace('\\', "/"));
+        let (Some(parent), Some(typed_name)) = (target.parent(), target.file_name().map(|n| n.to_string_lossy().into_owned())) else {
+            return Ok(typed);
         };
+        let wanted = typed_name.to_lowercase();
         let listing = if parent.as_os_str().is_empty() { folder.dir.entries() } else { folder.dir.read_dir(parent) };
-        let Ok(listing) = listing else { return Ok(None) };
+        let Ok(listing) = listing else { return Ok(typed) };
         let mut found = None;
+        let mut matches = 0;
         for (scanned, entry) in listing.flatten().enumerate() {
             if scanned >= MAX_IMPORT_FILES {
-                return Ok(None);
+                return Ok(typed);
             }
             let name = entry.file_name().to_string_lossy().into_owned();
             if name.starts_with('.') || name.to_lowercase() != wanted || !entry.file_type().is_ok_and(|t| t.is_file()) {
                 continue;
             }
-            if found.is_some() {
-                return Ok(None);
+            if name == typed_name {
+                return Ok(Some(target.to_string_lossy().replace('\\', "/")));
             }
+            matches += 1;
             found = Some(parent.join(name));
         }
-        if let Some(found) = found {
-            // Recheck the name actually returned, including links and the shared file budget.
-            let found = found.to_string_lossy().replace('\\', "/");
-            self.folder_path(&grant, &found)?;
-            Ok(Some(found))
-        } else {
-            Ok(None)
+        let Some(found) = found.filter(|_| matches == 1) else { return Ok(typed) };
+        // Recheck the name actually returned, including links and the shared file budget. A typed
+        // path that opens the file stays the answer when the folder's spelling is not admitted.
+        let found = found.to_string_lossy().replace('\\', "/");
+        match self.admit_folder_path(&grant, &found) {
+            Ok(_) => Ok(Some(found)),
+            Err(_) if typed.is_some() => Ok(typed),
+            Err(error) => Err(self.fail(error)),
         }
     }
 }

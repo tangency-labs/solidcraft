@@ -406,11 +406,14 @@ fn isolate_on_body_and_component_menus_toggles_unisolate() {
     let kept = body(&app);
     let t = Target::Body { name: kept.clone() };
     // #3504: each entry shows its key.
-    assert!(context_menu::items(&app, &t).iter().any(|i| i.label == "Isolate" && i.shortcut == "Ctrl+I"));
+    assert!(context_menu::items(&app, &t).iter().any(|i| i.label == "Isolate" && i.shortcut == crate::ui_kit::chord_label("Ctrl+I")));
     act(&mut app, &t, "Isolate");
     assert!(!app.session.visibility.hidden_bodies.is_empty());
     let after = context_menu::items(&app, &t);
-    assert!(after.iter().any(|i| i.label == "Exit Isolation" && i.shortcut == "Ctrl+Shift+I"), "same menu offers Exit Isolation");
+    assert!(
+        after.iter().any(|i| i.label == "Exit Isolation" && i.shortcut == crate::ui_kit::chord_label("Ctrl+Shift+I")),
+        "same menu offers Exit Isolation"
+    );
     // On what is already all that shows, Isolate would change nothing: Exit Isolation alone.
     assert!(!after.iter().any(|i| i.label == "Isolate"), "only Exit Isolation on the isolated body");
     let other = app.session.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).find(|n| n != &kept).unwrap();
@@ -2474,6 +2477,52 @@ fn mesh_export_from_a_selected_browser_body_takes_the_selected_bodies() {
     }
 }
 
+#[test]
+fn component_export_names_are_opt_in_and_keep_existing_defaults() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.session.doc_mut().name = "Assembly".into();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "RootBody"})).unwrap();
+    let part = h.app.run("component.create", json!({"name": "Bracket", "activate": true})).unwrap();
+    let component = part["component"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "body_name": "PartBody"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+    let names = seen.clone();
+    h.app.services.pick_save = Some(Box::new(move |name, _| {
+        names.borrow_mut().push(name.to_string());
+        Box::pin(std::future::ready(None))
+    }));
+    let targets = [
+        Target::Component { id: component },
+        Target::Occurrence { path: h.app.session.doc.first_path(component) },
+        Target::Body { name: "PartBody".into() },
+        Target::Component { id: 0 },
+    ];
+    for target in &targets {
+        act(&mut h.app, target, "Export…");
+        h.frames(3);
+        h.settle();
+    }
+    let defaults = seen.borrow().clone();
+    assert_eq!(defaults[0], "PartBody.step");
+    assert_eq!(defaults[1], defaults[0]);
+    assert_eq!(defaults[2], defaults[0]);
+    h.app.preferences.export_name = "{component}".into();
+    seen.borrow_mut().clear();
+    for target in &targets {
+        act(&mut h.app, target, "Export…");
+        h.frames(3);
+        h.settle();
+    }
+    assert_eq!(*seen.borrow(), ["Bracket.step", "Bracket.step", defaults[2].as_str(), defaults[3].as_str()]);
+    h.app.preferences.export_name = "{body}".into();
+    act(&mut h.app, &targets[0], "Export…");
+    h.frames(3);
+    h.settle();
+    assert_eq!(seen.borrow().last().map(String::as_str), Some("PartBody.step"));
+}
+
 /// A selected browser body exports the *full* body selection, just as Save As Mesh and
 /// Send to Slicer do (#18902). A body outside the selection exports only itself.
 #[test]
@@ -2882,7 +2931,17 @@ mod browser_rows {
         right_click(&mut h, plate + half, true);
         assert!(h.app.viewport.context_menu.is_some());
         assert_eq!(h.app.menu.target, Target::Body { name: "Plate".into() });
-        right_click(&mut h, origin + half, true);
+        // The click goes to a part of the Origin row the open menu does not cover: the menu is
+        // placed to fit the window, and a long one reaches up over the rows above Plate.
+        let menu = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_context_menu"))).expect("the Plate menu");
+        // The row's handle is 120 pt into the row, so there is room left of a menu opened there.
+        let mut on_origin = origin + half;
+        let near = menu.expand(16.0);
+        if near.contains(on_origin) {
+            on_origin.x = near.left() - 8.0;
+        }
+        assert!(!near.contains(on_origin), "the Origin row is under the menu at {on_origin:?}: {menu:?}");
+        right_click(&mut h, on_origin, true);
         assert!(h.app.viewport.context_menu.is_some(), "a right-click on another row opens that row's menu");
         assert_eq!(h.app.menu.target, Target::Origin);
 
