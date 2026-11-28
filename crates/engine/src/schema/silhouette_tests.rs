@@ -29,7 +29,7 @@ fn matches(schema: schemars::Schema, id: &str, reply: &Value) {
 #[test]
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<SilhouetteParams>(), &["bodies", "camera", "rows", "view"]);
-    assert_keys(input_schema_for::<ExportViewDxfParams>(), &["camera", "curves", "hidden", "path", "tolerance", "zero"]);
+    assert_keys(input_schema_for::<ExportViewDxfParams>(), &["camera", "curves", "hidden", "path", "section", "tolerance", "zero"]);
 }
 
 /// Strict gives the handlers' messages for the calls they refuse for a key (a missing `camera`
@@ -213,6 +213,10 @@ fn the_schemas_take_what_the_handlers_read() {
             (json!({"camera": camera(), "zero": "corner"}), false),
             (json!({"camera": camera(), "curves": "arcs"}), true),
             (json!({"camera": camera(), "curves": "splines"}), false),
+            (json!({"camera": camera(), "section": [{"origin": [0, 0, 5], "normal": [0, 0, 1]}]}), true),
+            (json!({"camera": camera(), "section": []}), true),
+            (json!({"camera": camera(), "section": [{"origin": [0, 0, 5]}]}), false),
+            (json!({"camera": camera(), "section": [{"origin": [0, 0], "normal": [0, 0, 1]}]}), false),
         ],
     );
 }

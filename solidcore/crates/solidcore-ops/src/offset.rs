@@ -25,9 +25,7 @@ use solidcore::error::{ErrorKind, Reason};
 use solidcore::geom::attribute::{ids, Attribute, Behavior};
 use solidcore::offset::draft::{draft_surface, refuse_closing_wall, Draft, DraftRefusal};
 use solidcore::offset::offset_executive::p1::certified_offset_surface;
-use solidcore::offset::offset_executive::p2::{
-    local_operation_simple, offset_brep_simple, OffsetOptions, ShellOptions,
-};
+use solidcore::offset::offset_executive::p2::{offset_brep_simple, OffsetOptions, ShellOptions};
 use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
 use solidcore::offset::thin_features::shell_brep;
 use solidcore::offset::wall_room::{shell_wall_room, WallRoom};
@@ -546,32 +544,42 @@ pub fn offset_faces(body: &Body, order: &Order, faces: &[usize], distance: f64) 
         }
         let mut exec = OffsetFacesExecutive::new();
         if let Err(e) = exec.offset_faces(k, b, &picked, distance) {
-            // where the kernel says why the blends cannot follow, the refusal says it too
-            let why = exec.reason().trim();
-            let not_followed = |exact: bool, bare: Error| {
-                if why.is_empty() {
-                    bare
-                } else {
-                    Error::BlendsNotFollowed {
-                        exact,
-                        why: why.to_owned(),
-                    }
-                }
-            };
-            return Ok(Err(match exec.refusal() {
-                OffsetFacesRefusal::NoRoom => Error::NoRoom,
-                OffsetFacesRefusal::Unsupported | OffsetFacesRefusal::NotPutBack => not_followed(
-                    false,
-                    Error::Unsupported("a blend on a moved face cannot be taken off and put back"),
-                ),
-                OffsetFacesRefusal::NotExact => not_followed(true, Error::NotExact),
-                OffsetFacesRefusal::NoEffect => Error::NoEffect,
-                OffsetFacesRefusal::None => status(e, &in_order(order)),
-            }));
+            return Ok(Err(
+                faces_move_refused(&exec).unwrap_or_else(|| status(e, &in_order(order)))
+            ));
         }
         let moved = std::mem::take(b);
         replace(k, b, moved, expect)
     })?
+}
+
+/// Why the kernel's face move whose blends follow ([`OffsetFacesExecutive`], a face offset's or
+/// a draft's) refused, as the operation's error, where it refused (`None` for a failure of its
+/// own, to be mapped from its status): where the kernel says why the blends cannot follow,
+/// the refusal says it too.
+#[must_use]
+pub fn faces_move_refused(exec: &OffsetFacesExecutive) -> Option<Error> {
+    let why = exec.reason().trim();
+    let not_followed = |exact: bool, bare: Error| {
+        if why.is_empty() {
+            bare
+        } else {
+            Error::BlendsNotFollowed {
+                exact,
+                why: why.to_owned(),
+            }
+        }
+    };
+    Some(match exec.refusal() {
+        OffsetFacesRefusal::NoRoom => Error::NoRoom,
+        OffsetFacesRefusal::Unsupported | OffsetFacesRefusal::NotPutBack => not_followed(
+            false,
+            Error::Unsupported("a blend on a moved face cannot be taken off and put back"),
+        ),
+        OffsetFacesRefusal::NotExact => not_followed(true, Error::NotExact),
+        OffsetFacesRefusal::NoEffect => Error::NoEffect,
+        OffsetFacesRefusal::None => return None,
+    })
 }
 
 /// The sheet `body` thickened by `thickness` along its normals, or (`symmetric`) moved back by
@@ -718,7 +726,9 @@ pub fn draft_refused(r: DraftRefusal) -> Error {
 /// normal `neutral_normal`, so that they lean in going along `pull` (a negative angle leans
 /// them out): a plane parallel to the pull turns about the line where it meets the neutral
 /// plane, a cone or cylinder about the pull about its circle on it ([`draft_surface`]), and the
-/// faces around them are extended or trimmed to meet them.
+/// faces around them are extended or trimmed to meet them. The tangent blends on the drafted
+/// faces follow them, as they follow [`offset_faces`]: taken off, the faces drafted, put back at
+/// their sizes ([`OffsetFacesExecutive::move_onto`]).
 ///
 /// # Errors
 /// [`Error::Argument`] for a neutral normal or pull not finite or not longer than 1e-12 (the
@@ -727,7 +737,8 @@ pub fn draft_refused(r: DraftRefusal) -> Error {
 /// face the body does not have, a body that is not a valid solid facing out, or a pull in the
 /// neutral plane for a plane face;
 /// [`Error::Unsupported`] for a face the kernel cannot draft (what it is), or a face drafted past
-/// where its neighbours meet; [`Error::NoEffect`] for a draft that moved no face;
+/// where its neighbours meet; [`Error::NoEffect`] for a draft that moved no face; those of
+/// [`faces_move_refused`] for blends that cannot follow;
 /// [`Error::OffsetRefused`] for a face the kernel refuses with a reason (a drafted cone that
 /// would close within the face: [`OffsetRefusal::DraftConeCloses`]; a neutral plane at or past a
 /// cone's apex: [`OffsetRefusal::DraftNeutralPlanePastApex`]; a drafted cone that would reach a
@@ -786,7 +797,13 @@ pub fn draft(
         // a draft the kernel builds
         let through = drafted_through(k, b, &picked, &surfaces).ok().flatten();
         mark_moved(b, &picked)?;
-        if let Err(e) = local_operation_simple(k, b, &picked, surfaces) {
+        // the tangent blends on the drafted faces follow them: taken off, the faces drafted,
+        // put back (the kernel's face move whose blends follow; with none, the local operation)
+        let mut exec = OffsetFacesExecutive::new();
+        if let Err(e) = exec.move_onto(k, b, &picked, surfaces) {
+            if let Some(refused) = faces_move_refused(&exec) {
+                return Ok(Err(refused));
+            }
             // the cut through is named only where the kernel gives no reason of its own (a bare
             // status): any refusal it words or types is its answer, passed on as it is
             return Ok(Err(match (status(e, &in_order(order)), through) {

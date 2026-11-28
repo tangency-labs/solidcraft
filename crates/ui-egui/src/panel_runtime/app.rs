@@ -1392,7 +1392,7 @@ impl crate::SolveApp {
     }
 }
 
-pub(super) fn ensure_production(app: &mut crate::SolveApp) -> PanelResult<()> {
+pub(crate) fn ensure_production(app: &mut crate::SolveApp) -> PanelResult<()> {
     if app.panel_runtime.is_none() {
         super::production::enable_production(app)?;
     }
@@ -1448,6 +1448,7 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
     if app.panel_runtime.as_ref().is_some_and(|integration| integration.last_tick_frame == Some(ctx.cumulative_frame_nr())) {
         return;
     }
+    crate::plugin_workspaces::tick(app, ctx);
     let plugin_error = super::plugin::sync(app).err();
     let production_error = super::production::drain_production_actions(app)
         .and_then(|()| super::production::sync_production_visibility(app))
@@ -1894,5 +1895,111 @@ impl crate::SolveApp {
         if self.panel_runtime.as_ref().is_some_and(|integration| integration.production.is_some()) && !self.preferences.agent_chat_popped {
             crate::agent_chat::finish_shared(self, ui.ctx());
         }
+    }
+}
+
+impl AppPanelRuntime {
+    /// Give a plugin workspace its immutable starting layout: the host panels it keeps, then the
+    /// plugin's own declared panels where it places them. The panels are the ones the shared
+    /// plugin-panel runtime draws, so a workspace adds placement, never a second widget set.
+    pub(crate) fn register_plugin_workspace(&mut self, workspace: &crate::plugin_workspaces::Workspace, base: &Layout) -> PanelResult<()> {
+        use commands::LayoutCatalogue as _;
+        let id = WorkspaceId::new(&workspace.id)?;
+        let registered = self.catalogue.state().summaries().iter().any(|entry| entry.id == id);
+        let mut placed = Vec::new();
+        for (dock, ids) in &workspace.spec.panels {
+            for panel in ids {
+                let declared = workspace
+                    .plugin
+                    .declarations
+                    .panels
+                    .iter()
+                    .find(|declared| declared.id == *panel)
+                    .ok_or_else(|| error(Rule::MissingTarget, "workspace places an undeclared panel"))?;
+                let instance = self.plugins.ensure_registered(&mut self.runtime, &workspace.plugin.id, declared)?;
+                placed.push((crate::plugin_workspaces::zone(*dock), instance));
+            }
+        }
+        if registered {
+            return Ok(());
+        }
+        let registry = self.runtime.layout().registry().clone();
+        let mut layout = base.clone();
+        layout.workspace = id.clone();
+        layout.extent_priority_context = ExtentPriorityContext::default();
+        // A built-in panel the layout the user came from does not have (closed, or never part of
+        // it) is left out: a manifest that validated never fails the switch.
+        layout.instances.retain(|instance| workspace.spec.builtin_panels.contains(&instance.id.0));
+        let retained = layout.instances.iter().map(|instance| instance.id.clone()).collect::<std::collections::BTreeSet<_>>();
+        for section in &mut layout.sections {
+            section.tabs.retain(|instance| retained.contains(instance));
+            if !section.tabs.contains(&section.active)
+                && let Some(first) = section.tabs.first()
+            {
+                section.active = first.clone();
+            }
+        }
+        layout.sections.retain(|section| !section.tabs.is_empty());
+        layout.columns.retain(|column| layout.sections.iter().any(|section| section.column.as_ref() == Some(&column.id)));
+        for (zone, instance) in placed {
+            let kind = PanelKind::new(&instance.0)?;
+            let spec = registry.get(&kind)?;
+            let size = spec.default_size;
+            let section = SectionId::new(&instance.0)?;
+            let location = SectionLocation::Dock { zone };
+            let dock_key = format!("{}.{zone:?}", workspace.spec.id);
+            let column = zone.side().then(|| ColumnId(crate::plugin_workspaces::identity(&workspace.plugin.id, &dock_key)));
+            if let Some(column) = &column
+                && !layout.columns.iter().any(|existing| existing.id == *column)
+            {
+                layout.columns.push(Column { id: column.clone(), zone, width: size.width });
+            }
+            let column_index = layout
+                .columns
+                .iter()
+                .filter(|existing| existing.zone == zone)
+                .position(|existing| Some(&existing.id) == column.as_ref())
+                .unwrap_or(0);
+            layout.instances.push(PanelInstance {
+                id: instance.clone(),
+                kind,
+                requested_open: true,
+                memory: PlacementMemory {
+                    section: section.clone(),
+                    location: location.clone(),
+                    section_index: layout.sections.len(),
+                    tab_index: 0,
+                    size,
+                    collapsed: false,
+                    column: column.clone(),
+                    column_index,
+                    column_width: column.as_ref().map(|_| size.width),
+                    weight: 1.0,
+                    preferred_extent: None,
+                    extent_priority: 0,
+                },
+            });
+            layout.sections.push(Section {
+                id: section,
+                location,
+                tabs: vec![instance.clone()],
+                active: instance,
+                size,
+                collapsed: false,
+                column,
+                weight: 1.0,
+                preferred_extent: None,
+                extent_priority: 0,
+            });
+        }
+        normalize_column_widths(&mut layout, &registry)?;
+        validate(&layout, &registry)?;
+        let mut catalogue = commands::InMemoryCatalogue::from_snapshot(&self.catalogue.state().export()?, &registry)?;
+        let preset = crate::plugin_workspaces::identity(&workspace.plugin.id, &workspace.spec.id);
+        catalogue.register_builtin(&preset, &LayoutEnvelope::new(layout), &registry)?;
+        catalogue.register_workspace(commands::WorkspaceDescriptor { id, title_key: "ui.plugin_workspace.panel".into(), default_preset: preset })?;
+        let staged = self.catalogue.prepare(catalogue.state().clone())?;
+        self.catalogue.publish(staged);
+        Ok(())
     }
 }

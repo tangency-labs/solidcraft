@@ -39,6 +39,11 @@
 //!   the B-rep from its `const` methods). [`calculate_bounding_box`] and
 //!   [`calculate_tight_bounding_box`] take a [`LazyBrep`]: pass `&mut Brep` for the
 //!   upstream behaviour; with `&Brep` the edits are made on a private copy and lost.
+//! - **Planar faces.** [`calculate_tight_bounding_box`] does not solve the tight box of a
+//!   planar face with an edge curve: that box is the face's vertices and edge boxes, which
+//!   the vertex and edge passes have taken, or passed over where an edge's loose box lay
+//!   inside. Upstream solves it, and with it each of the face's edges again. A failure
+//!   only that second solve of an edge would meet is not met.
 //! - **Passed-on statuses.** Upstream [`calculate_tight_bounding_box`] ignores the
 //!   statuses of the edge and face boxes and keeps what a failed call leaves. As the
 //!   fork does (60a8a51), the four statuses are passed on instead.
@@ -253,8 +258,9 @@ pub fn calculate_bounding_box<'a>(
 
 /// `SmBrep::CalculateTightBoundingBox`: the union of the vertex points, then of the
 /// tight box of every edge and face whose loose box is not already inside the box so
-/// far (the locked box is not used, nothing is expanded). The statuses of the edge and
-/// face boxes are ignored (see the module's deviations).
+/// far (the locked box is not used, nothing is expanded). A planar face with an edge
+/// curve is not solved: the vertex and edge passes have taken its box (see the module's
+/// deviations). The statuses of the edge and face boxes are ignored (also there).
 ///
 /// # Errors
 ///
@@ -297,6 +303,11 @@ pub fn calculate_tight_bounding_box<'a>(
         k.check_cancelled(OP_TIGHT_BOX)?;
         let mut face_bbox = qf1::calculate_bounding_box(k, lb.get(), f, false)?;
         if face_bbox.is_contained_by(&brep_bbox, 0.0) {
+            continue;
+        }
+        // Not upstream: a planar face's box is its vertices' and edges', which the box has
+        // already, and solving it would solve each of its curved edges again.
+        if qf3::adds_nothing_to_brep_box(k, lb.get(), f)? {
             continue;
         }
         qf3::calculate_tight_bounding_box_into(k, &mut lb, f, &mut face_bbox)?;
