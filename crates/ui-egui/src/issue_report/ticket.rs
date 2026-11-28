@@ -91,6 +91,67 @@ pub fn system(app: &SolveApp, ctx: Option<&egui::Context>) -> (serde_json::Map<S
     (f, s)
 }
 
+/// The system info of a report about a crash: the graphics of the run that crashed, from its
+/// crash report, in place of this run's. After a crash at startup this run is often safe mode on
+/// the software renderer, which says nothing about the GPU that failed. This run's graphics stay,
+/// as `reported_from`. Unchanged when the crash report names no renderer.
+pub fn crashed_system(report: &Value, fields: &mut serde_json::Map<String, Value>, text: &mut String) {
+    let Some(environment) = report.get("system").and_then(|s| s.get("environment")).and_then(Value::as_str).filter(|e| !e.trim().is_empty()) else {
+        return;
+    };
+    let environment = super::limited(environment, 500);
+    let version = report.get("app").and_then(|a| a.get("version")).and_then(Value::as_str).unwrap_or_default();
+    let mut from = serde_json::Map::new();
+    for key in ["renderer", "gpu", "graphics_api"] {
+        if let Some(v) = fields.remove(key) {
+            from.insert(key.into(), v);
+        }
+    }
+    let mut failed = json!({ "environment": environment });
+    if !version.is_empty() {
+        failed["version"] = json!(super::limited(version, 100));
+    }
+    let mut lines = vec![format!("Crashed run: {environment}")];
+    if let Some(g) = solidcraft_engine::crash::graphics(&environment) {
+        let api = g.api_id().unwrap_or(g.api.as_str()).to_string();
+        let cpu = g.device_type.as_deref() == Some("Cpu");
+        fields.insert("renderer".into(), json!(if cpu { "CPU" } else { "GPU" }));
+        fields.insert("gpu".into(), json!(match &g.device_type {
+            Some(t) => format!("{} ({}, {t})", g.adapter, g.api),
+            None => g.adapter.clone(),
+        }));
+        fields.insert("graphics_api".into(), json!(api));
+        if let Some(d) = &g.driver {
+            fields.insert("driver".into(), json!(super::limited(d, 200)));
+            lines.push(format!("Crashed run's driver: {d}"));
+        }
+        failed["graphics_api"] = json!(api);
+        failed["gpu"] = json!(g.adapter);
+    }
+    fields.insert("crashed_run".into(), failed);
+    if !from.is_empty() {
+        let said: Vec<&str> = ["renderer", "gpu", "graphics_api"].iter().filter_map(|k| from.get(*k).and_then(Value::as_str)).collect();
+        lines.push(format!("Reported from: {}", said.join(", ")));
+        fields.insert("reported_from".into(), Value::Object(from));
+    }
+    if !text.ends_with('\n') && !text.is_empty() {
+        text.push('\n');
+    }
+    text.push_str(&lines.join("\n"));
+    text.push('\n');
+}
+
+/// The crashed run's own log lines, home folder as `~`: found by the run (`run`: its process and
+/// start) the crash report names, in the logs kept from earlier runs (`log_file::run_tail_in`).
+fn crashed_log_lines(report: &Value) -> Option<Vec<String>> {
+    let run = report.get("run")?;
+    let pid = u32::try_from(run.get("pid")?.as_u64()?).ok()?;
+    let start = run.get("start")?.as_str()?;
+    let lines = crate::log_file::run_tail_in(crate::log_file::dir()?, pid, start, LOG_LINES, LOG_BYTES)?;
+    let home = super::home_text();
+    Some(lines.iter().map(|l| clean(l, home.as_deref(), 2000)).collect())
+}
+
 /// `s` as a report carries it: at most `limit` bytes, the home folder as `~`.
 fn clean(s: &str, home: Option<&str>, limit: usize) -> String {
     let s = super::limited(s, limit);
@@ -343,7 +404,12 @@ pub fn evidence(
         Some(r) => crash_steps(r),
         None => app.issue_report.steps.iter().cloned().collect(),
     };
-    let (system_fields, system_text) = system(app, ctx);
+    let (mut system_fields, mut system_text) = system(app, ctx);
+    if let Some(r) = &report {
+        crashed_system(r, &mut system_fields, &mut system_text);
+    }
+    // About a crash: the crashed run's log, which may be several starts back by now.
+    let log = report.as_ref().and_then(crashed_log_lines).filter(|l| !l.is_empty()).unwrap_or_else(|| log_lines(app));
     payload::Evidence {
         system: system_text,
         system_fields,
@@ -352,7 +418,7 @@ pub fn evidence(
         session,
         failing,
         steps,
-        log: log_lines(app),
+        log,
         screenshot: None,
         design,
         design_from,

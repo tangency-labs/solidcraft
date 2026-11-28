@@ -3562,6 +3562,89 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Each start keeps the last few runs' logs, not one (`log_file::rotate`): two failed starts
+    /// and the safe-mode start after them still leave the first failure's log. The oldest go first,
+    /// past `KEEP` runs or past `MAX_KEPT_BYTES`.
+    #[test]
+    fn ticket_report_logs_of_several_failed_starts_are_kept() {
+        use crate::log_file::{FILE, KEEP, MAX_KEPT_BYTES, previous_name, rotate};
+        let dir = temp_dir("log-rotate");
+        std::fs::create_dir_all(&dir).unwrap();
+        for run in 0..KEEP + 2 {
+            rotate(&dir);
+            std::fs::write(dir.join(FILE), format!("run {run}\n")).unwrap();
+        }
+        let last = KEEP + 1;
+        assert_eq!(std::fs::read_to_string(dir.join(FILE)).unwrap(), format!("run {last}\n"));
+        for n in 1..=KEEP {
+            assert_eq!(std::fs::read_to_string(dir.join(previous_name(n))).unwrap(), format!("run {}\n", last - n), "{}", previous_name(n));
+        }
+        assert!(!dir.join(previous_name(KEEP + 1)).exists(), "no more than KEEP earlier runs");
+        // Big older logs: the oldest go until the rest fit.
+        let big = "x".repeat(usize::try_from(MAX_KEPT_BYTES / 3).unwrap());
+        for _ in 0..KEEP {
+            rotate(&dir);
+            std::fs::write(dir.join(FILE), &big).unwrap();
+        }
+        rotate(&dir);
+        let older: u64 = (2..=KEEP).filter_map(|n| std::fs::metadata(dir.join(previous_name(n))).ok()).map(|m| m.len()).sum();
+        assert!(older <= MAX_KEPT_BYTES, "{older} bytes");
+        assert!(dir.join(previous_name(1)).exists() && dir.join(previous_name(2)).exists(), "the newest stay");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A crash report's log is the crashed run's own, found by the run it names, even after more
+    /// starts: not this run's, nor the run before's.
+    #[test]
+    fn ticket_report_crash_log_is_the_crashed_runs_own() {
+        use crate::log_file::{FILE, previous_name, run_header, run_tail_in};
+        let dir = temp_dir("log-run");
+        std::fs::create_dir_all(&dir).unwrap();
+        let crashed = format!("{}\ncrashed 1\ncrashed 2\n", run_header(4242, "2026-11-27T10:00:01Z"));
+        std::fs::write(dir.join(previous_name(3)), crashed).unwrap();
+        std::fs::write(dir.join(previous_name(2)), format!("{}\nfailed again\n", run_header(4243, "2026-11-27T10:01:00Z"))).unwrap();
+        std::fs::write(dir.join(previous_name(1)), format!("{}\nsafe mode\n", run_header(4244, "2026-11-27T10:02:00Z"))).unwrap();
+        // Two windows' processes in one file (Windows refused the move): only the run's own lines.
+        let now = format!("{}\nthis run\n{}\nanother window\n", run_header(5000, "2026-11-27T10:03:00Z"), run_header(4242, "2026-11-20T10:00:00Z"));
+        std::fs::write(dir.join(FILE), now).unwrap();
+        // The crash journal starts a moment after the log.
+        assert_eq!(run_tail_in(&dir, 4242, "2026-11-27T10:00:03Z", 500, 1 << 20).unwrap(), ["crashed 1", "crashed 2"]);
+        assert_eq!(run_tail_in(&dir, 5000, "2026-11-27T10:03:00Z", 500, 1 << 20).unwrap(), ["this run"]);
+        assert_eq!(run_tail_in(&dir, 4242, "2026-11-27T10:00:03Z", 1, 1 << 20).unwrap(), ["crashed 2"], "the end of it");
+        assert_eq!(run_tail_in(&dir, 4242, "2026-11-28T10:00:03Z", 500, 1 << 20), None, "same process number, another day");
+        assert_eq!(run_tail_in(&dir, 9, "2026-11-27T10:00:03Z", 500, 1 << 20), None);
+        assert_eq!(run_tail_in(&dir, 4242, "yesterday", 500, 1 << 20), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A report about a crash says which GPU, driver and graphics API the run that crashed had,
+    /// not the safe-mode start that sends it; that start's stay beside it as `reported_from`.
+    #[test]
+    fn ticket_report_about_a_crash_names_the_crashed_runs_graphics() {
+        let report = json!({
+            "app": {"version": "0.50.0"},
+            "system": {"environment": "Renderer: Vulkan Intel(R) UHD Graphics 620 (IntegratedGpu, driver Intel Corporation 31.0.101.2111)"},
+        });
+        let mut fields = serde_json::Map::new();
+        fields.insert("renderer".into(), json!("GPU"));
+        fields.insert("gpu".into(), json!("Microsoft Basic Render Driver (Dx12, Cpu)"));
+        fields.insert("graphics_api".into(), json!("dx12"));
+        let mut text = "SolidCraft 0.51.0\nRenderer: GPU, Microsoft Basic Render Driver (Dx12, Cpu)\nGraphics API: dx12\n".to_string();
+        ticket::crashed_system(&report, &mut fields, &mut text);
+        assert_eq!(fields["gpu"], json!("Intel(R) UHD Graphics 620 (Vulkan, IntegratedGpu)"));
+        assert_eq!(fields["graphics_api"], json!("vulkan"));
+        assert_eq!(fields["renderer"], json!("GPU"));
+        assert_eq!(fields["driver"], json!("Intel Corporation 31.0.101.2111"));
+        assert_eq!(fields["crashed_run"]["version"], json!("0.50.0"));
+        assert_eq!(fields["reported_from"]["gpu"], json!("Microsoft Basic Render Driver (Dx12, Cpu)"));
+        assert!(text.contains("Crashed run: Renderer: Vulkan Intel(R) UHD Graphics 620"), "{text}");
+        assert!(text.contains("Reported from: GPU, Microsoft Basic Render Driver (Dx12, Cpu), dx12"), "{text}");
+        // A crash report without a renderer leaves this start's as they are.
+        let (mut same, mut said) = (fields.clone(), text.clone());
+        ticket::crashed_system(&json!({"system": {"environment": ""}}), &mut same, &mut said);
+        assert_eq!((same, said), (fields, text));
+    }
+
     /// The error in a report's title and description is cut at a word, with "…", never mid-word
     /// ("…Surface Natur"); the whole error stays in the failed operation's details.
     #[test]

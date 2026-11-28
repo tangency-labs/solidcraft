@@ -1,0 +1,7 @@
+{
+  "en": {
+    "crash.kind_device_lost": "Graphics device lost",
+    "crash.graphics_retry_note": "The graphics failed on an earlier start. {api} often works where another graphics API fails; you can change this later in Preferences › Graphics.",
+    "crash.graphics_retry": "Start with {api}"
+  }
+}
