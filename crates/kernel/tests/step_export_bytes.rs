@@ -73,6 +73,11 @@ const NO_READ_BACK: &[&str] = &["tests/step-regressions/thread_crest_band.step"]
 /// bit-for-bit identical; its eight polynomial cubic edges now enter SMLib as non-rational
 /// (`w = NOW`, #20422), shifting its eight SMLib-fitted 2D pcurves by at most 2.72e-15 in UV and
 /// line #8 uncertainty by 9e-15 (0.017508281886215407 -> 0.01750828188620642).
+/// An edge whose pcurve gap is past half its tolerance is raised to three times that gap, not
+/// one and a half (solidcore#3388), so the record check's zone holds the gap: the fillet's
+/// line #8 doubles (0.0175 -> 0.0350, its widest such edge), and both `rod_doubled_edge.step`
+/// exports differ only on line #8 (0.21407051524973394 -> 0.21407085951836702), the widest
+/// tolerance after the pcurves of its four raised edges are fitted to the wider zone.
 /// `stepped_tapered_hole.step` is new (solidcore#3253): a block whose stepped, tapered hole has
 /// whole-turn cone faces that close on their seams beside a quarter line.
 /// `bent_strip_micrometre_cuts.step` is new (#22579): SolidCraft's export of a bent strip with two
@@ -121,8 +126,8 @@ fn with_macos_digests(expected: Vec<(String, String)>) -> Vec<(String, String)> 
 #[rustfmt::skip]
 const DIGESTS: &[(&str, &str)] = &[
     ("solidcore/crates/solidcore-step/tests/fixtures/closed-spline-cylinder.step", "2b7d457b87394f2c"),
-    ("solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step", "902c8f135a031308"),
-    ("solidcore/crates/solidcore-step/tests/fixtures/rod_doubled_edge.step", "7e5ec3041433853c"),
+    ("solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step", "ca6fc53bccb81942"),
+    ("solidcore/crates/solidcore-step/tests/fixtures/rod_doubled_edge.step", "fc69a5154f525f58"),
     ("solidcore/crates/solidcore-step/tests/fixtures/rounded-cube-conic-corners.step", "48265d82ba693827"),
     ("solidcore/crates/solidcore-step/tests/fixtures/ruled-spline-patch-reparametrised.step", "d933f881bf7cd710"),
     ("solidcore/crates/solidcore-step/tests/fixtures/stepped_tapered_hole.step", "580fd86750a6eb21"),
@@ -164,7 +169,7 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/step-regressions/hole_round_revolved.step", "260e07ac4dec005d"),
     ("tests/step-regressions/net_steps_back_within_tolerance.step", "8e2dc148e8c3557e"),
     ("tests/step-regressions/rod_cross_hole_rim_off_curve_start.step", "908bb8af3062c6c0"),
-    ("tests/step-regressions/rod_doubled_edge.step", "7e5ec3041433853c"),
+    ("tests/step-regressions/rod_doubled_edge.step", "fc69a5154f525f58"),
     ("tests/step-regressions/rounded_disc_cut_vertices_off.step", "5dda1e626a95d58c"),
     ("tests/step-regressions/swept_tube_last_wall.step", "711d9a8df3f56e3a"),
     ("tests/step-regressions/thread_crest_band.step", "2dfb86551d60a9f3"),
@@ -238,7 +243,7 @@ fn fixed_input_digest(name: &str, live: &[solidcraft_kernel::ImportedBody], head
     // post-#20422 Linux digest.
     if name == "solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step" {
         assert_eq!(digest(&bytes), "5545d4ee93431803", "{name}: fixed input export changed");
-        return Some("902c8f135a031308".to_string());
+        return Some("ca6fc53bccb81942".to_string());
     }
     Some(digest(&bytes))
 }

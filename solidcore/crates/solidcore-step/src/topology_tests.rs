@@ -5174,6 +5174,102 @@ fn a_measured_gap_smaller_than_source_uncertainty_keeps_its_pcurve_allowance() {
     }
 }
 
+/// solidcore#3388: an edge's tolerance raised to cover the gap between its kernel-made pcurve
+/// and its curve was 1.5 times the gap, so the record check, which takes half the tolerance,
+/// reported a Bad Gap on every such edge. The patch is bilinear, (10 u, 10 v, u v) mm; its four
+/// sides are straight quadratic splines whose middle point is a quarter along, so they run at an
+/// uneven pace, which no closed form at a steady pace lifts onto and the kernel makes every
+/// pcurve. Each side is affine along its iso-line, so its exact pcurve is the same spline over
+/// (x / 10, y / 10); the kernel's are those moved 1e-4 along u, about 1e-3 mm off, far past the
+/// 1e-5 mm the file states, so the reader alone raises the tolerance. The first side is split at
+/// its middle, so the loop has five uses and the proof of a whole patch (three or four sides,
+/// `measure_boundary_edges`) is not asked: every gap is the kernel's.
+fn shifted_trims_patch(shift: f64) -> (Result<crate::assembly::Solid, String>, usize) {
+    use crate::assembly::{Assembly, Bound, Kind};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Shifted(AtomicUsize, f64);
+    impl Trims for Shifted {
+        fn trims(&self, face: &TrimFace<'_>) -> std::result::Result<Vec<Vec<Curve2>>, String> {
+            let mut out = Vec::new();
+            for l in &face.loops {
+                let mut pcs = Vec::new();
+                for u in l {
+                    if let Some(pc) = &u.pcurve {
+                        pcs.push(pc.clone());
+                        continue;
+                    }
+                    self.0.fetch_add(1, Ordering::Relaxed);
+                    let e = face.edges.get(u.edge as usize).ok_or("edge")?;
+                    let BCurve::Spline { knots, points } = e.curve else { return Err(format!("{:?}", e.curve)) };
+                    let points = points.iter().map(|p| [p[0] / 10.0 + self.1, p[1] / 10.0]).collect();
+                    pcs.push(Curve2::Spline { knots: knots.clone(), points });
+                }
+                out.push(pcs);
+            }
+            Ok(out)
+        }
+    }
+    let trims = Shifted(AtomicUsize::new(0), shift);
+    let mut a = Assembly::new(1e-5, Some(&trims));
+    let points = [[0.0, 0.0, 0.0], [5.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 1.0], [0.0, 10.0, 0.0]];
+    let vs: Vec<u32> = points.iter().map(|&p| a.add_vertex(p).unwrap()).collect();
+    let mut edges = Vec::new();
+    for k in 0..5 {
+        let next = (k + 1) % 5;
+        let [p, q] = [points[k], points[next]];
+        let quarter = std::array::from_fn(|i| p[i] + 0.25 * (q[i] - p[i]));
+        let side = BCurve::Spline { knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], points: vec![p, quarter, q] };
+        edges.push(a.add_edge(k as u64, side, [0.0, 1.0], [vs[k], vs[next]]).unwrap());
+    }
+    let patch = BSurface::Spline {
+        u_knots: vec![0.0, 0.0, 1.0, 1.0],
+        v_knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![vec![points[0], points[4]], vec![points[2], points[3]]],
+    };
+    let f = a.add_face(1, patch, vec![Bound::Edges(edges)], Some(0), true).unwrap();
+    let s = a.finish(1, "shifted trims".into(), vec![vec![(f, true)]], Kind::Model);
+    (s, trims.0.load(Ordering::Relaxed))
+}
+
+#[test]
+fn an_edge_tolerance_raised_over_its_pcurve_gap_passes_the_record_check() {
+    let (s, made) = shifted_trims_patch(1e-4);
+    let s = s.unwrap();
+    assert_eq!(made, 5, "the kernel makes every pcurve");
+    let f = &s.brep.faces[0];
+    let surface = SurfaceEval::new(f.parameters()).unwrap();
+    let Loop::Edges { edges } = &f.loops[0] else { panic!("edge loop") };
+    for u in edges {
+        let e = &s.brep.edges[u.edge as usize];
+        let curve = CurveEval::new(e.parameters()).unwrap();
+        let gap = (0..=1000)
+            .map(|k| {
+                let t = f64::from(k) / 1000.0;
+                let q = solidcore_ops::pcurve::eval(&u.pcurve, t).unwrap();
+                surface.point(q).unwrap().dist(curve.point(t).unwrap())
+            })
+            .fold(0.0, f64::max);
+        assert!(gap > 1e-3 - 1e-9, "the pcurve is as the kernel made it: {gap}");
+        assert!(0.5 * e.tolerance > gap, "the zone tolerance {} covers the gap {gap}", 0.5 * e.tolerance);
+    }
+    let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+    let report = body.check(solidcore_ops::check::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+}
+
+/// solidcore#3388: a gap past a third of [`MAX_TOLERANCE`](crate::assembly::MAX_TOLERANCE), which
+/// the full margin would take past it, still reads, with the margin it had: the same patch with
+/// its kernel-made pcurves 0.04 along u, about 0.4 mm off.
+#[test]
+fn an_edge_gap_the_full_margin_would_refuse_still_reads() {
+    let (s, made) = shifted_trims_patch(0.04);
+    let s = s.unwrap();
+    assert_eq!(made, 5, "the kernel makes every pcurve");
+    for e in &s.brep.edges {
+        assert!(e.tolerance > 0.39 * 1.5 && e.tolerance <= 1.0, "1.5 times the gap: {}", e.tolerance);
+    }
+}
+
 /// A cubic rational spline with 101 control points 10 mm apart along a 1000 mm line, weights
 /// alternating 1 and 0.9, on uniform knots over [0, 1]: its speed is about 1000, so a 5e-8 mm edge
 /// spans 5e-11 of its parameter, which the kernel resolves, and its knots stay the file's bit for
@@ -5498,7 +5594,8 @@ fn patch_sides() -> Vec<Run> {
 
 /// A sheet read with the stand-in kernel: its brep, and the number of pcurves the kernel made. How
 /// many edges the proof of a boundary raised to three times their gap (to `off`'s 3 times, to a
-/// hair): the raise the importer makes for the proof, where the kernel's own measure is 1.5 times.
+/// hair): the raise the importer makes for the proof, and for the kernel's own measure of a gap
+/// past half the file's tolerance (solidcore#3388).
 fn read_sheet(ex: &p21::Exchange, off: f64) -> (Brep, usize, usize) {
     let kernel = OnPatch(Default::default());
     let r = read_solids_with(ex, &kernel);
@@ -5511,9 +5608,10 @@ fn read_sheet(ex: &p21::Exchange, off: f64) -> (Brep, usize, usize) {
 /// A face is raised for the proof only as a whole patch: exactly one loop of four uses on the
 /// patch's four sides. The whole patch is (no kernel, its four edges covered); three sides of it
 /// with a fourth that bulges 2 mm into the patch is not, and neither is a face of its four sides
-/// with a hole, or a face of two sides and a curve across: the kernel is asked and no edge is
-/// raised to the proved three times its gap (what the sides alone would be, one by one, as the
-/// proof of an edge was taken before it was asked of the face).
+/// with a hole, or a face of two sides and a curve across: the kernel is asked for every use's
+/// pcurve, none taken in closed form at a proof's raise. (The tolerance does not tell the two
+/// apart: since solidcore#3388 the kernel's measured gap, 2e-5 mm here, past half the file's
+/// 1e-5, is covered at three times too, so that the record check, which takes half, passes.)
 #[test]
 fn a_boundary_gap_is_covered_only_where_the_face_is_the_whole_patch() {
     let off = 2e-5;
@@ -5523,16 +5621,14 @@ fn a_boundary_gap_is_covered_only_where_the_face_is_the_whole_patch() {
     // Three sides and a fourth 2 mm inside the patch at its middle.
     let mut trimmed: Vec<Run> = patch_sides().into_iter().take(3).collect();
     trimmed.push(Run::Bulge);
-    let (b, calls, raised) = read_sheet(&patch_sheet(off, &[trimmed]), off);
-    assert!(calls > 0, "the kernel makes the pcurves of a trimmed face");
-    assert_eq!(raised, 0, "no edge of a trimmed face is raised for a proof: {:?}", b.edges.iter().map(|e| e.tolerance).collect::<Vec<_>>());
+    let (_, calls, _) = read_sheet(&patch_sheet(off, &[trimmed]), off);
+    assert_eq!(calls, 4, "the kernel makes every pcurve of a trimmed face");
 
     // The four sides and a hole of straight lines on the patch, clockwise about its middle.
     let hole = [[4.0, 4.0, 5.16], [4.0, 6.0, 5.24], [6.0, 6.0, 5.36], [6.0, 4.0, 5.24]];
     let inner = (0..4).map(|k| Run::Line(hole[k], hole[(k + 1) % 4])).collect();
-    let (_, calls, raised) = read_sheet(&patch_sheet(off, &[patch_sides(), inner]), off);
-    assert!(calls > 0);
-    assert_eq!(raised, 0, "a face with a hole is not the whole patch");
+    let (_, calls, _) = read_sheet(&patch_sheet(off, &[patch_sides(), inner]), off);
+    assert_eq!(calls, 8, "a face with a hole is not the whole patch");
 
     // Two sides whole and a diagonal across: three uses.
     let triangle = vec![
@@ -5540,17 +5636,17 @@ fn a_boundary_gap_is_covered_only_where_the_face_is_the_whole_patch() {
         Run::Line(PATCH_CORNERS[1], PATCH_CORNERS[2]),
         Run::Line(PATCH_CORNERS[2], PATCH_CORNERS[0]),
     ];
-    let (_, calls, raised) = read_sheet(&patch_sheet(off, &[triangle]), off);
-    assert!(calls > 0);
-    assert_eq!(raised, 0, "three uses are no whole patch");
+    let (_, calls, _) = read_sheet(&patch_sheet(off, &[triangle]), off);
+    assert_eq!(calls, 3, "three uses are no whole patch");
 }
 
 /// A face that does not qualify is read as it was: a patch whose edges stand 0.5 mm off its
 /// boundary (past what a tolerance may be raised to) takes its pcurves from the kernel, exactly as
 /// the kernel makes them, and its edges' tolerance is the one the measured gap of those pcurves
-/// gives (1.5 times it), with no raise for a proof that did not hold. A rational patch (weights
-/// 2, the same surface) is no polynomial net: its pcurves are the kernel's too, with the tolerance
-/// their measured gap gives; and with no kernel neither is read.
+/// gives (1.5 times it: three times would pass [`MAX_TOLERANCE`](crate::assembly::MAX_TOLERANCE)),
+/// with no raise for a proof that did not hold. A rational patch (weights 2, the same surface) is
+/// no polynomial net: its pcurves are the kernel's too, with the tolerance their measured gap
+/// gives; and with no kernel neither is read.
 #[test]
 fn a_patch_that_does_not_qualify_is_read_as_before() {
     let far = block_with_a_twisted_patch(0.5);
@@ -5577,7 +5673,9 @@ fn a_patch_that_does_not_qualify_is_read_as_before() {
     assert_eq!(patch_lines(&s.brep).0.len(), 4);
     let top: Vec<f64> = s.brep.edges.iter().filter(|e| e.tolerance > 2e-5).map(|e| e.tolerance).collect();
     assert_eq!(top.len(), 4);
-    assert!(top.iter().all(|t| (t - 3e-5).abs() < 1e-8), "{top:?}: 1.5 times the 20 micrometres, not the 3 times a proof covers");
+    // solidcore#3388: the kernel's 20 micrometre gap is past half the file's 10, so it is covered
+    // three times over, as a proof's is, and the record check, which takes half, passes.
+    assert!(top.iter().all(|t| (t - 6e-5).abs() < 1e-8), "{top:?}: 3 times the 20 micrometres the pcurves are measured off");
     assert!(!read_solids(&rational).failures.is_empty(), "no kernel, no pcurves");
     // The same gap on a polynomial patch is proved: no kernel, and 3 times the gap.
     let proved = block_under_a_patch([2e-5; 4], [false; 4], false);
