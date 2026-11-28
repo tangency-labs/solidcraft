@@ -1025,6 +1025,8 @@ pub struct SolveApp {
     /// A STEP, IGES, FreeCAD, Rhino or glTF file waiting for its import options (`import_options`).
     /// Copy Design with Links' window, while it is open.
     pub copy_links: Option<copy_links_dialog::CopyLinks>,
+    /// The list or copy running beside the window for Copy Design with Links.
+    pub copy_links_job: Option<copy_links_dialog::Job>,
     pub import_options: Option<import_options::Ask>,
     /// Files asked while another waits for its options (several dropped at once), asked in turn.
     pub import_options_waiting: std::collections::VecDeque<import_options::Ask>,
@@ -1373,6 +1375,7 @@ impl SolveApp {
             quick_measure: Default::default(),
             mesh_units: None,
             copy_links: None,
+            copy_links_job: None,
             import_options: None,
             import_options_waiting: Default::default(),
             plugin_menu: Default::default(),

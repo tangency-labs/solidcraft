@@ -6,13 +6,20 @@
 //! keep linking it there. Rename a file in its row, or find and replace over every ticked name at
 //! once; choose the folder, then Copy runs `file.copy_with_links` with what is ticked. A script, the
 //! control channel or MCP calls the command with its own picks and never meets this window.
+//!
+//! Listing reads every design it finds and copying writes every file picked, so both run beside the
+//! window ([`Job`]) and the window says what it is doing until the reply comes.
 
 use std::path::Path;
+use std::sync::mpsc::{Receiver, TryRecvError};
 
 use serde_json::{Value, json};
 
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, ui_kit};
+
+const LIST: &str = "file.copy_with_links.list";
+const COPY: &str = "file.copy_with_links";
 
 /// One file of the list, as its row edits it.
 #[derive(Clone, Debug, PartialEq)]
@@ -33,11 +40,23 @@ pub struct CopyLinks {
     /// The design copied.
     pub design: String,
     pub rows: Vec<Row>,
+    /// Design files the list couldn't read while looking for drawings: it may be missing some.
+    pub skipped: Vec<String>,
     pub find: String,
     pub replace: String,
     /// The folder the copies go in.
     pub folder: String,
     pub error: Option<String>,
+    /// The list is being made beside the window.
+    pub listing: bool,
+    /// The copies are being written beside the window.
+    pub copying: bool,
+}
+
+/// A command running beside the window for it: the list, or the copy.
+pub struct Job {
+    copying: bool,
+    reply: Receiver<Result<Value, String>>,
 }
 
 fn file_name(path: &str) -> String {
@@ -68,7 +87,12 @@ impl CopyLinks {
                 })
             })
             .collect();
-        Some(Self { design, rows, ..Self::default() })
+        let skipped = listed
+            .get("skipped")
+            .and_then(Value::as_array)
+            .map(|s| s.iter().filter_map(Value::as_str).map(str::to_string).collect())
+            .unwrap_or_default();
+        Some(Self { design, rows, skipped, ..Self::default() })
     }
 
     /// Find and replace over the names of the ticked files; how many changed.
@@ -94,15 +118,123 @@ impl CopyLinks {
     }
 }
 
-/// Open the window for the open design, or say why it can't open.
+/// Run `command` beside the window on a session of its own: both commands work from files only.
+/// `None` without threads (the web, where they refuse anyway).
+fn beside(command: &'static str, params: Value) -> Option<Receiver<Result<Value, String>>> {
+    crate::control_job::spawn(None, Default::default(), move || {
+        let mut session = solidcraft_engine::Session::default();
+        session.execute(command, &params).map_err(|e| e.to_string())
+    })
+}
+
+/// Open the window for the open design, or say why it can't open. A design with no file, or with
+/// changes not saved, is refused at once with the command's own words; a saved one is listed
+/// beside the window.
 pub fn open(app: &mut SolveApp) {
-    match app.run("file.copy_with_links.list", json!({})) {
-        Ok(listed) => match CopyLinks::from_list(&listed) {
-            Some(window) => app.copy_links = Some(window),
-            None => app.set_status(solidcraft_ui_text::tr("copy_links.unreadable").to_string(), true),
-        },
-        Err(e) => app.set_status(e, true),
+    let saved = app.session.path.clone().filter(|_| !app.session.is_dirty());
+    let Some(design) = saved else {
+        if let Err(e) = app.run(LIST, json!({})) {
+            app.set_status(e, true);
+        }
+        return;
+    };
+    match beside(LIST, json!({"path": design})) {
+        Some(reply) => {
+            app.copy_links_job = Some(Job { copying: false, reply });
+            app.copy_links = Some(CopyLinks { design, listing: true, ..CopyLinks::default() });
+        }
+        None => {
+            let reply = app.run(LIST, json!({"path": design}));
+            listed(app, reply);
+        }
     }
+}
+
+/// The list's reply: the window's rows, or why there are none.
+fn listed(app: &mut SolveApp, reply: Result<Value, String>) {
+    match reply.map(|v| CopyLinks::from_list(&v)) {
+        Ok(Some(window)) => app.copy_links = Some(window),
+        Ok(None) => {
+            app.copy_links = None;
+            app.set_status(solidcraft_ui_text::tr("copy_links.unreadable").to_string(), true);
+        }
+        Err(e) => {
+            app.copy_links = None;
+            app.set_status(e, true);
+        }
+    }
+}
+
+/// The copy's reply: say where the copies went and close, or show why not. A copy that finishes
+/// after its window was closed still says so in the status line.
+fn copied(app: &mut SolveApp, reply: Result<Value, String>) {
+    let folder = app.copy_links.as_ref().map(|w| w.folder.clone()).unwrap_or_default();
+    match reply {
+        Ok(made) => {
+            let count = made.get("copied").and_then(Value::as_array).map_or(0, Vec::len).to_string();
+            let design = made.get("design").and_then(Value::as_str).unwrap_or_default();
+            let folder = if folder.is_empty() { folder_of(design) } else { folder };
+            app.set_status(solidcraft_ui_text::format("copy_links.done", &[("count", &count), ("folder", &folder)]), false);
+            app.copy_links = None;
+        }
+        Err(e) => match app.copy_links.as_mut() {
+            Some(window) => {
+                window.copying = false;
+                window.error = Some(e);
+            }
+            None => app.set_status(e, true),
+        },
+    }
+}
+
+/// The reply of the job running beside the window, once it has come.
+fn poll(app: &mut SolveApp, ctx: &egui::Context) {
+    let Some(job) = app.copy_links_job.as_ref() else { return };
+    let reply = match job.reply.try_recv() {
+        Ok(reply) => reply,
+        Err(TryRecvError::Empty) => {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            return;
+        }
+        Err(TryRecvError::Disconnected) => Err(solidcraft_ui_text::tr("copy_links.unreadable").to_string()),
+    };
+    let copying = job.copying;
+    app.copy_links_job = None;
+    if copying {
+        copied(app, reply);
+    } else if app.copy_links.is_some() {
+        listed(app, reply);
+    }
+}
+
+/// Copy what is ticked, beside the window.
+fn start_copy(app: &mut SolveApp, mut window: CopyLinks) {
+    let params = window.params();
+    match beside(COPY, params.clone()) {
+        Some(reply) => {
+            window.copying = true;
+            window.error = None;
+            app.copy_links_job = Some(Job { copying: true, reply });
+            app.copy_links = Some(window);
+        }
+        None => {
+            app.copy_links = Some(window);
+            let reply = app.run(COPY, params);
+            copied(app, reply);
+        }
+    }
+}
+
+/// Esc while the window is open closes it and does nothing else: the sketch's own Esc (cancel the
+/// tool, finish the sketch) waits. Called before the shortcuts are read.
+pub(crate) fn cancel_on_escape(app: &mut SolveApp, ctx: &egui::Context) -> bool {
+    if app.copy_links.is_none() || !ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        return false;
+    }
+    app.copy_links = None;
+    ctx.input_mut(|i| i.raw.events.retain(|e| !matches!(e, egui::Event::Key { key: egui::Key::Escape, .. })));
+    app.esc_handled = true;
+    true
 }
 
 /// Ask for the folder with the host's dialog.
@@ -116,8 +248,9 @@ fn choose_folder(app: &mut SolveApp) {
 }
 
 /// The window, while it is open. Copy writes the copies; Cancel, Esc or the close button writes
-/// nothing.
+/// nothing (a copy already under way finishes, and says so in the status line).
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
+    poll(app, ctx);
     let Some(mut window) = app.copy_links.take() else { return };
     let t = solidcraft_theme::Tokens::get();
     let title = solidcraft_ui_text::tr("cmd.file_copy_with_links");
@@ -130,6 +263,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         .cards(width / t.form_card_width)
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
         .show(ctx, true, |ui| {
+            if window.listing {
+                ui_kit::text(ui, solidcraft_ui_text::tr("copy_links.listing"), ui_kit::Text::Note("copy_links.listing"));
+                return;
+            }
             ui_kit::text(ui, solidcraft_ui_text::tr("copy_links.intro"), ui_kit::Text::Note("copy_links.intro"));
             ui.add_space(t.space_6);
             ui_kit::text_row(ui, solidcraft_ui_text::tr("copy_links.find"), &mut window.find, "");
@@ -139,6 +276,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
             ui.add_space(t.space_6);
             rows(ui, &mut window);
+            if !window.skipped.is_empty() {
+                let files: Vec<String> = window.skipped.iter().map(|p| file_name(p)).collect();
+                let warning = solidcraft_ui_text::format("copy_links.skipped", &[("files", &files.join(", "))]);
+                ui_kit::text(ui, &warning, ui_kit::Text::Error("copy_links_skipped"));
+            }
             ui.add_space(t.space_6);
             ui.horizontal(|ui| {
                 ui_kit::text(ui, solidcraft_ui_text::tr("copy_links.folder"), ui_kit::Text::Inline);
@@ -149,28 +291,23 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     pick_folder = true;
                 }
             });
+            if window.copying {
+                ui_kit::text(ui, solidcraft_ui_text::tr("copy_links.copying"), ui_kit::Text::Note("copy_links.copying"));
+            }
             if let Some(error) = &window.error {
                 ui_kit::text(ui, error, ui_kit::Text::Error("copy_links_error"));
             }
         });
     match action {
+        // Copy waits for the list, and for a copy already under way.
+        ui_kit::Action::Ok if window.listing || window.copying => app.copy_links = Some(window),
         ui_kit::Action::Ok => {
             if window.folder.trim().is_empty() {
                 window.error = Some(solidcraft_ui_text::tr("copy_links.no_folder").to_string());
                 app.copy_links = Some(window);
                 return;
             }
-            match app.run("file.copy_with_links", window.params()) {
-                Ok(made) => {
-                    let count = made.get("copied").and_then(Value::as_array).map_or(0, Vec::len).to_string();
-                    let message = solidcraft_ui_text::format("copy_links.done", &[("count", &count), ("folder", &window.folder)]);
-                    app.set_status(message, false);
-                }
-                Err(e) => {
-                    window.error = Some(e);
-                    app.copy_links = Some(window);
-                }
-            }
+            start_copy(app, window);
         }
         ui_kit::Action::None if !closed => {
             app.copy_links = Some(window);
@@ -285,6 +422,19 @@ mod tests {
         assert_eq!(w.replace_all(), 0, "nothing to find changes nothing");
     }
 
+    /// Frames until the job beside the window has answered (a few seconds at most).
+    fn settle(h: &mut crate::scenario::Harness) {
+        for _ in 0..500 {
+            h.frames(1);
+            if h.app.copy_links_job.is_none() {
+                h.frames(1);
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("the copy window's job never answered");
+    }
+
     /// A saved skid of two parts in one folder and a bolt in another.
     fn skid(h: &mut crate::scenario::Harness, root: &Path) -> std::path::PathBuf {
         let (work, lib) = (root.join("Skid-100"), root.join("Library"));
@@ -320,13 +470,15 @@ mod tests {
         h.app.start("file.copy_with_links");
         h.frames(2);
         assert!(h.app.copy_links.take().is_some(), "starting the command opens the window");
+        h.app.copy_links_job = None;
         // File > Copy Design with Links… opens it too.
         h.call("ui.resize", json!({"width": 1600, "height": 1300}));
         h.frames(2);
         h.step(&json!({"click": {"handle": "appbar:file"}})).unwrap();
         h.step(&json!({"widget": "Copy Design with Links…"})).unwrap();
-        h.frames(3);
+        settle(&mut h);
         let w = h.app.copy_links.as_mut().expect("the File menu's row opens the window");
+        assert!(!w.listing, "the list came back from beside the window");
         assert_eq!(w.rows.len(), 3, "{:?}", w.rows);
         let bolt = w.rows.iter_mut().find(|r| r.name == "Bolt.sc").unwrap();
         bolt.copy = false;
@@ -338,7 +490,7 @@ mod tests {
         let names: Vec<String> = h.app.copy_links.as_ref().unwrap().rows.iter().map(|r| r.name.clone()).collect();
         assert_eq!(names, ["Skid-200.sc", "Skid-200 Plate.sc", "Bolt.sc"]);
         h.step(&json!({"widget": "Copy"})).unwrap();
-        h.frames(2);
+        settle(&mut h);
         assert!(h.app.copy_links.is_none(), "Copy closes the window: {:?}", h.app.copy_links.as_ref().and_then(|w| w.error.clone()));
         let mut made: Vec<String> = std::fs::read_dir(&out).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         made.sort();

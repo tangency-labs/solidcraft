@@ -248,3 +248,57 @@ fn a_drawing_beside_a_part_in_another_folder_is_listed_and_copied_with_it() {
     );
     assert_eq!(drawn(&out.join("bolt drawing.sc")), vec![text(&out.join("bolt.sc"))]);
 }
+
+#[test]
+fn a_linked_step_file_that_is_gone_is_listed_with_its_problem_and_left_in_place() {
+    let folder = Folder::new("missing-step");
+    let dir = folder.dir("work");
+    let step = dir.join("bought pump.step");
+    let mut part = Session::default();
+    run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0]}));
+    run(&mut part, "file.export", json!({"path": step}));
+    let skid = dir.join("skid.sc");
+    let mut s = Session::default();
+    run(&mut s, "file.save", json!({"path": skid}));
+    run(&mut s, "file.insert_step", json!({"path": step, "link": true}));
+    run(&mut s, "file.save", json!({"path": skid}));
+    let listed = run(&mut s, "file.copy_with_links.list", json!({"path": skid}));
+    let item =
+        |listed: &Value| listed["items"].as_array().unwrap().iter().find(|i| i["path"] == text(&step)).cloned().unwrap_or_else(|| panic!("{listed}"));
+    assert_eq!(item(&listed)["kind"], "file", "{listed}");
+    assert!(item(&listed).get("problem").is_none(), "{listed}");
+    std::fs::remove_file(&step).unwrap();
+    let listed = run(&mut s, "file.copy_with_links.list", json!({"path": skid}));
+    let problem = item(&listed)["problem"].as_str().unwrap_or_default().to_string();
+    assert!(problem.contains("missing"), "{listed}");
+    let e = refused(
+        &mut s,
+        "file.copy_with_links",
+        json!({"path": skid, "folder": folder.dir("out"), "copy": [{"path": skid, "name": "skid.sc"}, {"path": step, "name": "bought pump.step"}]}),
+    );
+    assert!(e.contains("can't be copied"), "{e}");
+}
+
+#[test]
+fn a_drawing_of_a_design_another_drawing_brings_in_is_found_in_any_order() {
+    // In one folder: `a-detail` draws `extra` only, and `z-sheet` draws the skid and `extra`. `a-detail`
+    // is read first, before anything brings `extra` in; it is found once `z-sheet` does.
+    let k = skid("chained");
+    let src = k.skid.parent().unwrap().to_path_buf();
+    let extra = k.folder.dir("elsewhere").join("extra.sc");
+    part(&extra, 3);
+    let (detail, sheet) = (src.join("a-detail.sc"), src.join("z-sheet.sc"));
+    drawing_of(&detail, &extra);
+    let mut s = Session::default();
+    run(&mut s, "file.save", json!({"path": sheet}));
+    run(&mut s, "drawing.create", json!({"source": k.skid}));
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "drawing.create", json!({"source": extra}));
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "file.save", json!({"path": sheet}));
+    let listed = run(&mut s, "file.copy_with_links.list", json!({"path": k.skid}));
+    let kind = |p: &Path| listed["items"].as_array().unwrap().iter().find(|i| i["path"] == text(p)).map(|i| i["kind"].as_str().unwrap().to_string());
+    assert_eq!(kind(&sheet).as_deref(), Some("drawing"), "{listed}");
+    assert_eq!(kind(&extra).as_deref(), Some("design"), "{listed}");
+    assert_eq!(kind(&detail).as_deref(), Some("drawing"), "{listed}");
+}

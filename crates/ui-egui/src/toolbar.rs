@@ -3143,6 +3143,9 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
     if crate::params_dialog::cancel_on_escape(app, ctx) {
         return;
     }
+    if crate::copy_links_dialog::cancel_on_escape(app, ctx) {
+        return;
+    }
     if crate::view_tiles::cancel_placement_on_escape(app, ctx) {
         app.esc_handled = true;
         app.last_escape = None;

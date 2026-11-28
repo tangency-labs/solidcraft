@@ -136,20 +136,28 @@ mod native {
     }
 
     /// The design at `top`, every file it links all the way down, and (with `drawings`) the designs
-    /// in the folders of the listed designs whose drawings draw one of them, with their own links.
+    /// in the folders of the listed designs whose drawings draw one of them, with their own links. A
+    /// design there that draws nothing listed yet is kept as a candidate and looked at again whenever
+    /// the list grows, so a drawing of a design another drawing brings in is found too.
     fn find(top: &Path, drawings: bool) -> Result<Found> {
         let mut found = Found { items: Vec::new(), skipped: Vec::new() };
         let mut index = HashMap::new();
         let mut queue = VecDeque::new();
         queue.extend(found.add(&mut index, top.to_path_buf(), DESIGN, Path::new(""))?);
         let mut searched = HashSet::new();
+        // Designs read in the searched folders that draw nothing listed yet: each with what it draws.
+        let mut candidates: Vec<(PathBuf, Vec<PathBuf>)> = Vec::new();
         let mut scanned = 0usize;
         loop {
             while let Some(i) = queue.pop_front() {
+                let at = PathBuf::from(&found.items[i].path);
                 if found.items[i].kind == FILE {
+                    // A linked STEP or other source is copied byte for byte: it only has to be there.
+                    if solidcraft_io::vfs::design_path_is_file(&found.items[i].path, None) != Some(true) {
+                        found.items[i].problem = Some(format!("{}: missing or out of reach", whole(&at)));
+                    }
                     continue;
                 }
-                let at = PathBuf::from(&found.items[i].path);
                 match read_design(&at) {
                     Err(why) => found.items[i].problem = Some(why),
                     Ok((_, doc)) => {
@@ -170,20 +178,10 @@ mod native {
                 .filter_map(|item| Path::new(&item.path).parent().map(Path::to_path_buf))
                 .filter(|folder| !searched.contains(folder))
                 .collect();
-            if folders.is_empty() {
-                break;
-            }
             for folder in folders {
                 searched.insert(folder.clone());
-                if solidcraft_io::vfs::check(&whole(&folder)).is_err() {
-                    continue;
-                }
-                let Ok(entries) = std::fs::read_dir(&folder) else { continue };
-                let mut files: Vec<PathBuf> = entries.filter_map(|e| e.ok().map(|e| e.path())).collect();
-                files.sort();
-                for file in files {
-                    let file = absolute(&file);
-                    if index.contains_key(&file) || !solidcraft_io::is_design_path(&whole(&file)) || !file.is_file() {
+                for file in design_files(&folder, &mut found.skipped) {
+                    if index.contains_key(&file) {
                         continue;
                     }
                     if scanned >= MAX_SCANNED {
@@ -200,23 +198,65 @@ mod native {
                         .iter()
                         .flat_map(|d| d.sources.iter().filter_map(|s| s.path.as_deref()))
                         .map(|p| absolute(&resolve(Some(&whole(&file)), p)))
-                        .filter(|p| index.get(p).is_some_and(|&i| found.items[i].kind != FILE))
                         .collect();
-                    let Some(first) = drawn.first() else { continue };
-                    if let Some(i) = found.add(&mut index, file.clone(), DRAWING, first)? {
-                        // It is listed as used by what it draws, so unticking a part shows its drawing.
-                        for other in &drawn[1..] {
-                            let other = whole(other);
-                            if !found.items[i].used_by.contains(&other) {
-                                found.items[i].used_by.push(other);
-                            }
-                        }
-                        queue.push_back(i);
+                    if !drawn.is_empty() {
+                        candidates.push((file, drawn));
                     }
                 }
             }
+            // Every candidate that now draws a listed design joins the list, with its own links.
+            let mut waiting = Vec::new();
+            for (file, drawn) in std::mem::take(&mut candidates) {
+                let listed: Vec<&PathBuf> = drawn.iter().filter(|p| index.get(*p).is_some_and(|&i| found.items[i].kind != FILE)).collect();
+                let Some(first) = listed.first() else {
+                    waiting.push((file, drawn));
+                    continue;
+                };
+                if let Some(i) = found.add(&mut index, file, DRAWING, first)? {
+                    // It is listed as used by what it draws, so unticking a part shows its drawing.
+                    for other in &listed[1..] {
+                        let other = whole(other);
+                        if !found.items[i].used_by.contains(&other) {
+                            found.items[i].used_by.push(other);
+                        }
+                    }
+                    queue.push_back(i);
+                }
+            }
+            candidates = waiting;
+            if queue.is_empty() {
+                // Nothing new joined: no new folder to look through, and no candidate left to match.
+                break;
+            }
         }
         Ok(found)
+    }
+
+    /// The design files in `folder`, sorted. A folder that can't be listed, or an entry in it that
+    /// can't be read, goes in `skipped`, so the list says it may be missing drawings.
+    fn design_files(folder: &Path, skipped: &mut Vec<String>) -> Vec<PathBuf> {
+        if solidcraft_io::vfs::check(&whole(folder)).is_err() {
+            skipped.push(whole(folder));
+            return Vec::new();
+        }
+        let Ok(entries) = std::fs::read_dir(folder) else {
+            skipped.push(whole(folder));
+            return Vec::new();
+        };
+        let mut files = Vec::new();
+        let mut unread = false;
+        for entry in entries {
+            match entry {
+                Ok(e) => files.push(absolute(&e.path())),
+                Err(_) => unread = true,
+            }
+        }
+        if unread {
+            skipped.push(whole(folder));
+        }
+        files.retain(|f| solidcraft_io::is_design_path(&whole(f)) && f.is_file());
+        files.sort();
+        files
     }
 
     pub(super) fn list(s: &mut Session, p: &Value) -> Result<Value> {
@@ -257,10 +297,14 @@ mod native {
         let params: CopyLinksParams = serde_json::from_value(p.clone()).map_err(|e| bad(COPY, e.to_string()))?;
         let top = start(s, COPY, params.path.as_deref())?;
         let folder = absolute(Path::new(&params.folder));
-        if params.folder.trim().is_empty() || params.folder.contains('\0') || !folder.is_dir() {
+        if params.folder.trim().is_empty() || params.folder.contains('\0') {
             return Err(bad(COPY, format!("`{}` is not a folder", params.folder)));
         }
+        // Refused before it is touched: a folder outside an agent's scope is never asked about.
         solidcraft_io::vfs::check(&whole(&folder)).map_err(|e| bad(COPY, e.to_string()))?;
+        if !folder.is_dir() {
+            return Err(bad(COPY, format!("`{}` is not a folder", params.folder)));
+        }
         let found = find(&top, params.drawings.unwrap_or(true))?;
         let listed: HashMap<PathBuf, &CopyLinksItem> = found.items.iter().map(|i| (PathBuf::from(&i.path), i)).collect();
 
@@ -346,6 +390,11 @@ mod native {
         let mut written: Vec<PathBuf> = Vec::new();
         for w in &writes {
             if let Err(e) = solidcraft_io::library_files::transfer(&whole(&w.from), &whole(&w.to), &w.original, &w.contents, false) {
+                // A transfer can fail after its copy is in place (syncing the folder): that copy is this
+                // call's too. A file another program put there first (`AlreadyExists`) is never touched.
+                if e.kind() != std::io::ErrorKind::AlreadyExists && std::fs::read(&w.to).is_ok_and(|now| now == w.contents) {
+                    written.push(w.to.clone());
+                }
                 // Only copies this call made are removed: each was a new file.
                 for made in &written {
                     let _ = std::fs::remove_file(made);
