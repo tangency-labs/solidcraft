@@ -1023,6 +1023,19 @@ fn cylinder(r: f64, h: f64) -> Brep {
     turned(r, r, h)
 }
 
+/// A cylinder whose circle edges run from `phase` through one full turn, so angle 0 lies
+/// `phase` before the parameter end. The seam and the side face stay on `[0, TAU]`, as [`turned`].
+fn cylinder_phased(r: f64, h: f64, phase: f64) -> Brep {
+    let mut body = turned(r, r, h);
+    let tau = std::f64::consts::TAU;
+    for edge in &mut body.shells[0].edges {
+        if let Curve::CircleArc { angle, .. } = &mut edge.curve {
+            *angle = [phase, phase + tau];
+        }
+    }
+    body
+}
+
 /// A cylinder (`r0 == r1`) or a cone frustum from radius `r0` at z = 0 to `r1` at z = `h`,
 /// its seam at angle 0.
 fn turned(r0: f64, r1: f64, h: f64) -> Brep {
@@ -1308,6 +1321,142 @@ fn check_cylinder_sides(d: &Drawing, view: &View) {
     for side in [-1., 1.] {
         let len: f64 = sides.iter().filter(|s| s.0 == side).map(|s| s.1).sum();
         assert!((len - rise).abs() < 1e-9, "side {side}: {len} vs {rise}");
+    }
+    assert_eq!(d.stats.uncertain_uncovered, 0, "{:?}", d.stats);
+    assert!(d.unsupported.is_empty());
+}
+
+/// The largest distance among the ends and the middle of every segment: a folded conic whose
+/// chord is short, and a line whose ends have collapsed, both count as the stroke drawn.
+fn screen_extent(piece: &Piece) -> f64 {
+    let mut pts = Vec::new();
+    for g in &piece.geometry {
+        for t in [0., 0.5, 1.] {
+            pts.push(g.point_at(t));
+        }
+    }
+    let mut extent = 0_f64;
+    for i in 0..pts.len() {
+        for j in (i + 1)..pts.len() {
+            let d = pts[i].dist(pts[j]);
+            if d.is_finite() {
+                extent = extent.max(d);
+            }
+        }
+    }
+    extent
+}
+
+#[test]
+fn an_edge_on_circle_whose_seam_is_just_off_the_fold_has_no_sub_nanometre_piece() {
+    // Parameter is the circle angle. Seen along -Y with up +Z, screen x is -X, so the
+    // projection of a circle about Z turns back at angle 0 (screen x = -R) and at angle π
+    // (screen x = +R). The circles run [phase, phase + TAU], so angle 0 is parameter TAU,
+    // `phase` before the end.
+    // Off that fold the screen moves R * (1 - cos dt) = R * dt^2 / 2. For R = 10 and
+    // dt = phase = 4e-8 that is 8e-15 mm, under a nanometre (1e-6 mm). The 3D chord is
+    // R * phase = 4e-7 mm. A cut is merged only when its parameter gap is at most 1e-10 of
+    // a full turn (about 6.3e-10) and its 3D gap is at most 1e-9 of the scene diagonal.
+    // The cylinder's box is 20 by 20 by 30, so that diagonal is sqrt(1700) (about 41.2)
+    // and the 3D limit is about 4.1e-8 mm. The parameter gap alone is already larger, and
+    // the chord is still above the 3D limit. The tail past the fold is not the visibility
+    // of the piece before it, so it stays.
+    let (r, h, phase) = (10., 30., 4e-8);
+    let opts = Options {
+        threads: 1,
+        ..Options::default()
+    };
+    let view = View::new(Vec3::new(0., -1., 0.), Vec3::new(0., 0., 1.)).unwrap();
+    let def = prepare(&cylinder_phased(r, h, phase), &opts).unwrap();
+    let d = hidden_lines(
+        std::slice::from_ref(&def),
+        &[identity(0, [0.; 3])],
+        &view,
+        &opts,
+        &never,
+    )
+    .unwrap();
+    for (edge, z) in [(0, 0.), (1, h)] {
+        let line = edge_line(&d, 0, edge);
+        for (i, piece) in line.pieces.iter().enumerate() {
+            let extent = screen_extent(piece);
+            assert!(
+                extent >= 1e-6,
+                "edge {edge} piece {i} t=[{:.6e}, {:.6e}] vis={:?} covered={} extent={extent:.6e}",
+                piece.t[0],
+                piece.t[1],
+                piece.visibility,
+                piece.covered,
+            );
+        }
+        for side in [r, -r] {
+            let target = Vec2::new(side, z);
+            let mut best = f64::MAX;
+            for piece in &line.pieces {
+                for g in &piece.geometry {
+                    for t in [0., 0.5, 1.] {
+                        let dist = g.point_at(t).dist(target);
+                        if dist.is_finite() {
+                            best = best.min(dist);
+                        }
+                    }
+                }
+            }
+            assert!(
+                best < 1e-6,
+                "edge {edge} misses screen ({side}, {z}) by {best}"
+            );
+        }
+        let drawn: f64 = line
+            .pieces
+            .iter()
+            .map(screen_extent)
+            .filter(|extent| *extent >= 1e-6)
+            .sum();
+        assert!(
+            drawn >= 2. * r - 1e-4,
+            "edge {edge} draws {drawn} mm of a {r} mm radius"
+        );
+    }
+}
+
+#[test]
+fn a_cylinder_one_twentieth_of_a_millimetre_tall_keeps_its_silhouette_lines() {
+    // A real edge of this height must not be dropped with the sub-nanometre tail above.
+    let opts = Options {
+        threads: 1,
+        ..Options::default()
+    };
+    let view = View::new(Vec3::new(0., -1., 0.), Vec3::new(0., 0., 1.)).unwrap();
+    let def = prepare(&cylinder(10., 0.05), &opts).unwrap();
+    let d = hidden_lines(
+        std::slice::from_ref(&def),
+        &[identity(0, [0.; 3])],
+        &view,
+        &opts,
+        &never,
+    )
+    .unwrap();
+    let sil = silhouette_pieces(&d);
+    assert!(!sil.is_empty());
+    let mut sides = Vec::new();
+    for p in sil {
+        assert_eq!(p.accuracy, CurveAccuracy::Analytic);
+        assert_eq!(p.visibility, Visibility::Visible);
+        for g in &p.geometry {
+            let Seg2::Line { a, b } = *g else {
+                panic!("a silhouette ruling is a line: {g:?}")
+            };
+            assert!(
+                (a.x.abs() - 10.).abs() < 1e-12 && (a.x - b.x).abs() < 1e-12,
+                "{g:?}"
+            );
+            sides.push((a.x.signum(), (b.y - a.y).abs()));
+        }
+    }
+    for side in [-1., 1.] {
+        let len: f64 = sides.iter().filter(|s| s.0 == side).map(|s| s.1).sum();
+        assert!((len - 0.05).abs() < 1e-6, "side {side}: {len} vs 0.05");
     }
     assert_eq!(d.stats.uncertain_uncovered, 0, "{:?}", d.stats);
     assert!(d.unsupported.is_empty());

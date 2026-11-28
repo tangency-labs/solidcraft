@@ -269,6 +269,11 @@ pub struct RevolveParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "RevolveConventionParam")]
     pub convention: Option<RevolveConventionParam>,
+    /// Join pieces of the same circular profile. Default: true. Set false to keep the face and
+    /// edge layout of Revolve features saved before arc joining.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub join_profile_arcs: Option<bool>,
     /// Turn until this face, vertex or point (To Object). Takes the place of `angle`, `angle2`
     /// and `direction`.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]

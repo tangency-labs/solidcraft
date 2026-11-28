@@ -231,12 +231,30 @@ mod tests {
     #[test]
     fn test_a_collapsed_track_title_fits_under_its_badge() {
         use super::assembly::collapsed_strip_title;
+        crate::i18n::install();
+        let _language = solidcraft_ui_text::scope("en");
         let width = |s: &str| s.len() as f32 * 6.0;
         assert_eq!(collapsed_strip_title(false, 200.0, width), Some("Assembly & Joints"));
         assert_eq!(collapsed_strip_title(false, 60.0, width), Some("Assembly"));
         assert_eq!(collapsed_strip_title(true, 60.0, width), Some("Modeling"));
         assert_eq!(collapsed_strip_title(false, 30.0, width), None);
         assert_eq!(collapsed_strip_title(true, -5.0, width), None);
+    }
+
+    #[test]
+    fn timeline_track_titles_and_counts_use_the_selected_language() {
+        use super::assembly::collapsed_strip_title;
+        crate::i18n::install();
+        let _language = solidcraft_ui_text::scope("cs");
+        let width = |s: &str| s.chars().count() as f32 * 6.0;
+        assert_eq!(collapsed_strip_title(false, 200.0, width), Some("Sestava a spoje"));
+        assert_eq!(collapsed_strip_title(false, 60.0, width), Some("Sestava"));
+        assert_eq!(collapsed_strip_title(true, 200.0, width), Some("Modelovací prvky"));
+        assert_eq!(collapsed_strip_title(true, 60.0, width), Some("Modelování"));
+        assert_eq!(collapsed_strip_title(true, 30.0, width), None);
+        assert_eq!(solidcraft_ui_text::format("ui.timeline_2d_steps_badge", &[("count", "3")]), "Kroky: 3");
+        assert_eq!(solidcraft_ui_text::format("ui.timeline_2d_joints_badge", &[("count", "2")]), "Spoje: 2");
+        assert_eq!(solidcraft_ui_text::format("ui.timeline_2d_active_summary", &[("active", "2"), ("total", "3")]), "Aktivní: 2 / 3");
     }
 
     /// A corridor is checked outward from the feature and stops at the first move that fails,
@@ -384,6 +402,90 @@ mod tests {
         // Group and features are now removed
         assert!(!h.app.session.doc.timeline_groups.iter().any(|g| g.id == gid), "Group must be removed after confirmation");
         assert!(!h.app.session.doc.features.iter().any(|f| f.id == f0), "Feature must be removed after confirmation");
+    }
+
+    #[test]
+    fn repaints_reuse_history_until_the_design_changes() {
+        let mut h = Harness::new();
+        h.app.preferences.timeline_2d = true;
+        h.app.run("solid.box", json!({"name": "Base", "length": 10, "width": 10, "height": 10})).unwrap();
+        let base = h.app.session.doc.features[0].id;
+        let checked = || canvas::FEATURES_CHECKED.with(std::cell::Cell::get);
+        let start = checked();
+        h.frames(2);
+        assert_eq!(checked() - start, 1, "discover the box's tracks once");
+        h.app.run("select.set", json!({"items": [{"type": "feature", "id": base}]})).unwrap();
+        h.frames(3);
+        assert_eq!(checked() - start, 1, "selection and repaint reuse the analysis");
+
+        h.app.run("timeline.rename", json!({"feature": base, "name": "Frame"})).unwrap();
+        h.frames(2);
+        assert_eq!(checked() - start, 2);
+        assert!(crate::scenario::handle_at("timeline_2d:Frame").is_some());
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.frames(2);
+        assert_eq!(checked() - start, 3);
+        assert!(crate::scenario::handle_at("timeline_2d:Base").is_some());
+    }
+
+    #[test]
+    fn opening_or_scrolling_a_long_timeline_checks_the_visible_steps_first() {
+        use crate::panel_runtime::{HostControlTarget, HostPointerTarget};
+        use solidcraft_engine::panels::{ControlId, InstanceId};
+
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"name": "First", "length": 5, "width": 5, "height": 5})).unwrap();
+        let doc = std::sync::Arc::make_mut(&mut h.app.session.doc);
+        let first = doc.features[0].clone();
+        for i in 1..256 {
+            doc.features.push(solidcraft_engine::doc::Feature { id: first.id + i, name: format!("Step {i}"), ..first.clone() });
+        }
+        h.frames(3);
+        assert!(panel_rect(&h, "history").is_some());
+        assert!(crate::scenario::handle_at("timeline_2d:First").is_none());
+        let checked = || canvas::FEATURES_CHECKED.with(std::cell::Cell::get);
+        let start = checked();
+        let expand = HostPointerTarget::HeaderAction { instance: InstanceId("history".into()), action: ControlId("timeline-expand".into()) };
+        click_control(&mut h, &HostControlTarget::Pointer(expand));
+        assert!(crate::scenario::handle_at("timeline_2d:First").is_some());
+        assert!(checked() - start < 256, "opening the dock must not analyze the entire model");
+
+        let uid = Some(h.app.session.uid);
+        let mut state = state::Timeline2DState::load_scoped(&h.ctx, uid);
+        state.scroll_x = 256.0 * canvas::COL_WIDTH;
+        state.store_scoped(&h.ctx, uid);
+        h.frame();
+        assert!(crate::scenario::handle_at("timeline_2d:Step 255").is_some());
+        assert!(checked() - start < 256, "jumping to the last columns must not analyze the intervening steps");
+    }
+
+    #[test]
+    fn component_tracks_keep_changed_and_removed_bodies_after_a_reorder() {
+        use std::sync::Arc;
+        let mut h = Harness::new();
+        for (name, x) in [("A", 0), ("B", 20)] {
+            h.app.run("solid.box", json!({"name": name, "length": 5, "width": 5, "height": 5, "corner": [x, 0, 0]})).unwrap();
+        }
+        let s = &mut h.app.session;
+        let previous = s.model.results[0].state.bodies[0].clone();
+        let current = s.model.results[1].state.bodies[1].clone();
+        let body = |source: &solidcraft_engine::doc::ModelBody, name: &str, owner| {
+            let mut b = source.clone();
+            b.name = name.into();
+            b.transferred = true;
+            b.component = owner;
+            b
+        };
+        // A saved state may have repeated names. A lookup by name still takes its first match.
+        Arc::make_mut(&mut s.model.results[0].state).bodies =
+            vec![body(&previous, "Gone", 1), body(&previous, "Moved", 2), body(&previous, "Same", 3)];
+        Arc::make_mut(&mut s.model.results[1].state).bodies =
+            vec![body(&previous, "Same", 3), body(&current, "Moved", 4), body(&previous, "Moved", 5), body(&previous, "New", 6)];
+        let f = &s.doc.features[1];
+        assert_eq!(canvas::feature_affected_components(&s.doc, Some(&s.model), f), [0, 1, 2, 4, 6]);
+        let (rows, _) = canvas::discover_component_tracks(&h.app);
+        assert_eq!(rows, [0, 1, 2, 3, 4, 6], "undeclared rows appear in first-use order across both steps");
     }
 
     /// Verifies rendering of multi-component feature chips and vertical connector lines across tracks.
@@ -807,6 +909,21 @@ mod tests {
         h.app.run("solid.box", json!({"length": 20.0, "width": 20.0, "height": 10.0, "corner": [30, 0, 0]})).unwrap();
         let _ = h.app.run_heavy("timeline.roll_to", json!({"position": 1}));
         h.frames(3);
+    }
+
+    /// The marker's line ends in a down arrowhead while component rows are out of sight below,
+    /// and in the flat cap otherwise.
+    #[test]
+    fn test_marker_foot_points_down_at_hidden_rows() {
+        let color = egui::Color32::from_rgb(59, 130, 246);
+        let egui::Shape::Path(arrow) = canvas::marker_foot(100.0, 80.0, color, true) else { panic!("an arrowhead while rows are hidden") };
+        assert_eq!(arrow.points.len(), 3);
+        assert!(arrow.points.contains(&egui::pos2(100.0, 80.0)), "its tip ends the line: {:?}", arrow.points);
+        assert!(arrow.points.iter().all(|p| p.y <= 80.0));
+        assert!(matches!(canvas::marker_foot(100.0, 80.0, color, false), egui::Shape::Rect(_)), "the flat cap when all rows show");
+        // The line ends inside both feet: below the arrowhead's base and the 4-point cap's top, above their bottom.
+        let base = arrow.points.iter().map(|p| p.y).fold(f32::MAX, f32::min);
+        assert!(80.0 - canvas::MARKER_FOOT_OVERLAP > base && canvas::MARKER_FOOT_OVERLAP > 0.0 && canvas::MARKER_FOOT_OVERLAP < 4.0);
     }
 
     #[test]

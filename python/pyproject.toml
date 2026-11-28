@@ -15,6 +15,7 @@ dependencies = []
 test = ["pytest>=8"]
 
 [project.scripts]
+solidcraft = "solidcraft._cli:main"
 solidcraft-session = "solidcraft.__main__:main"
 
 [tool.hatch.version]

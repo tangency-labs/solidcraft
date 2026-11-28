@@ -37,7 +37,9 @@
 //! subtracting its closed radial sweep (`contract_complete_cone`), intersecting intervening
 //! walls through their interiors. Exact trim predicates, and the two supports' one axis and
 //! slab to the body's tolerance (`coaxial_slab`), select that event before execution; the
-//! supplied draft definition and source attributes are preserved.
+//! supplied draft definition and source attributes are preserved, the face's on the drafted
+//! wall and each capped end's rim's on the wall's new rim there (`rims_by_end`), as the local
+//! operation carries an edge's attributes to the edge that replaces it.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -164,19 +166,34 @@ pub(crate) fn contract_complete_cone(
         return Ok(None);
     }
     draft.recertify(k, new)?;
+    let axis = (c.rev.position, 0.5 * (c.bot_height() + c.top_height()));
+    let old_rims = rims_by_end(b, *f, axis)?;
     let old = old.copy(k)?;
     let new = new.copy(k)?;
     b.with_rollback_untouched(
         |b| {
             let input = validation::standing(k, &mut b.clone_standing_for_self()?)?;
             let mut tool = radial_sweep(k, &old, &new, &slab, b.tolerance())?;
-            // The inner wall is the only drafted face, and must inherit its source's marks.
+            // The inner wall is the only drafted face, and must inherit its source's marks;
+            // so is the wall's rim on a capped end the rim it replaces: the edge where the
+            // wall meets that end plane, which the cap moves in to the drafted support.
+            let mut pairs = vec![(EntityRef::Face(*f), EntityRef::Face(tool.1))];
+            let new_rims = rims_by_end(&tool.0, tool.1, axis)?;
+            for ((cap, from), onto) in slab.caps.iter().zip(&old_rims).zip(&new_rims) {
+                if !cap {
+                    continue;
+                }
+                for &e in from {
+                    for &to in onto {
+                        pairs.push((EntityRef::Edge(e), EntityRef::Edge(to)));
+                    }
+                }
+            }
             crate::offset::offset_executive::p2::copy_local_sweep_attributes(
                 k,
                 b,
-                *f,
+                &pairs,
                 &mut tool.0,
-                tool.1,
             )?;
             let mut result = crate::boolean::api_brep::boolean_difference(
                 k,
@@ -194,6 +211,36 @@ pub(crate) fn contract_complete_cone(
         Result::is_ok,
     )?;
     Ok(Some(()))
+}
+
+/// The rims of `face`, a complete wall on a cone's slab (its boundary the two end circles and
+/// its seam, [`complete_cylinder_boundary`]), at its bottom and its top: the edges of the face
+/// that meet another face, each on the end its start vertex lies on, below or above the
+/// slab's middle height on the cone's axis (`axis`: the cone's frame and that height; the
+/// ends are the slab's, far apart beside the body's tolerance).
+fn rims_by_end(
+    b: &Brep,
+    face: FaceId,
+    (frame, middle): (Axis2Placement, f64),
+) -> Result<[Vec<crate::topology::EdgeId>; 2]> {
+    let mut rims: [Vec<crate::topology::EdgeId>; 2] = [Vec::new(), Vec::new()];
+    for e in face4::edges(b, face, None, false, None)? {
+        let beside = crate::topology::edge::faces(b, e, None)?;
+        if !beside.iter().any(|&g| g != face) {
+            continue;
+        }
+        let (Some(v), _) = crate::topology::edge::start_end_vertices(b, e)? else {
+            continue;
+        };
+        let at = (crate::topology::vertex::point(b, v)? - frame.origin()).dot(frame.z_axis());
+        let end = usize::from(at > middle);
+        if let Some(rim) = rims.get_mut(end) {
+            if !rim.contains(&e) {
+                rim.push(e);
+            }
+        }
+    }
+    Ok(rims)
 }
 
 /// The slab a drafted support `new` sweeps over with the face's support `old`: the old
@@ -2157,6 +2204,24 @@ mod tests {
             Attribute::long(62002, 9, Behavior::Temp),
         )
         .unwrap();
+        // the top rim, which the cap moves in to the drafted wall
+        let rim_at = |b: &Brep, e| {
+            let (v, _) = crate::topology::edge::start_end_vertices(b, e).unwrap();
+            crate::topology::vertex::point(b, v.unwrap()).unwrap()
+        };
+        let top_rim = face4::edges(&b, f, None, false, None)
+            .unwrap()
+            .into_iter()
+            .find(|&e| {
+                crate::topology::edge::faces(&b, e, None).unwrap().len() == 2
+                    && (rim_at(&b, e).z - 20.0).abs() < 1e-9
+            })
+            .unwrap();
+        b.add_attribute(
+            EntityRef::Edge(top_rim),
+            Attribute::long(62003, 5, Behavior::Copy),
+        )
+        .unwrap();
         let cylinder = b.face(f).unwrap().surface.as_ref().unwrap();
         for neutral in [0.0, -10.0] {
             let draft = Draft::new(
@@ -2202,6 +2267,24 @@ mod tests {
                     panic!("the resulting wall lost its draft definition");
                 };
                 assert_eq!(draft.recertify(&k, moved).unwrap(), 0.0);
+                // the new top rim, of radius 8 at z = 20 on the drafted wall, stands for the
+                // old one
+                let rims: Vec<_> = bp1::edges(&contracted, None)
+                    .unwrap()
+                    .into_iter()
+                    .filter(|&e| {
+                        contracted
+                            .find_attribute(EntityRef::Edge(e), 62003)
+                            .is_some()
+                    })
+                    .collect();
+                assert_eq!(rims.len(), 1);
+                let p = rim_at(&contracted, rims[0]);
+                assert!((p.z - 20.0).abs() < 1e-9, "{p:?}");
+                assert!(((p.x * p.x + p.y * p.y).sqrt() - 8.0).abs() < 1e-9, "{p:?}");
+                assert!(crate::topology::edge::faces(&contracted, rims[0], None)
+                    .unwrap()
+                    .contains(&marked[0]));
             }
             let (SurfaceKind::Cone(c), SurfaceKind::Cone(d)) = (cylinder.kind(), cone.kind())
             else {
@@ -2212,7 +2295,10 @@ mod tests {
             let (mut tool, inner) =
                 radial_sweep(&mut k, cylinder, &cone, &slab, b.tolerance()).unwrap();
             crate::offset::offset_executive::p2::copy_local_sweep_attributes(
-                &mut k, &b, f, &mut tool, inner,
+                &mut k,
+                &b,
+                &[(EntityRef::Face(f), EntityRef::Face(inner))],
+                &mut tool,
             )
             .unwrap();
             assert!(matches!(

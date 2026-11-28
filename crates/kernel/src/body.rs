@@ -498,6 +498,10 @@ pub struct Paint {
     /// The body colour's name in the file it came from (a STEP `COLOUR_RGB` name), if it had one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// The presentation layer the body is exported on (a STEP `PRESENTATION_LAYER_ASSIGNMENT`):
+    /// the browser folder it sits in, as a path (`Frame/Rails`), if it sits in one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer: Option<String>,
 }
 
 /// A face's own colour: the B-rep face index (`face_iter` order), sRGB as 0..1, opacity, and
@@ -1701,14 +1705,15 @@ impl Body {
         self.paint.as_deref()
     }
 
-    /// The same body with opacity, face colours and colour names for export (`None`, or opaque
-    /// with no face colours and no name, clears them).
+    /// The same body with opacity, face colours, colour names and layer for export (`None`, or
+    /// opaque with no face colours, no name and no layer, clears them).
     pub fn with_paint(mut self, p: Option<Paint>) -> Body {
         let clean = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) } else { 1.0 };
         self.paint = p
             .map(|mut p| {
                 p.opacity = clean(p.opacity);
                 p.name = p.name.as_deref().and_then(colour_name);
+                p.layer = p.layer.as_deref().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string);
                 p.faces.retain(|f| f.color.iter().all(|x| x.is_finite()));
                 for f in &mut p.faces {
                     f.color = f.color.map(|x| x.clamp(0.0, 1.0));
@@ -1717,8 +1722,8 @@ impl Body {
                 }
                 p
             })
-            // An opaque body colour's name is kept with it: the paint holds it.
-            .filter(|p| p.opacity < 1.0 || !p.faces.is_empty() || p.name.is_some())
+            // An opaque body colour's name is kept with it: the paint holds it, as it holds a layer.
+            .filter(|p| p.opacity < 1.0 || !p.faces.is_empty() || p.name.is_some() || p.layer.is_some())
             .map(std::sync::Arc::new);
         self.regularization_protected |= self.paint().is_some_and(|paint| !paint.faces.is_empty());
         self
@@ -2604,6 +2609,50 @@ impl Body {
         body.rim_edges(order, faces).map_err(|e| ops_failure("rim edges", e))
     }
 
+    /// How far face `face` strays across the direction `direction`, when the kernel proves a
+    /// bound ([`solidcore_ops::Body::face_straying`]): within the zone tolerance the face runs
+    /// straight along it. `None` where no bound is proved.
+    ///
+    /// # Errors
+    /// [`KernelError::Invalid`] for an index past the faces or a direction that is not finite;
+    /// [`KernelError::Failed`] for a mesh body and the kernel's failure.
+    pub fn face_straying(&self, face: usize, direction: [f64; 3]) -> Result<Option<f64>> {
+        let form = self.exact_form("face straying")?;
+        let (body, order) = &*form;
+        body.face_straying(order, face, direction).map_err(|e| ops_failure("face straying", e))
+    }
+
+    /// The half width of face `face`'s plane band for the zone tolerance `zone`
+    /// ([`solidcore_ops::Body::face_run`]): a unit direction `d` with `|n · d|` within it, `n` the
+    /// plane's unit normal, is one the face runs straight along within the zone. `None` for a face
+    /// the kernel gives no plane band.
+    ///
+    /// # Errors
+    /// [`KernelError::Invalid`] for an index past the faces; [`KernelError::Failed`] for a mesh
+    /// body and the kernel's failure.
+    pub fn face_plane_band(&self, face: usize, zone: f64) -> Result<Option<f64>> {
+        let form = self.exact_form("face plane band")?;
+        let (body, order) = &*form;
+        match body.face_run(order, face, zone).map_err(|e| ops_failure("face plane band", e))? {
+            solidcore_ops::measure::FaceRun::Plane { slope, .. } => Ok(Some(slope)),
+            _ => Ok(None),
+        }
+    }
+
+    /// The unit direction into face `face` from the middle of its edge `edge`, square to the edge
+    /// in the face's tangent plane ([`solidcore_ops::Body::edge_inward`]): which side is into
+    /// the face comes from its loop, so a face that is not convex is read as a convex one is.
+    ///
+    /// # Errors
+    /// [`KernelError::Invalid`] for an index past the edges or faces, or an edge that does not
+    /// bound the face; [`KernelError::Failed`] for a mesh body, a seam of the face and the
+    /// kernel's failure.
+    pub fn edge_inward(&self, edge: usize, face: usize) -> Result<[f64; 3]> {
+        let form = self.exact_form("direction into a face")?;
+        let (body, order) = &*form;
+        body.edge_inward(order, edge, face).map_err(|e| ops_failure("direction into a face", e))
+    }
+
     /// The closest points of `p` and faces `faces` (as trimmed) and edges `edges` (over their
     /// intervals), by the kernel's minimum-distance solve on the exact geometry
     /// ([`solidcore_ops::Body::closest_to_point`]). `None` where the solve finds no points.
@@ -3005,9 +3054,31 @@ fn record_outline(record: &Brep) -> Aabb3 {
 
 /// solidcore-ops' error of a query: an argument it refuses is the caller's input, anything else
 /// the kernel's failure.
+/// The direction faces `faces` (each a body and a record face index of it; several bodies may
+/// take part) all run straight along within the zone tolerance, proved
+/// ([`solidcore_ops::measure::straight_direction`]); [`solidcore_ops::measure::Straight`] says
+/// which faces gave it, or why there is none.
+///
+/// # Errors
+/// [`KernelError::Invalid`] for an index past a body's faces; [`KernelError::Failed`] for a mesh
+/// body and the kernel's failure.
+pub fn straight_direction(faces: &[(&Body, usize)]) -> Result<solidcore_ops::measure::Straight> {
+    let forms = faces.iter().map(|(b, _)| b.exact_form("straight direction")).collect::<Result<Vec<_>>>()?;
+    let reads: Vec<(&solidcore_ops::Body, &solidcore_ops::Order, usize)> = forms
+        .iter()
+        .zip(faces)
+        .map(|(form, &(_, face))| {
+            let (body, order) = &**form;
+            (body, order, face)
+        })
+        .collect();
+    solidcore_ops::measure::straight_direction(&reads).map_err(|e| ops_failure("straight direction", e))
+}
+
 fn ops_failure(what: &str, e: solidcore_ops::Error) -> KernelError {
     match e {
         solidcore_ops::Error::Argument => KernelError::Invalid(format!("{what}: {e}")),
+        solidcore_ops::Error::Internal(message) => KernelError::Internal(format!("{what}: {message}")),
         e => KernelError::Failed(format!("{what}: {e}")),
     }
 }
