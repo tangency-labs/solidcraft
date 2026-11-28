@@ -32,7 +32,7 @@ pub(super) fn reconstruct(k: &mut Kernel, mesh: &TriMesh, tolerance: f64) -> Res
 }
 
 /// Rank at most sixteen canonical face-normal directions by triangle area to bound the reconstruction search.
-fn axes(mesh: &TriMesh) -> Vec<(Vec3, f64)> {
+pub(super) fn axes(mesh: &TriMesh) -> Vec<(Vec3, f64)> {
     let mut out = BTreeMap::new();
     for &[a, b, c] in &mesh.triangles {
         let (Some(a), Some(b), Some(c)) = (

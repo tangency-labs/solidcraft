@@ -16,6 +16,7 @@ use self::geometry::{
 };
 
 mod cap;
+mod crossed;
 mod curves;
 mod faceted;
 mod geometry;
@@ -172,6 +173,12 @@ pub fn reconstruct(
         }
     }
     if let Some(body) = parts::reconstruct(k, &mesh, tolerance)? {
+        return Ok(MeshReconstruction {
+            body,
+            kind: ReconstructionKind::Analytic,
+        });
+    }
+    if let Some(body) = crossed::reconstruct(k, &mesh, tolerance)? {
         return Ok(MeshReconstruction {
             body,
             kind: ReconstructionKind::Analytic,
@@ -379,8 +386,62 @@ fn resolve_slivers(kept: &mut Vec<[u32; 3]>, slivers: &[(u32, u32, u32)]) -> Res
     Ok(())
 }
 
+/// What a mesh may hold between the two caps of a [`prism`].
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Sides {
+    /// Only the straight walls of the caps' section: the mesh is the extrusion.
+    Walls,
+    /// Anything: the mesh is at most the extrusion, which [`crossed`] intersects with others.
+    Any,
+}
+
+/// The straight extrusion of a mesh's two matching end caps along an axis.
+struct Prism {
+    body: Brep,
+    plane: MeshPlane,
+    lo: f64,
+    hi: f64,
+    /// The fitted section loops, in `plane`'s coordinates.
+    loops: Vec<Loop2>,
+}
+
 /// Certify matching caps and straight walls before building an analytic prism with valid nesting and volume.
 fn extrusion(k: &mut Kernel, mesh: &TriMesh, axis: Vec3, tolerance: f64) -> Result<Option<Brep>> {
+    let Some(mut prism) = prism(k, mesh, axis, tolerance, Sides::Walls)? else {
+        return Ok(None);
+    };
+    let size = mesh.size();
+    let epsilon = (size.max(1.) * 1e-7).min(tolerance * 0.01).max(1e-9);
+    let height = prism.hi - prism.lo;
+    let perimeter: f64 = prism
+        .loops
+        .iter()
+        .flat_map(|lp| &lp.segs)
+        .map(segment_length)
+        .sum();
+    let original = mesh.volume();
+    let Some(rebuilt) = native::volume(k, &mut prism.body)? else {
+        return Ok(None);
+    };
+    if !original.is_finite()
+        || original <= 0.
+        || (rebuilt - original).abs() > perimeter * height * tolerance + epsilon * size.powi(2)
+    {
+        return Ok(None);
+    }
+    Ok(Some(prism.body))
+}
+
+/// Read the mesh's two end caps along `axis`, certify that they match and, for [`Sides::Walls`],
+/// that every other triangle is a straight wall of their section; build the section's valid
+/// extrusion between them.
+fn prism(
+    k: &mut Kernel,
+    mesh: &TriMesh,
+    axis: Vec3,
+    tolerance: f64,
+    sides: Sides,
+) -> Result<Option<Prism>> {
     type Boundary = BTreeMap<(i64, i64), Vec<(i64, i64)>>;
     let (lo, hi) = mesh
         .positions
@@ -413,6 +474,8 @@ fn extrusion(k: &mut Kernel, mesh: &TriMesh, axis: Vec3, tolerance: f64) -> Resu
             0
         } else if hs.iter().all(|h| (h - hi).abs() <= epsilon) {
             1
+        } else if sides == Sides::Any {
+            continue;
         } else {
             // STL stores coordinates as f32. Test the projected triangle's
             // distance from a line rather than amplifying that rounding into
@@ -535,8 +598,9 @@ fn extrusion(k: &mut Kernel, mesh: &TriMesh, axis: Vec3, tolerance: f64) -> Resu
     {
         return Ok(None);
     }
-    // Every side vertex must lie on an unchanged straight extrusion of the cap.
-    // This excludes twisted, tapered and stepped meshes before fitting any circles.
+    // With walls only, every side vertex must lie on an unchanged straight extrusion of the
+    // cap. This excludes twisted, tapered and stepped meshes before fitting any circles.
+    let walls = sides == Sides::Walls;
     let point = |k: (i64, i64)| Vec2::new(k.0 as f64 * epsilon, k.1 as f64 * epsilon);
     let boundary_segments: Vec<_> = adjacency
         .iter()
@@ -546,10 +610,10 @@ fn extrusion(k: &mut Kernel, mesh: &TriMesh, axis: Vec3, tolerance: f64) -> Resu
                 .map(move |&b| (point(a), point(b)))
         })
         .collect();
-    if mesh.positions.len().saturating_mul(boundary_segments.len()) > 32_000_000 {
+    if walls && mesh.positions.len().saturating_mul(boundary_segments.len()) > 32_000_000 {
         return Ok(None);
     }
-    for p in &mesh.positions {
+    for p in mesh.positions.iter().filter(|_| walls) {
         let h = p.dot(axis);
         if (h - lo).abs() <= epsilon || (h - hi).abs() <= epsilon {
             continue;
@@ -605,22 +669,13 @@ fn extrusion(k: &mut Kernel, mesh: &TriMesh, axis: Vec3, tolerance: f64) -> Resu
     if !native::is_valid(k, &mut body)? {
         return Ok(None);
     }
-    let perimeter: f64 = loops
-        .iter()
-        .flat_map(|lp| &lp.segs)
-        .map(segment_length)
-        .sum();
-    let original = mesh.volume();
-    let Some(rebuilt) = native::volume(k, &mut body)? else {
-        return Ok(None);
-    };
-    if !original.is_finite()
-        || original <= 0.
-        || (rebuilt - original).abs() > perimeter * height * tolerance + epsilon * size.powi(2)
-    {
-        return Ok(None);
-    }
-    Ok(Some(body))
+    Ok(Some(Prism {
+        body,
+        plane,
+        lo,
+        hi,
+        loops,
+    }))
 }
 
 /// Whether fitted boundaries keep containment, within the bounded pairwise Boolean work.
