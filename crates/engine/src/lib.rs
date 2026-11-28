@@ -2920,7 +2920,13 @@ impl Session {
                     names.resize(made.len(), String::new());
                 }
                 for (slot, &name) in names.iter_mut().zip(&made) {
-                    if *slot != name {
+                    // Ordinary modelling features keep an explicit requested name while another
+                    // active body holds it. A temporary overlap while switching alternatives must
+                    // not replace that request with the fallback name. Imports still pin their
+                    // evaluated names, so deleting or reordering components cannot renumber them.
+                    let requested_is_taken =
+                        !matches!(f.kind, solidcraft_doc::FeatureKind::Import { .. }) && !slot.trim().is_empty() && r.state.body(slot).is_some();
+                    if *slot != name && !requested_is_taken {
                         *slot = name.to_string();
                     }
                 }

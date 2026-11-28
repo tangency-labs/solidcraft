@@ -755,6 +755,70 @@ mod tests {
 
     use crate::Session;
 
+    // Exercise the command sequence, including the temporary overlap when switching back
+    // to the first alternative before suppressing the last one.
+    fn check_alternative_body_names(count: usize) {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Repro"}));
+        for i in 0..count {
+            let height = 4.0 + 0.5 * i as f64;
+            run(&mut s, "sketch.create", json!({"plane": "YZ", "name": format!("Profile {i}")}));
+            run(&mut s, "sketch.line", json!({"points": [[-5, 0], [5, 0], [5, height], [-5, height]], "closed": true}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "solid.extrude", json!({"distance": 10, "name": format!("Nut {i}"), "body_name": "Nut"}));
+            if i + 1 < count {
+                for feature in [format!("Profile {i}"), format!("Nut {i}")] {
+                    run(&mut s, "timeline.suppress", json!({"feature": feature, "suppressed": true}));
+                }
+            }
+        }
+        for feature in ["Profile 0", "Nut 0"] {
+            run(&mut s, "timeline.suppress", json!({"feature": feature, "suppressed": false}));
+        }
+        for feature in [format!("Profile {}", count - 1), format!("Nut {}", count - 1)] {
+            run(&mut s, "timeline.suppress", json!({"feature": feature, "suppressed": true}));
+        }
+        run(
+            &mut s,
+            "solid.cylinder",
+            json!({"diameter": 3, "height": 8, "base": [5, 0, -1], "axis": "Z", "operation": "cut", "targets": ["Nut"], "name": "Pilot bore"}),
+        );
+        let features: Vec<String> = (0..count).flat_map(|i| [format!("Profile {i}"), format!("Nut {i}")]).collect();
+        run(&mut s, "config.configure", json!({"params": [], "features": features}));
+        for i in 0..count {
+            let mut values = serde_json::Map::new();
+            for j in 0..count {
+                values.insert(format!("suppress:Profile {j}"), json!(i != j));
+                values.insert(format!("suppress:Nut {j}"), json!(i != j));
+            }
+            run(&mut s, "config.row", json!({"name": format!("row{i}"), "values": values}));
+        }
+        for i in 0..count {
+            run(&mut s, "config.activate", json!({"row": format!("row{i}")}));
+            assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+            assert_eq!(s.model.state().bodies.len(), 1);
+            let state = s.model.state();
+            let body = state.body("Nut").expect("active alternative keeps Nut");
+            // YZ rectangle: x=0..10, y=-5..5, z=0..h. Bore radius 1.5,
+            // centered at (5,0), spans z=-1..7, hence removes pi*1.5^2*h.
+            // For h=4,4.5,5: 400-9pi, 450-10.125pi, 500-11.25pi mm^3.
+            let height = 4.0 + 0.5 * i as f64;
+            let expected = (100.0 - std::f64::consts::PI * 2.25) * height;
+            let actual = solidcraft_kernel::measure(&body.body).unwrap().volume;
+            assert!((actual - expected).abs() < 1e-5, "row{i}: {actual} != {expected}");
+        }
+    }
+
+    #[test]
+    fn configuration_alternative_body_names_two() {
+        check_alternative_body_names(2);
+    }
+
+    #[test]
+    fn configuration_alternative_body_names_three() {
+        check_alternative_body_names(3);
+    }
+
     /// A placed copy's body name (`KB (K:2)`, as inspect.measure lists it) means the body it
     /// shows: the column is keyed by that body's own name, for every placement.
     #[test]
