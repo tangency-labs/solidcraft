@@ -600,7 +600,8 @@ pub struct SpotSite {
 /// The spot's line runs from the point along the picked face's inward normal, through the stack.
 /// Each listed sheet must be crossed exactly once, the sheets must follow one another along the
 /// line without a gap or an overlap, every face crossed must be flat and square to the line, and
-/// the spot's footprint must lie inside every such face. The sheets are read, never changed: the
+/// the spot's footprint, as far as its marks are drawn (`1.05 d / 2`, [`MARKS`]'s edge zone), must
+/// lie inside every such face. The sheets are read, never changed: the
 /// solves run on each body's kernel form, never on its record.
 ///
 /// # Errors
@@ -609,6 +610,13 @@ pub struct SpotSite {
 /// positive. The other [`SpotRefusal`]s where the stack does not take the spot. The errors of the
 /// kernel calls otherwise.
 pub fn spot_site(sheets: &[&Body], picked: usize, face: usize, point: [f64; 3], diameter: f64) -> Result<SpotSite> {
+    spot_site_reaching(sheets, picked, face, point, diameter, MARKS.edge * diameter / 2.0)
+}
+
+/// [`spot_site`] for a weld of `diameter` whose drawn bodies reach `reach` from its line: the
+/// footprint must keep that much room to every face's edges. `PastFaceEdge` names the diameter
+/// whose reach fits.
+pub(crate) fn spot_site_reaching(sheets: &[&Body], picked: usize, face: usize, point: [f64; 3], diameter: f64, reach: f64) -> Result<SpotSite> {
     if sheets.len() < 2 {
         return bad("fewer than two sheets");
     }
@@ -687,8 +695,8 @@ pub fn spot_site(sheets: &[&Body], picked: usize, face: usize, point: [f64; 3], 
             }
         }
     }
-    if let Some((room, sheet, face)) = tightest.filter(|(room, ..)| 2.0 * room < diameter) {
-        return Err(SpotRefusal::PastFaceEdge { sheet, face, diameter, fits: 2.0 * room });
+    if let Some((room, sheet, face)) = tightest.filter(|(room, ..)| *room < reach) {
+        return Err(SpotRefusal::PastFaceEdge { sheet, face, diameter, fits: diameter * room / reach });
     }
 
     Ok(SpotSite {

@@ -3,8 +3,9 @@
 //! refused only when no web lies under the weld's width (the renders' 0.05, 0.5, 1.4 and 2.2 mm);
 //! a web wall split by an edge under the line across the start; an arc over a ring web; a corner
 //! moved to where the moved pieces meet. The snapped path checked whole: a hole in the sheet, a
-//! pocket in its underside, a hole in the web between the ends, a snap that leaves the sheet, a web
-//! apart, overlapping or missing. The bodies on a wide web and on a thin one, cut to it, against
+//! pocket in its underside and a hole in the web between the ends (built with a notice), a snap
+//! that leaves the sheet, a web apart, overlapping (each built with a notice, refused out of reach)
+//! or missing. The bodies on a wide web and on a thin one, cut to it, against
 //! their closed-form volumes, every body through the kernel's check; the refusals.
 
 use std::f64::consts::{PI, TAU};
@@ -45,7 +46,7 @@ fn face_at(b: &Body, p: [f64; 3]) -> usize {
 /// A line along y on the sheet's top at x = `x`.
 fn site_on(skin: &Body, web: &Body, x: f64) -> Result<StakeSite> {
     let start = [x, -10.0, T];
-    stake_site(skin, face_at(skin, start), web, start, &[SeamPiece::Line { to: [x, 10.0, T] }], W, WELD_TOLERANCE)
+    stake_site(skin, face_at(skin, start), web, start, &[SeamPiece::Line { to: [x, 10.0, T] }], W, StakeTolerances::DEFAULT)
 }
 
 fn near(a: [f64; 3], b: [f64; 3]) -> bool {
@@ -78,6 +79,11 @@ fn built(site: &StakeSite, skin: &Body, web: &Body) -> Stake {
     stake_weld(&weld, skin, web).unwrap()
 }
 
+/// How far the line was moved, if the site says so.
+fn moved(site: &StakeSite) -> Option<f64> {
+    site.notices.iter().find_map(|n| if let StakeNotice::Moved { by } = *n { Some(by) } else { None })
+}
+
 impl StakeSite {
     fn path_end(&self) -> [f64; 3] {
         match self.path.last() {
@@ -95,11 +101,11 @@ impl StakeSite {
 #[test]
 fn a_line_off_the_web_is_snapped_onto_its_middle_or_refused_when_no_web_is_under_it() {
     let (s, w) = (skin(), web(1.2, 0.0));
-    for (off, moved) in [(0.05, None), (0.5, Some(0.5)), (1.4, Some(1.4))] {
+    for (off, want) in [(0.05, None), (0.5, Some(0.5)), (1.4, Some(1.4))] {
         let got = site_on(&s, &w, off).unwrap();
         assert!(near(got.start, [0.0, -10.0, 0.0]) && near(got.path_end(), [0.0, 10.0, 0.0]), "{off}: {got:?}");
         assert!(near(got.normal, [0.0, 0.0, -1.0]) && close(got.skin, T), "{got:?}");
-        match (got.moved, moved) {
+        match (moved(&got), want) {
             (None, None) => {}
             (Some(a), Some(b)) => assert!(close(a, b), "{off}: moved {a}"),
             other => panic!("{off}: {other:?}"),
@@ -121,7 +127,7 @@ fn a_web_wall_split_under_the_start_still_gives_the_web_s_middle() {
     let b = block([-0.6, -11.0, -10.0], [0.6, 15.0, 0.0]);
     let w = solidcraft_kernel::boolean(&a, &b, BoolOp::Union).unwrap().unwrap();
     let got = site_on(&skin(), &w, 0.5).unwrap();
-    assert!(near(got.start, [0.0, -10.0, 0.0]) && got.moved.is_some_and(|m| close(m, 0.5)), "{got:?}");
+    assert!(near(got.start, [0.0, -10.0, 0.0]) && moved(&got).is_some_and(|m| close(m, 0.5)), "{got:?}");
 }
 
 /// A half circle drawn at radius 10.5 over a ring web whose middle is at radius 10: the arc is
@@ -134,8 +140,8 @@ fn an_arc_over_a_ring_web_is_snapped_to_the_web_s_radius() {
     let s = skin();
     let start = [10.5, 0.0, T];
     let path = [SeamPiece::Arc { center: [0.0, 0.0, T], to: [-10.5, 0.0, T], turn: Turn::Left }];
-    let got = stake_site(&s, face_at(&s, start), &web, start, &path, W, WELD_TOLERANCE).unwrap();
-    assert!(got.moved.is_some_and(|m| close(m, 0.5)), "{got:?}");
+    let got = stake_site(&s, face_at(&s, start), &web, start, &path, W, StakeTolerances::DEFAULT).unwrap();
+    assert!(moved(&got).is_some_and(|m| close(m, 0.5)), "{got:?}");
     assert!(near(got.start, [10.0, 0.0, 0.0]) && near(got.path_end(), [-10.0, 0.0, 0.0]), "{got:?}");
     for piece in built(&got, &s, &web).pieces {
         check(&piece.body, "arc");
@@ -154,10 +160,10 @@ fn a_path_with_a_corner_is_moved_to_where_its_moved_pieces_meet() {
     let corner = |off: f64| {
         let start = [off, -10.0, T];
         let path = [SeamPiece::Line { to: [off, -off, T] }, SeamPiece::Line { to: [10.0, -off, T] }];
-        stake_site(&s, face_at(&s, start), &web, start, &path, W, WELD_TOLERANCE)
+        stake_site(&s, face_at(&s, start), &web, start, &path, W, StakeTolerances::DEFAULT)
     };
     let got = corner(0.5).unwrap();
-    assert!(got.moved.is_some_and(|m| close(m, 0.5)), "{got:?}");
+    assert!(moved(&got).is_some_and(|m| close(m, 0.5)), "{got:?}");
     assert!(near(got.start, [0.0, -10.0, 0.0]) && near(got.path_end(), [10.0, 0.0, 0.0]), "{got:?}");
     assert!(matches!(got.path.first(), Some(SeamPiece::Line { to }) if near(*to, [0.0, 0.0, 0.0])), "{got:?}");
     let stake = built(&got, &s, &web);
@@ -166,7 +172,7 @@ fn a_path_with_a_corner_is_moved_to_where_its_moved_pieces_meet() {
         check(&piece.body, "corner");
     }
     let got = corner(0.05).unwrap();
-    assert!(got.moved.is_none() && near(got.start, [0.05, -10.0, 0.0]), "{got:?}");
+    assert!(moved(&got).is_none() && near(got.start, [0.05, -10.0, 0.0]), "{got:?}");
 }
 
 /// A 2 × 1 mm hole through the sheet beside the line, 0.5 mm from it, between the line's ends:
@@ -200,42 +206,51 @@ fn a_snap_off_the_picked_face_or_through_an_arc_s_centre_is_refused() {
     let start = [0.5, 0.0, T];
     let path = [SeamPiece::Arc { center: [0.0, 0.0, T], to: [-0.5, 0.0, T], turn: Turn::Right }];
     let off = block([-2.4, -15.0, -10.0], [1.6, 15.0, 0.0]);
-    let got = stake_site(&s, face_at(&s, start), &off, start, &path, W, WELD_TOLERANCE);
+    let got = stake_site(&s, face_at(&s, start), &off, start, &path, W, StakeTolerances::DEFAULT);
     assert!(matches!(got, Err(StakeRefusal::Invalid(_))), "{got:?}");
 }
 
-/// A pocket 0.4 mm deep in the sheet's underside between the line's ends: refused as uneven, by
-/// 0.4. A hole through the web between the ends, which the path lowered 0.5 mm into the web runs
-/// through: refused, the web 0.5 nearer than at the start.
+/// A pocket 0.4 mm deep in the sheet's underside between the line's ends: built, with the sheet
+/// uneven by 0.4 as its notice. A hole through the web between the ends, which the path lowered
+/// 0.5 mm into the web runs through: built, the web 0.5 nearer than at the start as its notice.
 #[test]
-fn a_pocket_in_the_sheet_or_a_hole_in_the_web_between_the_ends_is_refused() {
+fn a_pocket_in_the_sheet_or_a_hole_in_the_web_between_the_ends_is_built_with_a_notice() {
     let pocketed = cut(&skin(), &block([-1.0, 2.0, -1.0], [1.0, 4.0, 0.4]));
-    let got = site_on(&pocketed, &web(1.2, 0.0), 0.0);
-    let Err(StakeRefusal::SkinUneven { piece: 0, by }) = got else {
-        panic!("{got:?}");
-    };
-    assert!((by - 0.4).abs() < 1e-6, "{by}");
+    let got = site_on(&pocketed, &web(1.2, 0.0), 0.0).unwrap();
+    assert!(matches!(got.notices.as_slice(), [StakeNotice::SkinUneven { piece: 0, by }] if (by - 0.4).abs() < 1e-6), "{got:?}");
     let holed = cut(&web(1.2, 0.0), &block([-1.0, 2.0, -0.8], [1.0, 4.0, -0.2]));
-    let got = site_on(&skin(), &holed, 0.0);
-    let Err(StakeRefusal::WebNotAlong { piece: 0, by }) = got else {
-        panic!("{got:?}");
-    };
-    assert!((by - 0.5).abs() < 1e-6, "{by}");
+    let got = site_on(&skin(), &holed, 0.0).unwrap();
+    assert!(matches!(got.notices.as_slice(), [StakeNotice::WebNotAlong { piece: 0, by }] if (by - 0.5).abs() < 1e-6), "{got:?}");
 }
 
-/// The web's top 0.3 and 0.6 mm under the sheet: apart, with the gap (0.6 is past half the
-/// sheet's thickness, where the line across is probed). 0.05 mm up into the sheet, within the
-/// tolerance: taken. 0.3 mm up: refused with the overlap. A web nowhere across the start: none.
+/// The web's top under the 1 mm sheet: 0.05 mm, within 10 % of the sheet, taken without a word;
+/// 0.3 and 0.6 mm (past half the sheet's thickness, where the line across is probed) built with
+/// the gap as its notice; 1.2 mm, past the zone's reach, refused. 0.05 mm up into the sheet, within
+/// the tolerance: no word. 0.3 mm up: built, with the overlap as its notice. Up through the sheet:
+/// refused. A web nowhere across the start: none.
 #[test]
-fn a_web_apart_overlapping_or_missing_is_refused_with_how_far() {
+fn a_web_apart_or_overlapping_is_built_with_how_far_and_refused_out_of_reach() {
     let s = skin();
+    assert!(site_on(&s, &web(1.2, -0.05), 0.0).is_ok_and(|g| g.notices.is_empty()));
     for gap in [0.3, 0.6] {
-        let got = site_on(&s, &web(1.2, -gap), 0.0);
-        assert!(matches!(got, Err(StakeRefusal::WebApart { gap: g }) if (g - gap).abs() < 1e-6), "{gap}: {got:?}");
+        let w = web(1.2, -gap);
+        let got = site_on(&s, &w, 0.0).unwrap();
+        assert!(matches!(got.notices.as_slice(), [StakeNotice::Gap { gap: g }] if (g - gap).abs() < 1e-6), "{gap}: {got:?}");
+        for piece in built(&got, &s, &w).pieces {
+            check(&piece.body, "gap");
+        }
     }
-    assert!(site_on(&s, &web(1.2, 0.05), 0.0).is_ok_and(|g| g.moved.is_none()));
-    let got = site_on(&s, &web(1.2, 0.3), 0.0);
-    assert!(matches!(got, Err(StakeRefusal::WebOverlap { by }) if (by - 0.3).abs() < 1e-6), "{got:?}");
+    let got = site_on(&s, &web(1.2, -1.2), 0.0);
+    assert!(matches!(got, Err(StakeRefusal::WebApart { gap, .. }) if (gap - 1.2).abs() < 1e-6), "{got:?}");
+    assert!(site_on(&s, &web(1.2, 0.05), 0.0).is_ok_and(|g| g.notices.is_empty()));
+    let w = web(1.2, 0.3);
+    let got = site_on(&s, &w, 0.0).unwrap();
+    assert!(matches!(got.notices.as_slice(), [StakeNotice::Overlap { by }] if (by - 0.3).abs() < 1e-6), "{got:?}");
+    for piece in built(&got, &s, &w).pieces {
+        check(&piece.body, "overlap");
+    }
+    let got = site_on(&s, &web(1.2, 1.2), 0.0);
+    assert!(matches!(got, Err(StakeRefusal::WebOverlap { by }) if (by - 1.2).abs() < 1e-6), "{got:?}");
     let across = block([-15.0, 5.0, -10.0], [15.0, 6.0, 0.0]);
     assert_eq!(site_on(&s, &across, 0.0), Err(StakeRefusal::NoWebUnder { nearest: None }));
 }
@@ -295,11 +310,17 @@ fn bad_stake_welds_are_refused() {
     let line = [SeamPiece::Line { to: [0.0, 10.0, T] }];
     let start = [0.0, -10.0, T];
     let f = face_at(&s, start);
-    assert!(matches!(stake_site(&s, 99, &w, start, &line, W, WELD_TOLERANCE), Err(StakeRefusal::Invalid(_))));
-    assert!(matches!(stake_site(&s, f, &w, start, &line, 0.0, WELD_TOLERANCE), Err(StakeRefusal::Invalid(_))));
-    assert!(matches!(stake_site(&s, f, &w, start, &line, W, 0.0), Err(StakeRefusal::Invalid(_))));
+    assert!(matches!(stake_site(&s, 99, &w, start, &line, W, StakeTolerances::DEFAULT), Err(StakeRefusal::Invalid(_))));
+    assert!(matches!(stake_site(&s, f, &w, start, &line, 0.0, StakeTolerances::DEFAULT), Err(StakeRefusal::Invalid(_))));
+    assert!(matches!(
+        stake_site(&s, f, &w, start, &line, W, StakeTolerances { drift: 0.0, ..StakeTolerances::DEFAULT }),
+        Err(StakeRefusal::Invalid(_))
+    ));
     let above = [0.0, -10.0, T + 0.5];
-    assert_eq!(stake_site(&s, f, &w, above, &[SeamPiece::Line { to: [0.0, 10.0, T + 0.5] }], W, WELD_TOLERANCE), Err(StakeRefusal::OffFace));
+    assert_eq!(
+        stake_site(&s, f, &w, above, &[SeamPiece::Line { to: [0.0, 10.0, T + 0.5] }], W, StakeTolerances::DEFAULT),
+        Err(StakeRefusal::OffFace)
+    );
     let site = site_on(&s, &w, 0.0).unwrap();
     let ok = StakeWeld { start: site.start, path: site.path, normal: site.normal, skin: T, depth: T, width: W, shape: FusionShape::Tapered };
     for weld in [StakeWeld { depth: 0.0, ..ok.clone() }, StakeWeld { width: f64::NAN, ..ok.clone() }, StakeWeld { skin: -1.0, ..ok }] {
