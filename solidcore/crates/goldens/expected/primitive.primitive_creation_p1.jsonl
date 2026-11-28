@@ -22,7 +22,7 @@
 {"case":"boolean_empty_primary_nonplanar_secondary","deferred":null,"error":null,"ints":{"maps":[0,0,1,1]},"topology":null,"values":{}}
 {"case":"boolean_later_primary_tilt","deferred":null,"error":null,"ints":{"maps":[1007,0,1,0]},"topology":null,"values":{}}
 {"case":"boolean_later_secondary_tilt","deferred":null,"error":null,"ints":{"maps":[1007,0,1,0]},"topology":null,"values":{}}
-{"case":"boolean_multiple_coplanar","deferred":null,"error":null,"ints":{"maps":[0,0,-1,1,2,12,12]},"topology":null,"values":{"geometry":{"blocks":[[130.74024000000003,190.02024000000006,22113.32088],[21.30002,41.280019999999986,373.96036]],"n":300}}}
+{"case":"boolean_multiple_coplanar","deferred":null,"error":null,"ints":{"maps":[1001,0,1,0]},"topology":null,"values":{}}
 {"case":"boolean_nonplanar_first","deferred":null,"error":null,"ints":{"maps":[1007,0,1,0]},"topology":null,"values":{}}
 {"case":"boolean_nonplanar_later_primary","deferred":null,"error":null,"ints":{"maps":[1007,0,1,0]},"topology":null,"values":{}}
 {"case":"boolean_nonplanar_primary_empty_secondary","deferred":null,"error":null,"ints":{"maps":[0,0,1,1]},"topology":null,"values":{}}
