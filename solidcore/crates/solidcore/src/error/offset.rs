@@ -17,6 +17,7 @@
 //! | [`OffsetFailure::ExactCurveUncut`]     | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::FaceCloses`]          | `SM_ERR` (#19904, solidcore-native)       |
 //! | [`OffsetFailure::FaceMoveEmpty`]       | `SM_ERR_INVALID_INPUT` (the face move's)  |
+//! | [`OffsetFailure::FaceMoveSurfacesUnmatched`] | `SM_ERR_INVALID_INPUT` (the face move's) |
 //! | [`OffsetFailure::FacesApart`]          | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::FacesMoveRefused`], [`OffsetFailure::BlendSectionNotFound`], [`OffsetFailure::MoveCollapses`] | `SM_ERR` (the face move's) |
 //! | [`OffsetFailure::Failed`]              | `SM_ERR`                                  |
@@ -309,6 +310,14 @@ pub enum OffsetFailure {
         faces: usize,
         /// The distance it was given.
         distance: f64,
+    },
+    /// A move of faces onto new surfaces was given no face, or not one surface for each
+    /// face.
+    FaceMoveSurfacesUnmatched {
+        /// How many faces it was given.
+        faces: usize,
+        /// How many surfaces it was given.
+        surfaces: usize,
     },
     /// In a local operation, the new surfaces of `face` and of its neighbour across an
     /// edge meet nowhere near the edge, so no extension of either makes them meet there
@@ -878,6 +887,7 @@ impl OffsetFailure {
             Self::FacesMoveRefused { .. }
             | Self::FollowedBlendIncomplete
             | Self::FaceMoveEmpty { .. }
+            | Self::FaceMoveSurfacesUnmatched { .. }
             | Self::VertexNotGiven
             | Self::EdgeuseNotGiven
             | Self::VertexCurveNotArc
@@ -981,6 +991,7 @@ impl OffsetFailure {
                 | Self::FaceHasNoOuterFaceuse { .. }
                 | Self::MoveCollapses { .. }
                 | Self::FaceMoveEmpty { .. }
+                | Self::FaceMoveSurfacesUnmatched { .. }
                 | Self::VertexNotGiven
                 | Self::EdgeuseNotGiven
                 | Self::CurveKindUnsupported { .. }
@@ -1038,6 +1049,7 @@ impl OffsetFailure {
             | Self::FaceHasNoOuterFaceuse { .. }
             | Self::FaceHasNoSurface { .. }
             | Self::FaceMoveEmpty { .. }
+            | Self::FaceMoveSurfacesUnmatched { .. }
             | Self::FacesApart { .. }
             | Self::FacesMoveRefused { .. }
             | Self::FaceuseHasNoFace { .. }
@@ -1134,6 +1146,7 @@ impl OffsetFailure {
             | Self::FaceHasNoOuterFaceuse { .. }
             | Self::FaceHasNoSurface { .. }
             | Self::FaceMoveEmpty { .. }
+            | Self::FaceMoveSurfacesUnmatched { .. }
             | Self::FacesApart { .. }
             | Self::FacesMoveRefused { .. }
             | Self::FaceuseHasNoFace { .. }
@@ -1274,6 +1287,7 @@ impl OffsetFailure {
             }
             Self::EdgeVanishes { .. } => SM_ERR_OFFSET_EDGE_VANISHES,
             Self::FaceMoveEmpty { .. }
+            | Self::FaceMoveSurfacesUnmatched { .. }
             | Self::InvalidValue(_)
             | Self::ShellFaceNotOfBody { .. }
             | Self::ShellLeavesNoCavity { .. }
@@ -1345,6 +1359,7 @@ impl OffsetFailure {
             | Self::FaceHasNoOuterFaceuse { .. }
             | Self::FaceHasNoSurface { .. }
             | Self::FaceMoveEmpty { .. }
+            | Self::FaceMoveSurfacesUnmatched { .. }
             | Self::FaceuseHasNoFace { .. }
             | Self::FaceuseHasNoMate { .. }
             | Self::FaceuseHasNoShell { .. }
@@ -1770,6 +1785,11 @@ impl core::fmt::Display for OffsetFailure {
                 f,
                 "invalid input: a face move needs a face and a nonzero distance ({faces} faces, \
                  distance {distance})"
+            ),
+            Self::FaceMoveSurfacesUnmatched { faces, surfaces } => write!(
+                f,
+                "invalid input: faces moved onto surfaces need a face and one surface each \r
+                 ({faces} faces, {surfaces} surfaces)"
             ),
             Self::VertexNotGiven => f.write_str("invalid input: the vertex offset was given no vertex"),
             Self::EdgeuseNotGiven => f.write_str(
@@ -2845,6 +2865,7 @@ mod tests {
                 O::FaceHasNoOuterFaceuse { .. } => "FaceHasNoOuterFaceuse",
                 O::FaceHasNoSurface { .. } => "FaceHasNoSurface",
                 O::FaceMoveEmpty { .. } => "FaceMoveEmpty",
+                O::FaceMoveSurfacesUnmatched { .. } => "FaceMoveSurfacesUnmatched",
                 O::FacesApart { .. } => "FacesApart",
                 O::FacesMoveRefused { .. } => "FacesMoveRefused",
                 O::FaceuseHasNoFace { .. } => "FaceuseHasNoFace",

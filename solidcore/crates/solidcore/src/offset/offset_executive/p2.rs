@@ -3099,31 +3099,37 @@ pub fn local_operation_simple(
     result
 }
 
-/// Carries the selected face's own attributes onto a static local operation's
-/// swept wall, using the normal Copy handlers and disjoint source/result identities.
+/// Carries the own attributes of each entity of `source` in `pairs` (the selected face, and
+/// its rims on the ends the sweep caps) onto its partner of a static local operation's swept
+/// tool (its wall, and the wall's rims on those ends), using the normal Copy handlers and
+/// disjoint source/result identities. The tool's attributes become the copies, all written
+/// back at once.
 pub(crate) fn copy_local_sweep_attributes(
     kernel: &mut Kernel,
     source: &Brep,
-    face: FaceId,
+    pairs: &[(EntityRef, EntityRef)],
     target: &mut Brep,
-    wall: FaceId,
 ) -> Result<()> {
     let mut store = AttributeStore::default();
     attributes::seed_attributes(source, &attributes::original_key, &mut store)?;
-    let from = attributes::original_key(EntityRef::Face(face));
-    let to = attributes::result_key(EntityRef::Face(wall));
     let mut records = attributes::simple_records(source);
-    records.insert(to.key, Topology::new());
-    crate::topology::topology::notify(
-        &mut records,
-        &mut store,
-        Some(&mut kernel.context),
-        NotifyOperation::Copy,
-        from,
-        Some(to),
-        None,
-        None,
-    )?;
+    for &(entity, onto) in pairs {
+        let from = attributes::original_key(entity);
+        let to = attributes::result_key(onto);
+        if !records.contains_key(&to.key) {
+            records.insert(to.key, Topology::new());
+        }
+        crate::topology::topology::notify(
+            &mut records,
+            &mut store,
+            Some(&mut kernel.context),
+            NotifyOperation::Copy,
+            from,
+            Some(to),
+            None,
+            None,
+        )?;
+    }
     attributes::write_back_attributes(target, &attributes::result_key, &store)
 }
 
