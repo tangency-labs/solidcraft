@@ -324,11 +324,16 @@ pub fn moved(brep: &Brep, motion: &Rigid) -> Option<Brep> {
         {
             d.bound = widened(d.bound, face_net(f.nurbs.as_ref()?)?);
         }
+        // So is a screw sweep's.
+        if let Surface::Sweep { definition } = &mut f.surface {
+            definition.bound = widened(definition.bound, face_net(f.nurbs.as_ref()?)?);
+        }
     }
     for e in &mut out.edges {
-        // An edge on a blend by its definition is the kernel's: its curve's copy of the blend
-        // keeps no net of its own to take in the rounding by.
-        if matches!(&e.curve, Curve::SurfaceIntersection { surfaces, .. } if surfaces.iter().any(|s| matches!(**s, Surface::Blend { .. }))) {
+        // An edge on a blend or sweep by its definition is the kernel's: its curve's copy of the
+        // surface keeps no net of its own to take in the rounding by.
+        if matches!(&e.curve, Curve::SurfaceIntersection { surfaces, .. } if surfaces.iter().any(|s| matches!(**s, Surface::Blend { .. } | Surface::Sweep { .. })))
+        {
             return None;
         }
         e.curve = motion.curve(&e.curve)?;
