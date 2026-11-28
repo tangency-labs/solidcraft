@@ -409,3 +409,74 @@ fn a_single_reference_and_shallow_blind_hole_pattern_stay_in_their_wall() {
         assert!(solid_at(&b, Vec3::new(x, 580.0, 220.0)), "back wall must stay solid at x={x}");
     }
 }
+
+/// A 200 × 140 × 20 plate with a 20 × 140 × 100 wall standing on its x = 0 end, and a Ø20 hole
+/// through the plate at (100, 40): 80 mm from the wall top's inner edge (x = 20, z = 100) and
+/// 30 mm from the plate top's back edge (y = 70). The two edges border no face in common.
+fn plate_with_wall_and_hole() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 200, "width": 140, "height": 20, "corner": [0, -70, 0]}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 140, "height": 100, "corner": [0, -70, 0], "operation": "join", "targets": ["Body1"]}));
+    run(
+        &mut s,
+        "solid.hole",
+        json!({
+            "position": [100, 40, 20],
+            "diameter": 20,
+            "depth": 20,
+            "name": "H",
+            "references": [{"edge": [20, 0, 100], "distance": 80}, {"edge": [100, 70, 20], "distance": 30}]
+        }),
+    );
+    s
+}
+
+/// The Ø20 bore through the plate is about (x, y): empty on its axis and up to 8 mm from it,
+/// solid 12 mm from it in every direction.
+fn wide_bore_at(s: &Session, x: f64, y: f64) {
+    let at = Vec3::new(x, y, 10.0);
+    for k in 0..8 {
+        let a = PI / 4.0 * f64::from(k);
+        let p = |r: f64| at + Vec3::new(a.cos(), a.sin(), 0.0) * r;
+        assert!(!solid_at(s, p(0.0)) && !solid_at(s, p(8.0)), "the bore about ({x}, {y}) is empty {a} rad from +x");
+        assert!(solid_at(s, p(12.0)), "the wall about ({x}, {y}) is solid {a} rad from +x");
+    }
+}
+
+fn total_volume(s: &mut Session) -> f64 {
+    run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap()
+}
+
+#[test]
+fn a_hole_whose_reference_edges_share_no_face_can_be_mirrored_and_patterned() {
+    // #23504: one edge is on the wall's top, the other on the plate's top. When the hole is made
+    // its centre lies on the plate's top; when a mirror or pattern replays it, the centre is in
+    // the opening, and the copy must still be placed in the plate's top.
+    let plate_and_wall = 200.0 * 140.0 * 20.0 + 20.0 * 140.0 * 80.0;
+    let bore = PI * 10.0 * 10.0 * 20.0;
+    let mut s = plate_with_wall_and_hole();
+    wide_bore_at(&s, 100.0, 40.0);
+    run(&mut s, "solid.mirror", json!({"plane": "XZ", "features": ["H"], "name": "M"}));
+    wide_bore_at(&s, 100.0, 40.0);
+    wide_bore_at(&s, 100.0, -40.0);
+    let v = total_volume(&mut s);
+    assert!((v - (plate_and_wall - 2.0 * bore)).abs() < 1.0, "two Ø20 × 20 bores are cut, volume {v}");
+
+    let mut s = plate_with_wall_and_hole();
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["H"], "dir1": [0, -1, 0], "count1": "3", "spacing1": "45", "name": "P"}));
+    for y in [40.0, -5.0, -50.0] {
+        wide_bore_at(&s, 100.0, y);
+    }
+    let v = total_volume(&mut s);
+    assert!((v - (plate_and_wall - 3.0 * bore)).abs() < 1.0, "three Ø20 × 20 bores are cut, volume {v}");
+    // The copies follow the hole's distances.
+    let h = s.doc.find_feature("H").unwrap();
+    let first = h.kind.inputs().iter().position(|(label, _, _)| *label == "Reference distance").unwrap();
+    let d = h.param_names[first].clone();
+    run(&mut s, "parameters.change", json!({"name": d, "expression": "120 mm"}));
+    let p = s.doc.find_feature("P").unwrap().id;
+    assert!(s.model.result(p).is_some_and(|r| r.error.is_none()), "{:?}", s.model.result(p).map(|r| &r.error));
+    for y in [40.0, -5.0, -50.0] {
+        wide_bore_at(&s, 140.0, y);
+    }
+}
