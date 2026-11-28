@@ -1600,6 +1600,7 @@ fn seam_side<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     }
     let dom = own.natural_uv_domain_with_nurb(k)?;
     let mut out = uv;
+    let length = tangent.x.hypot(tangent.y);
     for (param, lo, hi, t) in [
         (SurfParamType::U, dom.min().x, dom.max().x, tangent.x),
         (SurfParamType::V, dom.min().y, dom.max().y, tangent.y),
@@ -1609,13 +1610,12 @@ fn seam_side<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         } else {
             out.y
         };
-        let room = 1e-9 * (hi - lo).abs();
-        let on_seam = (x - lo).abs() <= room || (x - hi).abs() <= room;
-        if !on_seam || t == 0.0 || !own.is_closed(k, &dom, param, None, false)?.0 {
+        let Some(end) = seam_end(x, [lo, hi], t, length, arriving) else {
+            continue;
+        };
+        if !own.is_closed(k, &dom, param, None, false)?.0 {
             continue;
         }
-        // departing up the range: from its low end; arriving up it: at its high end
-        let end = if (t > 0.0) == arriving { hi } else { lo };
         if param == SurfParamType::U {
             out.x = end;
         } else {
@@ -1623,6 +1623,23 @@ fn seam_side<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         }
     }
     Ok(out)
+}
+
+/// The end of the range `[lo, hi]` a foot at `x` on its seam takes ([`seam_side`]), its
+/// motion `t` in that parameter out of a uv tangent of length `length`: departing (`arriving`
+/// false) up the range from `lo`, arriving up it at `hi`, and the other way round for a
+/// motion down it. `None` for a foot off the seam, and for a motion across the seam within
+/// round-off of none (`|t|` at most `1e-9 length`): a foot that runs along a second seam the
+/// whole trace (a torus's tube seam) moves across it only by round-off, of either sign, and
+/// stays on the end it is on.
+fn seam_end(x: f64, [lo, hi]: [f64; 2], t: f64, length: f64, arriving: bool) -> Option<f64> {
+    let room = 1e-9 * (hi - lo).abs();
+    let on_seam = (x - lo).abs() <= room || (x - hi).abs() <= room;
+    // (a motion that is not a number moves it to neither end either)
+    if !on_seam || t.is_nan() || t.abs() <= 1e-9 * length {
+        return None;
+    }
+    Some(if (t > 0.0) == arriving { hi } else { lo })
 }
 
 /// The stations of the extension from the end station `end`, outwards (`outward` `1` after
@@ -2973,6 +2990,30 @@ fn surface_is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<b
 mod tests {
     use super::*;
     use crate::surface::plane::Plane;
+
+    /// A closed leader's seam foot (#13710): on a seam, departing up the range it takes the
+    /// range's low end and arriving up it the high end, down it the other way; off the seam
+    /// it is left. A foot on a torus's tube seam all along (v on its seam, the trace round u)
+    /// moves in v by round-off of either sign, 1e-17 against a tangent of length 1: it stays
+    /// on the end it is on, so the two seam stations do not land on opposite ends there.
+    #[test]
+    fn a_seam_foot_takes_the_end_its_motion_leaves_or_reaches_and_round_off_moves_none() {
+        let range = [0.0, 1.0];
+        assert_eq!(seam_end(0.0, range, 1.0, 1.0, false), Some(0.0));
+        assert_eq!(seam_end(0.0, range, 1.0, 1.0, true), Some(1.0));
+        assert_eq!(seam_end(1.0, range, -1.0, 1.0, false), Some(1.0));
+        assert_eq!(seam_end(1.0, range, -1.0, 1.0, true), Some(0.0));
+        // off the seam
+        assert_eq!(seam_end(0.5, range, 1.0, 1.0, true), None);
+        // round-off across a second seam, of either sign, and none at all
+        for t in [1e-17, -1e-17, 0.0] {
+            assert_eq!(seam_end(0.0, range, t, 1.0, true), None, "{t}");
+            assert_eq!(seam_end(1.0, range, t, 1.0, false), None, "{t}");
+        }
+        // a real motion across a long tangent still counts
+        assert_eq!(seam_end(0.0, range, 1e-6, 100.0, true), Some(1.0));
+        assert_eq!(seam_end(0.0, range, f64::NAN, 1.0, true), None);
+    }
 
     fn plane(o: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Surface {
         Surface::from(Plane::new(
